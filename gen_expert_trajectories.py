@@ -190,6 +190,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
 
     N = 20
     goals = [(0,0), (20,20), (20,0), (0,20)]
+    n_goals = len(goals)
 
     obstacles = []
     obs_starts = [1,15]
@@ -212,7 +213,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
 
         start_state = State(sample_start(set_diff), obstacles)
 
-        for g in range(4): # loop over goals
+        for g in range(n_goals): # loop over goals
                            
             # path 1 - go up/down till boundary and then move right/left
 
@@ -231,6 +232,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
             while state.state[1] != grid_height-1 and state.state[1] != 0:
                 f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                 f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                 state = T(state, action, 0)
 
             if g == 0 or g == 3:
@@ -243,6 +245,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
             while state.state[0] != grid_width-1 and state.state[0] != 0:
                 f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                 f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                 state = T(state, action, 0)
 
 
@@ -268,6 +271,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
             while state.state[0] != grid_width-1 and state.state[0] != 0:
                 f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                 f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                 state = T(state, action, 0)
 
             if g < 2:
@@ -280,6 +284,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
             while state.state[1] != grid_height-1 and state.state[1] != 0:
                 f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                 f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                 state = T(state, action, 0)
 
             assert(state.coordinates in goals)
@@ -305,6 +310,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                     break
                 f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                 f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                 state = new_state
 
             if T(state, Action(2), 0).coordinates == state.coordinates \
@@ -320,6 +326,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
                     f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                     f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                     state = T(state, action, 0)
 
                 if g == 0 or g == 3:
@@ -332,6 +339,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
                     f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                     f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                     state = T(state, action, 0)
 
             else:
@@ -346,6 +354,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
                     f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                     f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                     state = T(state, action, 0)
 
                 if g < 2:
@@ -358,6 +367,7 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
                     f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
                     f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
+                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
                     state = T(state, action, 0)
                 
 

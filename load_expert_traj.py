@@ -12,13 +12,15 @@ class Expert(object):
         self.pointer = 0
         self.n = len(os.listdir(folder))
         self.folder = folder
+        self.data_files = os.listdir(folder)
         self.list_of_sample_c = []
         #self.running_state = ZFilter((num_inputs,), clip=5)
 
     def push(self):
         """Saves a (state, action, c, mask) tuple."""
-        for i in range(self.n):
-            f = open(self.folder + str(i) + '.txt', 'r')
+        for filename in self.data_files:
+            #f = open(self.folder + str(i) + '.txt', 'r')
+            f = open(filename, 'r')
             line_counter = 0
             temp_mem = []
             temp_c = []

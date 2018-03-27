@@ -29,7 +29,7 @@ def sample_start(set_diff):
     return random.choice(set_diff)
 
 class State():
-    def __init__(self, coordinates, list_of_obstacles):
+    def __init__(self, coordinates, list_of_obstacles, feat_type='view', view_size=3):
         #coordinates - tuple, list_of_obstacles - list of tuples
         assert(len(coordinates) == 2)
         self.coordinates = coordinates
@@ -39,12 +39,35 @@ class State():
             self.n_obs += 1
 
         self.list_of_obstacles = list_of_obstacles
-        self.state = np.zeros(2*(self.n_obs+1))
-        self.state[0] = self.coordinates[0]
-        self.state[1] = self.coordinates[1]
-        for i in range(1,len(list_of_obstacles)+1):
-            self.state[2*i] = list_of_obstacles[i-1][0]
-            self.state[2*i+1] = list_of_obstacles[i-1][1]
+        self.set_features(feat_type=feat_type,view_size=view_size)
+
+    def set_features(self, feat_type='view', view_size=3):
+        
+        if feat_type == 'view':
+
+            view_size = int(view_size)
+            self.state = np.zeros(2 + view_size*view_size -1)
+            self.state[0] = self.coordinates[0]
+            self.state[1] = self.coordinates[1]
+            count = 0
+            for i in range(-view_size/2, view_size/2):
+                for j in range(-view_size/2, view_size/2):
+                    if i == 0 and j == 0:
+                        continue
+                    count += 1
+                    if (self.state[0]+i, self.state[1]+j) in list_of_obstacles:
+                        self.state[2+count] = 1
+
+        elif feat_type == 'all':
+
+            self.state = np.zeros(2*(self.n_obs+1))
+            self.state[0] = self.coordinates[0]
+            self.state[1] = self.coordinates[1]
+            for i in range(1,len(list_of_obstacles)+1):
+                self.state[2*i] = list_of_obstacles[i-1][0]
+                self.state[2*i+1] = list_of_obstacles[i-1][1]
+        
+
 
 
 class Action():
