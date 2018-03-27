@@ -83,8 +83,9 @@ class TransitionFunction():
         obs_delta = self.obs_func(t)
         for obs in state.list_of_obstacles:
             new_obs = (obs[0] + obs_delta[0], obs[1]+obs_delta[1])
-            if new_obs[0] >= self.width or new_obs[0] < 0 or new_obs[1] >= self.height or new_obs[1] < 0:
-                print 'Obstacle moved outside of the grid!!!'
+            if new_obs[0] >= self.width or new_obs[0] < 0 \
+                    or new_obs[1] >= self.height or new_obs[1] < 0:
+                print('Obstacle moved outside of the grid!!!')
                 sys.exit()
             new_list_of_obstacles.append(new_obs)
 
@@ -108,7 +109,7 @@ class TransitionFunction():
                     #print 'Warning at transition 4'
                     new_coordinates = (state.coordinates[0], max(min(state.coordinates[1]+1,self.height-1),0))
                 else:
-                    print 'There is an obstacle for every transition!!!'
+                    print('There is an obstacle for every transition!!!')
                     sys.exit()
 
         new_state = State(new_coordinates, new_list_of_obstacles)
