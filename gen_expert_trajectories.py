@@ -403,15 +403,15 @@ def main(args):
 
     if expert_data_dict is not None:
         if args.save_format == 'text':
-            save_expert_traj_dict_to_txt(expert_data_dict, save_dir)
+            save_expert_traj_dict_to_txt(expert_data_dict, args.save_dir)
         elif args.save_format == 'h5':
-            save_expert_traj_dict_to_h5(expert_data_dict, save_dir)
+            save_expert_traj_dict_to_h5(expert_data_dict, args.save_dir)
         else:
             raise ValueError("Incorrect save format {}".format(args.save_format))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("Generate expert data")
-    parser.add_argument('--data_type', type=str, default='',
+    parser.add_argument('--data_type', type=str, default='gen_L',
                         choices=['gen_L',
                                  'gen_square_rect', 
                                  'gen_square_rect_2',

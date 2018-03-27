@@ -100,7 +100,8 @@ class Action():
     def oned_to_twod(delta, diagonal_allowed=True):
         #assert(delta in (0,1,2,3,4))
         #assert(delta in (0,1,2,3))
-        assert delta in tuple(range(self.num_actions)), "Invalid action index."
+        num_actions = 8
+        assert delta in tuple(range(num_actions)), "Invalid action index."
 
         #if delta == 0:
             #return (0,0) # no movement
