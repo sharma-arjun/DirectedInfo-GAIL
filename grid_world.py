@@ -35,7 +35,7 @@ class State():
         for obs in list_of_obstacles:
             assert(len(obs) == 2)
             self.n_obs += 1
-        
+
         self.list_of_obstacles = list_of_obstacles
         self.state = np.zeros(2*(self.n_obs+1))
         self.state[0] = self.coordinates[0]
@@ -43,7 +43,7 @@ class State():
         for i in range(1,len(list_of_obstacles)+1):
             self.state[2*i] = list_of_obstacles[i-1][0]
             self.state[2*i+1] = list_of_obstacles[i-1][1]
-        
+
 
 class Action():
     def __init__(self, delta):
@@ -69,7 +69,8 @@ class Action():
 
 class TransitionFunction():
     def __init__(self, width, height, obs_func):
-        # height - number (integer), width - number (integer), list_of_obstacles - list of tuples
+        # height - number (integer), width - number (integer),
+        # list_of_obstacles - list of tuples
         #assert(height >= 16)
         #assert(width >= 16)
         self.height = height
@@ -78,7 +79,9 @@ class TransitionFunction():
 
     def __call__(self, state, action, t):
         delta = Action.oned_to_twod(action.delta)
-        t = t+1 # reward is computed later ... t+1 is the correct time to compute new obstacles
+        # reward is computed later, t+1 is the correct time to compute
+        # new obstacles
+        t = t+1
         new_list_of_obstacles = []
         obs_delta = self.obs_func(t)
         for obs in state.list_of_obstacles:
@@ -89,28 +92,50 @@ class TransitionFunction():
                 sys.exit()
             new_list_of_obstacles.append(new_obs)
 
-        # compute new coordinates here. Stay within boundary and don't move over obstacles (new).
-        new_coordinates = (max(min(state.coordinates[0] + delta[0],self.width-1),0), max(min(state.coordinates[1] + delta[1],self.height-1),0))
+        # Compute new coordinates here.
+        # Stay within boundary and don't move over obstacles (new).
+        new_coordinates = (max(min(state.coordinates[0] + delta[0],
+                                   self.width-1), 0),
+                               max(min(state.coordinates[1] + delta[1],
+                                       self.height-1), 0))
         if new_coordinates in new_list_of_obstacles:
-            # do stuff here - option 1. Remain where you are. This should be sufficient. If not, then try moving right, left down or up
+            # do stuff here - option 1. Remain where you are.
+            # This should be sufficient. If not, then try moving right,
+            # left down or up.
             if state.coordinates not in new_list_of_obstacles:
-                new_coordinates = state.coordinates # best case scenario ... stay where you are
+                # best case scenario ... stay where you are
+                new_coordinates = state.coordinates
             else:
-                if (max(min(state.coordinates[0]+1,self.width-1),0), state.coordinates[1]) not in new_list_of_obstacles: # right
-                    new_coordinates = (max(min(state.coordinates[0]+1,self.width-1),0), state.coordinates[1])
+                # right
+                if (max(min(state.coordinates[0]+1, self.width-1), 0),
+                            state.coordinates[1]) not in new_list_of_obstacles:
+                    new_coordinates = (max(min(state.coordinates[0] + 1,
+                                               self.width-1),
+                                           0), state.coordinates[1])
                     #print 'Warning at transition 1'
-                elif (max(min(state.coordinates[0]-1,self.width-1),0), state.coordinates[1]) not in new_list_of_obstacles: # left
-                    new_coordinates = (max(min(state.coordinates[0]-1,self.width-1),0), state.coordinates[1])
+                elif (max(min(state.coordinates[0]-1, self.width-1), 0),
+                              state.coordinates[1]) not in \
+                                      new_list_of_obstacles: # left
+                    new_coordinates = (max(min(state.coordinates[0] - 1,
+                                               self.width - 1), 0),
+                                       state.coordinates[1])
                     #print 'Warning at transition 2'
-                elif (state.coordinates[0], max(min(state.coordinates[1]-1,self.height-1),0)) not in new_list_of_obstacles: # down
-                    new_coordinates = (state.coordinates[0], max(min(state.coordinates[1]-1,self.height-1),0))
+                elif (state.coordinates[0],
+                      max(min(state.coordinates[1]-1, self.height-1),0)) \
+                              not in new_list_of_obstacles: # down
+                    new_coordinates = (state.coordinates[0],
+                                       max(min(state.coordinates[1] - 1,
+                                               self.height - 1), 0))
                     #print 'Warning at transition 3'
-                elif (state.coordinates[0], max(min(state.coordinates[1]+1,self.height-1),0)) not in new_list_of_obstacles: # up
+                elif (state.coordinates[0],
+                      max(min(state.coordinates[1] + 1, self.height - 1), 0)) \
+                              not in new_list_of_obstacles: # up
                     #print 'Warning at transition 4'
-                    new_coordinates = (state.coordinates[0], max(min(state.coordinates[1]+1,self.height-1),0))
+                    new_coordinates = (state.coordinates[0],
+                                       max(min(state.coordinates[1] + 1,
+                                               self.height - 1), 0))
                 else:
-                    print('There is an obstacle for every transition!!!')
-                    sys.exit()
+                    raise ValueError('There is an obstacle for every transition')
 
         new_state = State(new_coordinates, new_list_of_obstacles)
         return new_state
@@ -122,7 +147,7 @@ class RewardFunction():
         self.penalty = penalty
         self.reward = reward
         self.t = 0 # timer
-        
+
     def __call__(self, state, action, c):
         self.t += 1
         if action.delta != np.argmax(c):
@@ -144,7 +169,7 @@ class RewardFunction_SR2():
         self.grid_width = grid_width
         self.action_deltas = [[3,3,1,1,2,2,0,0], [3,1,1,1,2,0,0,0]]
         self.t = 0 # timer
-        
+
     def __call__(self, state, action, c):
         self.t += 1
         if state.state[0] >= self.grid_width/2:
