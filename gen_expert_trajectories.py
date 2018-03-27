@@ -17,9 +17,11 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
     t = 3
     n = 2
     N = 200
-    
+
     obstacles = create_obstacles(grid_width, grid_height)
-    set_diff = list(set(product(tuple(range(3, grid_width-3)), tuple(range(3, grid_height-3)))) - set(obstacles))
+    set_diff = list(set(product(tuple(range(3, grid_width-3)),
+                                tuple(range(3, grid_height-3)))) \
+                                        - set(obstacles))
 
 
     if not os.path.exists(path):
@@ -44,15 +46,22 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
                 elif action.delta == 3:
                     action = Action(1)
             for k in range(t):
-                f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write action
-                f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write c[t]s
+                # Write state
+                f.write(' '.join([str(e)
+                    for e in state.state]) + '\n')
+                # Write action
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(action.delta, 4)]) + '\n')
+                # Write c[t]
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(action.delta, 4)]) + '\n')
                 state = T(state, action, j)
 
         f.close()
 
 def gen_sq_rec(grid_width, grid_height, path='SR_expert_trajectories'):
-    ''' Generates squares if starting in quadrants 1 and 4, and rectangles if starting in quadransts 2 and 3 '''
+    ''' Generates squares if starting in quadrants 1 and 4, and rectangles if
+    starting in quadransts 2 and 3 '''
     N = 200
 
     obstacles = create_obstacles(grid_width, grid_height)
@@ -67,12 +76,16 @@ def gen_sq_rec(grid_width, grid_height, path='SR_expert_trajectories'):
         f = open(filename, 'w')
         half = random.choice(range(0,2))
         if half == 0: # left half
-            set_diff = list(set(product(tuple(range(0, (grid_width/2)-3)), tuple(range(1, grid_height)))) - set(obstacles))
+            set_diff = list(set(product(tuple(range(0, (grid_width/2)-3)),
+                                        tuple(range(1, grid_height)))) \
+                                                - set(obstacles))
             start_loc = sample_start(set_diff)
         elif half == 1: # right half
-            set_diff = list(set(product(tuple(range(grid_width/2, grid_width-2)), tuple(range(2, grid_height)))) - set(obstacles))
+            set_diff = list(set(product(
+                tuple(range(grid_width/2, grid_width-2)),
+                tuple(range(2, grid_height)))) - set(obstacles))
             start_loc = sample_start(set_diff)
-            
+
         state = State(start_loc, obstacles)
 
         if start_loc[0] >= grid_width/2: # quadrants 1 and 4
@@ -84,18 +97,23 @@ def gen_sq_rec(grid_width, grid_height, path='SR_expert_trajectories'):
             for j in range(n):
                 for k in range(t):
                     action = Action(delta)
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write c[t]s
+                    # Write state
+                    f.write(' '.join([str(e) for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 4)]) + '\n')
+                    # Write c[t]s
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 4)]) + '\n')
                     state = T(state, action, j*2 + k)
-                
+
                 if delta == 3:
                     delta = 1
                 elif delta == 1:
                     delta = 2
                 elif delta == 2:
                     delta = 0
-            
+
         else: # quadrants 2 and 3
             # generate 3x1 rectangle anti-clockwise
             t = [1,3,1,3]
@@ -104,9 +122,14 @@ def gen_sq_rec(grid_width, grid_height, path='SR_expert_trajectories'):
             for j in range(len(t)):
                 for k in range(t[j]):
                     action = Action(delta)
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write c[t]s
+                    # Write state
+                    f.write(' '.join([str(e) for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 4)]) + '\n')
+                    # Write c[t]s
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 4)]) + '\n')
                     state = T(state, action, sum(t[0:j]) + k)
 
                 if delta == 1:
@@ -118,7 +141,8 @@ def gen_sq_rec(grid_width, grid_height, path='SR_expert_trajectories'):
 
 
 def gen_sq_rec_2(grid_width, grid_height, path='SR2_expert_trajectories'):
-    ''' Generates squares if starting in quadrants 1 and 4, and rectangles if starting in quadransts 2 and 3 '''
+    ''' Generates squares if starting in quadrants 1 and 4, and rectangles if
+    starting in quadransts 2 and 3 '''
     N = 200
 
     obstacles = create_obstacles(grid_width, grid_height)
@@ -133,12 +157,16 @@ def gen_sq_rec_2(grid_width, grid_height, path='SR2_expert_trajectories'):
         f = open(filename, 'w')
         half = random.choice(range(0,2))
         if half == 0: # left half
-            set_diff = list(set(product(tuple(range(0, (grid_width/2)-3)), tuple(range(1, grid_height)))) - set(obstacles))
+            set_diff = list(set(product(tuple(range(0, (grid_width/2)-3)),
+                                        tuple(range(1, grid_height)))) \
+                                                - set(obstacles))
             start_loc = sample_start(set_diff)
         elif half == 1: # right half
-            set_diff = list(set(product(tuple(range(grid_width/2, grid_width-2)), tuple(range(2, grid_height)))) - set(obstacles))
+            set_diff = list(set(product(
+                tuple(range(grid_width/2, grid_width-2)),
+                tuple(range(2, grid_height)))) - set(obstacles))
             start_loc = sample_start(set_diff)
-            
+
         state = State(start_loc, obstacles)
 
         if start_loc[0] >= grid_width/2: # quadrants 1 and 4
@@ -151,18 +179,24 @@ def gen_sq_rec_2(grid_width, grid_height, path='SR2_expert_trajectories'):
             for j in range(n):
                 for k in range(t):
                     action = Action(delta)
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(cs[j], 2)]) + '\n') # write c[t]s
+                    # Write state
+                    f.write(' '.join([str(e)
+                        for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 4)]) + '\n')
+                    # Write c[t]s
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(cs[j], 2)]) + '\n')
                     state = T(state, action, j*2 + k)
-                
+
                 if delta == 3:
                     delta = 1
                 elif delta == 1:
                     delta = 2
                 elif delta == 2:
                     delta = 0
-            
+
         else: # quadrants 2 and 3
             # generate 3x1 rectangle clockwise
             t = [1,3,1,3]
@@ -172,9 +206,14 @@ def gen_sq_rec_2(grid_width, grid_height, path='SR2_expert_trajectories'):
             for j in range(len(t)):
                 for k in range(t[j]):
                     action = Action(delta)
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 4)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(cs[j], 2)]) + '\n') # write c[t]s
+                    # Write state
+                    f.write(' '.join([str(e) for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 4)]) + '\n')
+                    # Write c[t]s
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(cs[j], 2)]) + '\n')
                     state = T(state, action, sum(t[0:j]) + k)
 
                 if delta == 3:
@@ -206,12 +245,12 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
         start_state = State(sample_start(set_diff), obstacles)
 
         for g in range(n_goals): # loop over goals
-                           
             # path 1 - go up/down till boundary and then move right/left
 
             state = start_state
 
-            filename = os.path.join(path, str(n) + '_' + str(g) + '_' + str(1)  + '.txt')
+            filename = os.path.join(
+                    path, str(n) + '_' + str(g) + '_' + str(1)  + '.txt')
             f = open(filename,'w')
 
             if g < 2:
@@ -220,11 +259,13 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 delta = 1
 
             action = Action(delta)
-        
+
             while state.state[1] != grid_height-1 and state.state[1] != 0:
-                f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                # Write state
+                f.write(' '.join([str(e) for e in state.state]) + '\n')
+                # Write action
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
                 state = T(state, action, 0)
 
             if g == 0 or g == 3:
@@ -235,9 +276,11 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
             action = Action(delta)
 
             while state.state[0] != grid_width-1 and state.state[0] != 0:
-                f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                # Write state
+                f.write(' '.join([str(e) for e in state.state]) + '\n')
+                # Write action
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
                 state = T(state, action, 0)
 
 
@@ -250,7 +293,8 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
 
             state = start_state
 
-            filename = os.path.join(path, str(n) + '_' + str(g) + '_' + str(2)  + '.txt')
+            filename = os.path.join(
+                    path, str(n) + '_' + str(g) + '_' + str(2)  + '.txt')
             f = open(filename,'w')
 
             if g == 0 or g == 3:
@@ -259,11 +303,14 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 delta = 2
 
             action = Action(delta)
-        
+
             while state.state[0] != grid_width-1 and state.state[0] != 0:
-                f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                # Write state
+                f.write(' '.join([str(e)
+                    for e in state.state]) + '\n')
+                # Write action
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
                 state = T(state, action, 0)
 
             if g < 2:
@@ -274,23 +321,26 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
             action = Action(delta)
 
             while state.state[1] != grid_height-1 and state.state[1] != 0:
-                f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                # Write state
+                f.write(' '.join([str(e) for e in state.state]) + '\n')
+                # Write action
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
                 state = T(state, action, 0)
 
             assert(state.coordinates in goals)
 
             f.close()
 
-            # path 3 - go diagonally till obstacle and then 
+            # path 3 - go diagonally till obstacle and then
             #          move up/down if x > 10 or right/left if y > 10
             #          and then move right/left or up/down till goal
 
 
             state = start_state
 
-            filename = os.path.join(path, str(n) + '_' + str(g) + '_' + str(3)  + '.txt')
+            filename = os.path.join(
+                    path, str(n) + '_' + str(g) + '_' + str(3)  + '.txt')
             f = open(filename,'w')
 
             delta = g + 4
@@ -300,14 +350,16 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 new_state = T(state, action, 0)
                 if new_state.coordinates == state.coordinates:
                     break
-                f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                # Write state
+                f.write(' '.join([str(e) for e in state.state]) + '\n')
+                # Write action
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
                 state = new_state
 
             if T(state, Action(2), 0).coordinates == state.coordinates \
                 or T(state, Action(3), 0).coordinates == state.coordinates:
-            
+
                 if g < 2:
                     delta = 0
                 else:
@@ -316,22 +368,26 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 action = Action(delta)
 
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                    # Write state
+                    f.write(' '.join([str(e) for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
                     state = T(state, action, 0)
 
                 if g == 0 or g == 3:
-                    delta = 3                                                                         
+                    delta = 3
                 else:
                     delta = 2
-                
+
                 action = Action(delta)
 
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                    # Write state
+                    f.write(' '.join([str(e) for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
                     state = T(state, action, 0)
 
             else:
@@ -344,9 +400,11 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 action = Action(delta)
 
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                    # Write state
+                    f.write(' '.join([str(e) for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
                     state = T(state, action, 0)
 
                 if g < 2:
@@ -357,11 +415,13 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 action = Action(delta)
 
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
-                    f.write(' '.join([str(e) for e in state.state]) + '\n') # write state
-                    f.write(' '.join([str(e) for e in oned_to_onehot(action.delta, 8)]) + '\n') # write action
-                    f.write(' '.join([str(e) for e in oned_to_onehot(g, n_goals)]) + '\n') # write goal
+                    # Write state
+                    f.write(' '.join([str(e) for e in state.state]) + '\n')
+                    # Write action
+                    f.write(' '.join([str(e)
+                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
                     state = T(state, action, 0)
-                
+
 
             assert(state.coordinates in goals)
 
