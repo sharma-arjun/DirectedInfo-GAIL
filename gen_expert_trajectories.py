@@ -2,15 +2,44 @@ from grid_world import State, Action, TransitionFunction
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from itertools import product
 import numpy as np
+import argparse
+import h5py
+import pdb
 import random
 import sys
 import os
+
+from load_expert_traj import recursively_save_dict_contents_to_group
 
 def oned_to_onehot(action_delta, n):
     action_onehot = np.zeros(n,)
     action_onehot[action_delta] = 1.0
 
     return action_onehot
+
+def save_expert_traj_dict_to_txt(traj_data_dict, save_dir):
+    for path_key, traj in traj_data_dict.items():
+        # File to save trajectory in.
+        filename = os.path.join(save_dir, path_key)
+        with open(filename, 'w') as f:
+            traj_len = len(traj['state'])
+            for i in range(traj_len):
+                # Write state
+                f.write(' '.join([str(e) for e in traj['state'][i]]) + '\n')
+
+                # Write action
+                f.write(' '.join([str(e)
+                    for e in oned_to_onehot(traj['action'][i].delta, 8)])+'\n')
+        print("Did save results to: {}".format(filename))
+
+def save_expert_traj_dict_to_h5(traj_data_dict, save_dir, 
+                                h5_filename='expert_traj.h5'):
+    pdb.set_trace()
+    h5_f = h5py.File(os.path.join(save_dir, filename), 'w')
+    recursively_save_dict_contents_to_group(h5_f, '/', traj_data_dict)
+    h5_f.flush()
+    h5_f.close()
+    print("Did save data to {}".format(os.path.join(save_dir, filename)))
 
 def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
     ''' Generates trajectories of shape L, with right turn '''
@@ -22,10 +51,6 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
     set_diff = list(set(product(tuple(range(3, grid_width-3)),
                                 tuple(range(3, grid_height-3)))) \
                                         - set(obstacles))
-
-
-    if not os.path.exists(path):
-        os.makedirs(path)
 
     T = TransitionFunction(grid_width, grid_height, obstacle_movement)
 
@@ -224,21 +249,26 @@ def gen_sq_rec_2(grid_width, grid_height, path='SR2_expert_trajectories'):
                     delta = 0
 
 
-def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
-    ''' Generate diverse trajectories in a 21x21 grid with 4 goals '''
+def gen_diverse_trajs(grid_width, grid_height):
+    '''Generate diverse trajectories in a 21x21 grid with 4 goals.
+    
+    Return: Dictionary with keys as text filenames and values as dictionary.
+        Each value dictionary contains two keys, 'states' with a list of states
+        as value, and 'actions' with list of actions as value.
+    '''
 
+    assert grid_width == 21 and grid_height == 21, "Incorrect grid width height"
     N = 20
     goals = [(0,0), (20,20), (20,0), (0,20)]
     n_goals = len(goals)
 
     obstacles = create_obstacles(21, 21, 'diverse')
 
-    if not os.path.exists(path):
-        os.makedirs(path)
-
     T = TransitionFunction(grid_width, grid_height, obstacle_movement)
 
-    set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) - set(obstacles))
+    set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) \
+            - set(obstacles))
+    expert_data_dict = {}
 
     for n in range(N):
 
@@ -248,89 +278,50 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
             # path 1 - go up/down till boundary and then move right/left
 
             state = start_state
+            path_key = str(n) + '_' + str(g) + '_' + str(1)  + '.txt'
+            expert_data_dict[path_key] = {'state': [], 'action': []}
 
-            filename = os.path.join(
-                    path, str(n) + '_' + str(g) + '_' + str(1)  + '.txt')
-            f = open(filename,'w')
-
-            if g < 2:
-                delta = 0
-            else:
-                delta = 1
-
+            delta = 0 if g < 2 else 1
             action = Action(delta)
 
             while state.state[1] != grid_height-1 and state.state[1] != 0:
-                # Write state
-                f.write(' '.join([str(e) for e in state.state]) + '\n')
-                # Write action
-                f.write(' '.join([str(e)
-                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                expert_data_dict[path_key]['state'].append(state.state)
+                expert_data_dict[path_key]['action'].append(action)
                 state = T(state, action, 0)
 
-            if g == 0 or g == 3:
-                delta = 3
-            else:
-                delta = 2
-
+            delta = 3 if g == 0 or g == 3 else 2
             action = Action(delta)
 
             while state.state[0] != grid_width-1 and state.state[0] != 0:
-                # Write state
-                f.write(' '.join([str(e) for e in state.state]) + '\n')
-                # Write action
-                f.write(' '.join([str(e)
-                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                expert_data_dict[path_key]['state'].append(state.state)
+                expert_data_dict[path_key]['action'].append(action)
                 state = T(state, action, 0)
 
-
-            f.close()
-
             assert(state.coordinates in goals)
-
 
             # path 2 - go right/left till boundary and then move up/down
 
             state = start_state
+            path_key = str(n) + '_' + str(g) + '_' + str(2)  + '.txt'
+            expert_data_dict[path_key] = {'state': [], 'action': []}
 
-            filename = os.path.join(
-                    path, str(n) + '_' + str(g) + '_' + str(2)  + '.txt')
-            f = open(filename,'w')
-
-            if g == 0 or g == 3:
-                delta = 3
-            else:
-                delta = 2
-
+            delta = 3 if g == 0 or g == 3 else 2
             action = Action(delta)
 
             while state.state[0] != grid_width-1 and state.state[0] != 0:
-                # Write state
-                f.write(' '.join([str(e)
-                    for e in state.state]) + '\n')
-                # Write action
-                f.write(' '.join([str(e)
-                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                expert_data_dict[path_key]['state'].append(state.state)
+                expert_data_dict[path_key]['action'].append(action)
                 state = T(state, action, 0)
 
-            if g < 2:
-                delta = 0
-            else:
-                delta = 1
-
+            delta = 0 if g < 2 else 1
             action = Action(delta)
 
             while state.state[1] != grid_height-1 and state.state[1] != 0:
-                # Write state
-                f.write(' '.join([str(e) for e in state.state]) + '\n')
-                # Write action
-                f.write(' '.join([str(e)
-                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                expert_data_dict[path_key]['state'].append(state.state)
+                expert_data_dict[path_key]['action'].append(action)
                 state = T(state, action, 0)
 
             assert(state.coordinates in goals)
-
-            f.close()
 
             # path 3 - go diagonally till obstacle and then
             #          move up/down if x > 10 or right/left if y > 10
@@ -338,10 +329,8 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
 
 
             state = start_state
-
-            filename = os.path.join(
-                    path, str(n) + '_' + str(g) + '_' + str(3)  + '.txt')
-            f = open(filename,'w')
+            path_key = str(n) + '_' + str(g) + '_' + str(3)  + '.txt'
+            expert_data_dict[path_key] = {'state': [], 'action': []}
 
             delta = g + 4
             action = Action(delta)
@@ -350,95 +339,93 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
                 new_state = T(state, action, 0)
                 if new_state.coordinates == state.coordinates:
                     break
-                # Write state
-                f.write(' '.join([str(e) for e in state.state]) + '\n')
-                # Write action
-                f.write(' '.join([str(e)
-                    for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                expert_data_dict[path_key]['state'].append(state.state)
+                expert_data_dict[path_key]['action'].append(action)
                 state = new_state
 
             if T(state, Action(2), 0).coordinates == state.coordinates \
                 or T(state, Action(3), 0).coordinates == state.coordinates:
 
-                if g < 2:
-                    delta = 0
-                else:
-                    delta = 1
-
+                delta = 0 if g < 2 else 1
                 action = Action(delta)
 
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
-                    # Write state
-                    f.write(' '.join([str(e) for e in state.state]) + '\n')
-                    # Write action
-                    f.write(' '.join([str(e)
-                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action)
                     state = T(state, action, 0)
 
-                if g == 0 or g == 3:
-                    delta = 3
-                else:
-                    delta = 2
-
+                delta = 3 if g == 0 or g == 3 else 2
                 action = Action(delta)
 
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
-                    # Write state
-                    f.write(' '.join([str(e) for e in state.state]) + '\n')
-                    # Write action
-                    f.write(' '.join([str(e)
-                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action)
                     state = T(state, action, 0)
 
             else:
 
-                if g == 0 or g == 3:
-                    delta = 3
-                else:
-                    delta = 2
-
+                delta = 3 if g == 0 or g == 3 else 2
                 action = Action(delta)
 
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
-                    # Write state
-                    f.write(' '.join([str(e) for e in state.state]) + '\n')
-                    # Write action
-                    f.write(' '.join([str(e)
-                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action)
                     state = T(state, action, 0)
 
-                if g < 2:
-                    delta = 0
-                else:
-                    delta = 1
-
+                delta = 0 if g < 2 else 1
                 action = Action(delta)
 
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
-                    # Write state
-                    f.write(' '.join([str(e) for e in state.state]) + '\n')
-                    # Write action
-                    f.write(' '.join([str(e)
-                        for e in oned_to_onehot(action.delta, 8)]) + '\n')
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action)
                     state = T(state, action, 0)
 
-
             assert(state.coordinates in goals)
+    return expert_data_dict
 
-            f.close()
+def main(args):
 
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
 
-def main():
-    if int(sys.argv[1]) == 0:
-        gen_L(12,12)
-    elif int(sys.argv[1]) == 1:
-        gen_sq_rec(12,12)
-    elif int(sys.argv[1]) == 2:
-        gen_sq_rec_2(12,12)
-    elif int(sys.argv[1]) == 3:
-        gen_diverse_trajs(21,21)
+    expert_data_dict = None
+
+    if args.data_type == 'gen_L':
+        gen_L(args.width, args.height, path=args.save_dir)
+    elif args.data_type == 'gen_square_rect':
+        gen_sq_rec(args.width, args.height, path=args.save_dir)
+    elif args.data_type == 'gen_square_rect_2':
+        gen_sq_rec_2(args.width, args.height, path=args.save_dir)
+    elif args.data_type == 'gen_diverse_trajs':
+        expert_data_dict = gen_diverse_trajs(args.width, args.height)
     else:
-        print 'Undefined arguement!'
+        raise ValueError("Undefined value")
+
+    if expert_data_dict is not None:
+        if args.save_format == 'text':
+            save_expert_traj_dict_to_txt(expert_data_dict, save_dir)
+        elif args.save_format == 'h5':
+            save_expert_traj_dict_to_h5(expert_data_dict, save_dir)
+        else:
+            raise ValueError("Incorrect save format {}".format(args.save_format))
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser("Generate expert data")
+    parser.add_argument('--data_type', type=str, default='',
+                        choices=['gen_L',
+                                 'gen_square_rect', 
+                                 'gen_square_rect_2',
+                                 'gen_diverse_trajs'],
+                        help='Type of data to be generated.')
+    parser.add_argument('--save_dir', type=str, required=True,
+                        help='Directory to save expert data in.')
+    parser.add_argument('--width', type=int, default=11,
+                        help='Gridworld environment width.')   
+    parser.add_argument('--height', type=int, default=11,
+                        help='Gridworld environment height.')   
+    parser.add_argument('--save_format', type=str, default='text',
+                        choices=['text', 'h5'],
+                        help='Format to save expert data in.')
+
+    args = parser.parse_args()
+    main(args)

@@ -8,39 +8,43 @@ import random
 Trajectory = namedtuple('Trajectory', ('state', 'action', 'c', 'mask'))
 
 def recursively_get_dict_from_group(group_or_data):
-  d = {}
-  if type(group_or_data) == h5py.Dataset:
-    return np.array(group_or_data)
+    d = {}
+    if type(group_or_data) == h5py.Dataset:
+        return np.array(group_or_data)
 
-  # Else it's still a group
-  for k in group_or_data.keys():
-    v = recursively_get_dict_from_group(group_or_data[k])
-    d[k] = v
-return d
+    # Else it's still a group
+    for k in group_or_data.keys():
+        v = recursively_get_dict_from_group(group_or_data[k])
+        d[k] = v
+    return d
 
 def recursively_save_dict_contents_to_group(h5file, path, dic):
-  """
-  Take an already open HDF5 file and insert the contents of a dictionary
-  at the current path location. Can call itself recursively to fill
-  out HDF5 files with the contents of a dictionary.
-  """
-  assert type(dic) is type({}), "must provide a dictionary"
-  assert type(path) is type(''), "path must be a string"
-  assert type(h5file) is h5py._hl.files.File, "must be an open h5py file"
-  for key in dic:
-    assert type(key) is type(''), 'dict keys must be strings to save to hdf5'
-    if type(dic[key]) in (np.int64, np.float64, type('')):
-      h5file[path + key] = dic[key]
-      assert h5file[path + key].value == dic[key], \
-        'The data representation in the HDF5 file does not match the ' \
-            'original dict.'
-    if type(dic[key]) is np.ndarray:
-      h5file[path + key] = dic[key]
-      assert np.array_equal(h5file[path + key].value, dic[key]), \
-          'The data representation in the HDF5 file does not match the ' \
-              'original dict.'
-    elif type(dic[key]) is types.DictionaryType:
-      recursively_save_dict_contents_to_group(h5file, path + key + '/', dic[key])
+    """
+    Take an already open HDF5 file and insert the contents of a dictionary
+    at the current path location. Can call itself recursively to fill
+    out HDF5 files with the contents of a dictionary.
+    """
+    assert type(dic) is type({}), "must provide a dictionary"
+    assert type(path) is type(''), "path must be a string"
+    assert type(h5file) is h5py._hl.files.File, "must be an open h5py file"
+
+    for key in dic:
+        assert type(key) is type(''), 'dict keys must be strings to save to hdf5'
+
+        if type(dic[key]) in (np.int64, np.float64, type('')):
+            h5file[path + key] = dic[key]
+            assert h5file[path + key].value == dic[key], \
+                'The data representation in the HDF5 file does not match the ' \
+                'original dict.'
+        if type(dic[key]) is np.ndarray:
+            h5file[path + key] = dic[key]
+            assert np.array_equal(h5file[path + key].value, dic[key]), \
+                'The data representation in the HDF5 file does not match the ' \
+                'original dict.'
+        if type(dic[key]) is types.DictionaryType:
+            recursively_save_dict_contents_to_group(h5file,
+                                                    path + key + '/',
+                                                    dic[key])
 
 class Expert(object):
     def __init__(self, folder, num_inputs):
@@ -120,7 +124,7 @@ class ExpertHDF5(Expert):
         memory = []
         for k in sorted(h5f.keys()):
             state = h5f[k]['states']
-            action = h5f[k]'action']
+            action = h5f[k]['action']
             context = h5f[k]['context']
             memory.append((state, action, context))
         h5f.close()
