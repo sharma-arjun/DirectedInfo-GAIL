@@ -92,14 +92,15 @@ class Action():
         #delta - number (integer)
         #assert(delta in (0,1,2,3,4))
         #assert(delta in (0,1,2,3))
-        assert(delta in tuple(range(8)))
+        self.num_actions = 8
         self.delta = delta
+        assert(delta in tuple(range(self.num_actions)))
 
     @staticmethod
-    def oned_to_twod(delta):
+    def oned_to_twod(delta, diagonal_allowed=True):
         #assert(delta in (0,1,2,3,4))
         #assert(delta in (0,1,2,3))
-        assert(delta in tuple(range(8)))
+        assert delta in tuple(range(self.num_actions)), "Invalid action index."
 
         #if delta == 0:
             #return (0,0) # no movement
@@ -141,8 +142,7 @@ class TransitionFunction():
             new_obs = (obs[0] + obs_delta[0], obs[1]+obs_delta[1])
             if new_obs[0] >= self.width or new_obs[0] < 0 \
                     or new_obs[1] >= self.height or new_obs[1] < 0:
-                print('Obstacle moved outside of the grid!!!')
-                sys.exit()
+                raise ValueError('Obstacle moved outside of the grid!!!')
             new_list_of_obstacles.append(new_obs)
 
         # Compute new coordinates here.
