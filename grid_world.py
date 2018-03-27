@@ -10,18 +10,20 @@ def create_obstacles(width, height):
     return []
 
 def obstacle_movement(t):
-    if t % 6 == 0:
-        return (0,1) # move up
-    elif t % 6 == 1:
-        return (1,0) # move right
-    elif t % 6 == 2:
-        return (1,0) # move right
-    elif t % 6 == 3:
-        return (0,-1) # move down
-    elif t % 6 == 4:
-        return (-1,0) # move left
-    elif t % 6 == 5:
-        return (-1, 0) # move left
+#    if t % 6 == 0:
+#        return (0,1) # move up
+#    elif t % 6 == 1:
+#        return (1,0) # move right
+#    elif t % 6 == 2:
+#        return (1,0) # move right
+#    elif t % 6 == 3:
+#        return (0,-1) # move down
+#    elif t % 6 == 4:
+#        return (-1,0) # move left
+#    elif t % 6 == 5:
+#        return (-1, 0) # move left
+
+    return (0,0)
 
 def sample_start(set_diff):
     return random.choice(set_diff)
@@ -49,13 +51,16 @@ class Action():
     def __init__(self, delta):
         #delta - number (integer)
         #assert(delta in (0,1,2,3,4))
-        assert(delta in (0,1,2,3))
+        #assert(delta in (0,1,2,3))
+        assert(delta in tuple(range(8)))
         self.delta = delta
 
     @staticmethod
     def oned_to_twod(delta):
         #assert(delta in (0,1,2,3,4))
-        assert(delta in (0,1,2,3))
+        #assert(delta in (0,1,2,3))
+        assert(delta in tuple(range(8)))
+
         #if delta == 0:
             #return (0,0) # no movement
         if delta == 0:
@@ -66,6 +71,14 @@ class Action():
             return (-1,0) # left
         elif delta == 3:
             return (1,0) # right
+        elif delta == 4:
+            return (1,1) # north-east
+        elif delta == 5:
+            return (-1,1) # north-west
+        elif delta == 6:
+            return (-1,-1) # south-west
+        elif delta == 7:
+            return (1,-1) # south-east
 
 class TransitionFunction():
     def __init__(self, width, height, obs_func):
