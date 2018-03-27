@@ -417,9 +417,9 @@ if not os.path.exists(args.checkpoint):
 stats = {'true_reward': [], 'ep_length':[]}
 
 expert = Expert(args.expert_path, num_inputs)
-print 'Loading expert trajectories ...'
+print('Loading expert trajectories ...')
 expert.push()
-print 'Expert trajectories loaded.'
+print('Expert trajectories loaded.')
 
 for i_episode in count(1):
     ep_memory = Memory_Ep()
