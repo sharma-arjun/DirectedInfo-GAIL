@@ -29,17 +29,16 @@ def save_expert_traj_dict_to_txt(traj_data_dict, save_dir):
 
                 # Write action
                 f.write(' '.join([str(e)
-                    for e in oned_to_onehot(traj['action'][i].delta, 8)])+'\n')
+                    for e in oned_to_onehot(traj['action'][i], 8)])+'\n')
         print("Did save results to: {}".format(filename))
 
 def save_expert_traj_dict_to_h5(traj_data_dict, save_dir, 
                                 h5_filename='expert_traj.h5'):
-    pdb.set_trace()
-    h5_f = h5py.File(os.path.join(save_dir, filename), 'w')
+    h5_f = h5py.File(os.path.join(save_dir, h5_filename), 'w')
     recursively_save_dict_contents_to_group(h5_f, '/', traj_data_dict)
     h5_f.flush()
     h5_f.close()
-    print("Did save data to {}".format(os.path.join(save_dir, filename)))
+    print("Did save data to {}".format(os.path.join(save_dir, h5_filename)))
 
 def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
     ''' Generates trajectories of shape L, with right turn '''
@@ -286,7 +285,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
             while state.state[1] != grid_height-1 and state.state[1] != 0:
                 expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action)
+                expert_data_dict[path_key]['action'].append(action.delta)
                 state = T(state, action, 0)
 
             delta = 3 if g == 0 or g == 3 else 2
@@ -294,7 +293,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
             while state.state[0] != grid_width-1 and state.state[0] != 0:
                 expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action)
+                expert_data_dict[path_key]['action'].append(action.delta)
                 state = T(state, action, 0)
 
             assert(state.coordinates in goals)
@@ -310,7 +309,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
             while state.state[0] != grid_width-1 and state.state[0] != 0:
                 expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action)
+                expert_data_dict[path_key]['action'].append(action.delta)
                 state = T(state, action, 0)
 
             delta = 0 if g < 2 else 1
@@ -318,7 +317,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
             while state.state[1] != grid_height-1 and state.state[1] != 0:
                 expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action)
+                expert_data_dict[path_key]['action'].append(action.delta)
                 state = T(state, action, 0)
 
             assert(state.coordinates in goals)
@@ -340,7 +339,7 @@ def gen_diverse_trajs(grid_width, grid_height):
                 if new_state.coordinates == state.coordinates:
                     break
                 expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action)
+                expert_data_dict[path_key]['action'].append(action.delta)
                 state = new_state
 
             if T(state, Action(2), 0).coordinates == state.coordinates \
@@ -351,7 +350,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
                     expert_data_dict[path_key]['state'].append(state.state)
-                    expert_data_dict[path_key]['action'].append(action)
+                    expert_data_dict[path_key]['action'].append(action.delta)
                     state = T(state, action, 0)
 
                 delta = 3 if g == 0 or g == 3 else 2
@@ -359,7 +358,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
                     expert_data_dict[path_key]['state'].append(state.state)
-                    expert_data_dict[path_key]['action'].append(action)
+                    expert_data_dict[path_key]['action'].append(action.delta)
                     state = T(state, action, 0)
 
             else:
@@ -369,7 +368,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
                 while state.state[0] != grid_width-1 and state.state[0] != 0:
                     expert_data_dict[path_key]['state'].append(state.state)
-                    expert_data_dict[path_key]['action'].append(action)
+                    expert_data_dict[path_key]['action'].append(action.delta)
                     state = T(state, action, 0)
 
                 delta = 0 if g < 2 else 1
@@ -377,7 +376,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
                 while state.state[1] != grid_height-1 and state.state[1] != 0:
                     expert_data_dict[path_key]['state'].append(state.state)
-                    expert_data_dict[path_key]['action'].append(action)
+                    expert_data_dict[path_key]['action'].append(action.delta)
                     state = T(state, action, 0)
 
             assert(state.coordinates in goals)

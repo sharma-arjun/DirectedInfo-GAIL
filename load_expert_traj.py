@@ -3,6 +3,7 @@ from collections import namedtuple
 from running_state import ZFilter
 import h5py
 import os
+import pdb
 import random
 
 Trajectory = namedtuple('Trajectory', ('state', 'action', 'c', 'mask'))
@@ -36,12 +37,14 @@ def recursively_save_dict_contents_to_group(h5file, path, dic):
             assert h5file[path + key].value == dic[key], \
                 'The data representation in the HDF5 file does not match the ' \
                 'original dict.'
+        if type(dic[key]) is type([]):
+            h5file[path + key] = np.array(dic[key])
         if type(dic[key]) is np.ndarray:
             h5file[path + key] = dic[key]
             assert np.array_equal(h5file[path + key].value, dic[key]), \
                 'The data representation in the HDF5 file does not match the ' \
                 'original dict.'
-        if type(dic[key]) is types.DictionaryType:
+        if type(dic[key]) is type({}):
             recursively_save_dict_contents_to_group(h5file,
                                                     path + key + '/',
                                                     dic[key])
@@ -113,21 +116,26 @@ class Expert(object):
 
 class ExpertHDF5(Expert):
     def __init__(self, expert_dir, num_inputs):
-        super(self, Expert).__init__(expert_dir, num_inputs)
+        super(ExpertHDF5, self).__init__(expert_dir, num_inputs)
         self.expert_dir = expert_dir
         self.memory = []
         self.pointer = 0
         self.list_of_sample_c = []
 
     def push(self):
-        h5f = h5py.File(os.path.join(expert_dir, 'expert_trajs.h5'), 'r')
+        h5_file = os.path.join(self.expert_dir, 'expert_traj.h5')
+        assert os.path.exists(h5_file), \
+                "hdf5 file does not exist {}".format(h5_file)
+        h5f = h5py.File(h5_file, 'r')
         memory = []
         for k in sorted(h5f.keys()):
-            state = h5f[k]['states']
-            action = h5f[k]['action']
-            context = h5f[k]['context']
-            memory.append((state, action, context))
-        h5f.close()
+            state = np.array(h5f[k]['state'])
+            action = np.array(h5f[k]['action'])
+            # context = h5f[k]['context']
+            context = np.zeros(action.shape[0])
+            mask = np.ones((action.shape[0]))
+            mask[-1] = 0
+            memory.append((state, action, context, mask))
         self.memory = memory
 
     def sample(self, size=5):

@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+import pdb
 import pickle
 import math
 import random
@@ -23,7 +24,7 @@ from models import Policy, Posterior, Reward, Value
 from grid_world import State, Action, TransitionFunction
 from grid_world import RewardFunction, RewardFunction_SR2
 from grid_world import create_obstacles, obstacle_movement, sample_start
-from load_expert_traj import Expert
+from load_expert_traj import Expert, ExpertHDF5
 from replay_memory import Memory
 from running_state import ZFilter
 from utils import clip_grads
@@ -404,10 +405,19 @@ if not os.path.exists(args.checkpoint):
 
 stats = {'true_reward': [], 'ep_length':[]}
 
+'''
+expert_h5 = ExpertHDF5(args.expert_path, num_inputs)
+expert_h5.push()
+expert_h5.sample()
+expert_h5.sample_as_list()
+expert_h5.sample_c()
+'''
+
 expert = Expert(args.expert_path, num_inputs)
 print('Loading expert trajectories ...')
 expert.push()
 print('Expert trajectories loaded.')
+
 
 for i_episode in count(1):
     memory = Memory()
