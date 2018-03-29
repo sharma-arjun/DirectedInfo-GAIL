@@ -20,7 +20,7 @@ class Expert(object):
         """Saves a (state, action, c, mask) tuple."""
         for filename in self.data_files:
             #f = open(self.folder + str(i) + '.txt', 'r')
-            f = open(filename, 'r')
+            f = open(os.path.join(self.folder, filename), 'r')
             line_counter = 0
             temp_mem = []
             temp_c = []

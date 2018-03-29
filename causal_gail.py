@@ -71,6 +71,8 @@ parser.add_argument('--entropy-coeff', type=float, default=0.0, metavar='N',
                     help='coefficient for entropy cost')
 parser.add_argument('--clip-epsilon', type=float, default=0.2, metavar='N',
                     help='Clipping for PPO grad')
+parser.add_argument('--vae_weights', type=str, required=True,
+                    help='path to checkpoint')
 parser.add_argument('--checkpoint', type=str, required=True,
                     help='path to checkpoint')
 
@@ -78,9 +80,10 @@ args = parser.parse_args()
 
 
 #-----Environment-----#
-width = height = 12
-obstacles = create_obstacles(width, height)
-set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) - set(obstacles))
+width = height = 21
+obstacles = create_obstacles(width, height, 'diverse')
+#set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) - set(obstacles))
+set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))))
 start_loc = sample_start(set_diff)
 
 s = State(start_loc, obstacles)
@@ -91,14 +94,19 @@ if args.expert_path == 'SR2_expert_trajectories/':
 else:
     R = RewardFunction(-1.0,1.0)
 
-num_inputs = s.state.shape[0]
-num_actions = 4
-if args.expert_path == 'SR2_expert_trajectories/':
-    num_c = 2
-else:
-    num_c = 4
+history_size = 4
+num_inputs = s.state.shape[0]*history_size
+num_actions = 8
+
+#if args.expert_path == 'SR2_expert_trajectories/':
+num_c = 2
+#else:
+#    num_c = 4
 
 #env.seed(args.seed)
+
+vae_model = torch.load(args.vae_weights)
+
 torch.manual_seed(args.seed)
 
 policy_net = Policy(num_inputs,
@@ -107,17 +115,21 @@ policy_net = Policy(num_inputs,
                     num_actions,
                     hidden_size=64,
                     output_activation='sigmoid').type(dtype)
+
 old_policy_net = Policy(num_inputs,
                         0,
                         num_c,
                         num_actions,
                         hidden_size=64,
                         output_activation='sigmoid').type(dtype)
+
 #value_net = Value(num_inputs+num_c, hidden_size=64).type(dtype)
+
 reward_net = Reward(num_inputs,
                     num_actions,
                     num_c,
                     hidden_size=64).type(dtype)
+
 posterior_net = Posterior(num_inputs,
                           num_actions,
                           num_c,
@@ -142,13 +154,13 @@ def epsilon_greedy_linear_decay(action_vector,
     if np.random.uniform() > eps:
         return np.argmax(action_vector)
     else:
-        return np.random.randint(low=0, high=4)
+        return np.random.randint(low=0, high=num_actions)
 
 def epsilon_greedy(action_vector, eps=0.1):
     if np.random.uniform() > eps:
         return np.argmax(action_vector)
     else:
-        return np.random.randint(low=0, high=4)
+        return np.random.randint(low=0, high=num_actions)
 
 def greedy(action_vector):
     return np.argmax(action_vector)
@@ -188,7 +200,18 @@ def update_params(gen_batch, expert_batch, i_episode,
     masks = torch.Tensor(gen_batch.mask).type(dtype)
     actions = torch.Tensor(np.concatenate(gen_batch.action, 0)).type(dtype)
     states = torch.Tensor(gen_batch.state).type(dtype)
+    ## Expand states to include history ##
+    expanded_states = -1*torch.ones(states.size(0), states.size(1)*history_size).type(dtype)
+    for i in range(states.size(0)):
+        expanded_states[i,:states.size(1)] = states[i,:]
+        if i > 0:
+            expanded_states[i, states.size(1):] = expanded_states[i-1, 
+                                                :(history_size-1)*states.size(1)]
+    ## set it back to states ##
+    states = expanded_states
+
     latent_c = torch.Tensor(gen_batch.c).type(dtype)
+    latent_next_c = torch.Tensor(gen_batch.next_c).type(dtype)
     #values = value_net(Variable(states))
 
     # expert trajectories
@@ -202,6 +225,7 @@ def update_params(gen_batch, expert_batch, i_episode,
         list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
     expert_actions = torch.cat(list_of_expert_actions, 0).type(dtype)
 
+    # latent c here will all be g for corresponding expert traj. Set later
     list_of_expert_latent_c = []
     for i in range(len(expert_batch.c)):
         list_of_expert_latent_c.append(torch.Tensor(expert_batch.c[i]))
@@ -211,6 +235,26 @@ def update_params(gen_batch, expert_batch, i_episode,
     for i in range(len(expert_batch.mask)):
         list_of_masks.append(torch.Tensor(expert_batch.mask[i]))
     expert_masks = torch.cat(list_of_masks, 0).type(dtype)
+
+    ## Expand expert states ##
+    expanded_expert_states = -1*torch.ones(expert_states.size(0), 
+                                history_size*expert_states.size(1)).type(dtype)
+    for i in range(expert_states.size(0)):
+        expanded_expert_states[i,:expert_states.size(1)] = expert_states[i,:]
+        if i > 0:
+            expanded_expert_states[i, expert_states.size(1):] = expanded_expert_states[i-1, 
+                                                    :(history_size-1)*expert_states.size(1)]
+
+    ## set back to expert_state
+    expert_states = expanded_expert_states
+
+    ## Extract expert latent variables ##
+    for i in range(expert_states.size(0)):
+        if i == 0 or expert_masks[i-1] == 0:
+            continue
+        mu, sigma = vae_model.encode(Variable(expert_states[i-1]), Variable(expert_latent_c[i-1]))
+        expert_latent_c[i] = vae_model.reparameterize(mu, logvar)
+
 
     returns = torch.Tensor(actions.size(0),1).type(dtype)
     deltas = torch.Tensor(actions.size(0),1).type(dtype)
@@ -250,6 +294,7 @@ def update_params(gen_batch, expert_batch, i_episode,
         states = states[perm]
         actions = actions[perm]
         latent_c = latent_c[perm]
+        latent_next_c = latent_next_c[perm]
         #values = values[perm]
         targets = targets[perm]
         advantages = advantages[perm]
@@ -269,6 +314,8 @@ def update_params(gen_batch, expert_batch, i_episode,
             state_var = Variable(states[cur_id:cur_id+cur_batch_size])
             action_var = Variable(actions[cur_id:cur_id+cur_batch_size])
             latent_c_var = Variable(latent_c[cur_id:cur_id+cur_batch_size])
+            latent_next_c_var = Variable(
+                    latent_next_c[cur_id:cur_id+cur_batch_size])
             advantages_var = Variable(advantages[cur_id:cur_id+cur_batch_size])
             expert_state_var = Variable(
                     expert_states[cur_id_exp:cur_id_exp+cur_batch_size_exp])
@@ -276,6 +323,7 @@ def update_params(gen_batch, expert_batch, i_episode,
                     expert_actions[cur_id_exp:cur_id_exp+cur_batch_size_exp])
             expert_latent_c_var = Variable(
                     expert_latent_c[cur_id_exp:cur_id_exp+cur_batch_size_exp])
+
 
             # update reward net
             opt_reward.zero_grad()
@@ -303,9 +351,8 @@ def update_params(gen_batch, expert_batch, i_episode,
             mu, _ = posterior_net(torch.cat((state_var,
                                              action_var,
                                              latent_c_var), 1))
-            _, latent_c_targets = latent_c_var.max(1)
-            latent_c_targets = latent_c_targets.type(dtype)
-            loss = criterion_posterior(mu, latent_c_targets)
+
+            loss = criterion_posterior(mu, latent_next_c)
             loss.backward()
 
             # compute old and new action probabilities
@@ -372,16 +419,39 @@ for i_episode in count(1):
     while num_steps < args.batch_size:
         # read c sequence from expert trajectories. Here you'll need to pass
         # the expert trajectories through the pretrained posterior net.
-        c = expert.sample_c()
-        if args.expert_path == 'SR_expert_trajectories/':
-            if np.argmax(c[0,:]) == 1: # left half
-                set_diff = list(set(product(tuple(range(0, (width/2)-3)),
-                                            tuple(range(1, height)))) \
-                                                    - set(obstacles))
-            elif np.argmax(c[0,:]) == 3: # right half
-                set_diff = list(set(product(tuple(range(width/2, width-2)),
-                                            tuple(range(2, height)))) \
-                                                    - set(obstacles))
+        expert_sample = expert.sample(size=1)
+        expert_states = expert_sample.state
+        num_t_steps = len(expert_states)
+        c = -1*np.ones((num_t_steps+1,num_c))
+        c[0,1] = expert_sample.g[0]
+
+        x = -1*torch.ones(1, history_size, num_inputs)
+        
+        for t in range(len(expert_states)):
+            x[:,:(history_size-1),:] = x[:,1:,:]
+            curr_x = torch.from_numpy(expert.states[t])
+
+            x[:,(history_size-1),:] = curr_x
+
+            #x_t0 = Variable(x[:,0,:])
+            #x_t1 = Variable(x[:,1,:])
+            #x_t2 = Variable(x[:,2,:])
+            #x_t3 = Variable(x[:,3,:])
+            input_x = Variable(x[:,:,:].view(x.size(0), history_size*x.size(2)).clone())
+
+            mu, logvar = vae_model.encode(input_x, c[t,:])
+            c[t+1,1:num_c] = vae_model.reparameterize(mu, logvar)
+
+
+        #if args.expert_path == 'SR_expert_trajectories/':
+        #    if np.argmax(c[0,:]) == 1: # left half
+        #        set_diff = list(set(product(tuple(range(0, (width/2)-3)),
+        #                                    tuple(range(1, height)))) \
+        #                                            - set(obstacles))
+        #    elif np.argmax(c[0,:]) == 3: # right half
+        #        set_diff = list(set(product(tuple(range(width/2, width-2)),
+        #                                    tuple(range(2, height)))) \
+        #                                            - set(obstacles))
 
         start_loc = sample_start(set_diff)
         s = State(start_loc, obstacles)
@@ -423,7 +493,8 @@ for i_episode in count(1):
                 sigma = sigma.data.cpu().numpy()[0,0]
 
                 # should ideally be logpdf, but pdf may work better. Try both.
-                reward += norm.pdf(np.argmax(c[t+1,:]), loc=mu, scale=sigma)
+                next_ct = c[t+1,:]
+                reward += norm.pdf(np.argmax(next_ct), loc=mu, scale=sigma)
 
                 # Also, argmax for now, but has to be c[t+1, 1:]
                 # when reverting to proper c ...
@@ -454,7 +525,8 @@ for i_episode in count(1):
                         mask,
                         next_s.state,
                         reward,
-                        ct)
+                        ct,
+                        next_ct)
 
             if args.render:
                 env.render()

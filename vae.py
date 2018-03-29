@@ -33,23 +33,37 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
 #-----Environment-----#
-width = height = 12
-obstacles = create_obstacles(width, height)
+width = height = 21
+obstacles = create_obstacles(width, height, 'diverse')
+
+set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) - set(obstacles))
+state = State(sample_start(set_diff), obstacles)
 
 T = TransitionFunction(width, height, obstacle_movement)
 
-if args.expert_path == 'SR2_expert_trajectories/':
-    R = RewardFunction_SR2(-1.0,1.0,width)
-else:
-    R = RewardFunction(-1.0,1.0)
+#if args.expert_path == 'SR2_expert_trajectories/':
+#    R = RewardFunction_SR2(-1.0,1.0,width)
+#else:
+#    R = RewardFunction(-1.0,1.0)
 
 
 class VAE(nn.Module):
-    def __init__(self):
+    def __init__(self, state_size, action_size, latent_size, output_size, hidden_size):
         super(VAE, self).__init__()
 
-        self.policy = Policy(state_size=8, action_size=0, latent_size=2, output_size=4, hidden_size=64, output_activation='sigmoid')
-        self.posterior = Posterior(state_size=8, action_size=0, latent_size=2, hidden_size=64)
+        self.history_size = 4
+        self.policy = Policy(state_size=state_size*self.history_size,
+                            action_size=action_size, 
+                            latent_size=latent_size, 
+                            output_size=output_size, 
+                            hidden_size=hidden_size, 
+                            output_activation='sigmoid')
+
+        self.posterior = Posterior(state_size=state_size*self.history_size, 
+                                   action_size=action_size, 
+                                   latent_size=latent_size, 
+                                   hidden_size=hidden_size)
+        
 
     def encode(self, x, c):
         return self.posterior(torch.cat((x, c), 1))
@@ -67,13 +81,14 @@ class VAE(nn.Module):
         action_mean, action_log_std, action_std = self.policy(torch.cat((x, c), 1))
         return action_mean
 
-    def forward(self, x_t0, x_t1, x_t2, x_t3, c):
-        mu, logvar = self.encode(torch.cat((x_t0, x_t1, x_t2, x_t3), 1), c)
+    def forward(self, x, c):
+        mu, logvar = self.encode(x, c)
         c[:,0] = self.reparameterize(mu, logvar)
-        return self.decode(torch.cat((x_t0, x_t1, x_t2, x_t3), 1), c), mu, logvar
+        return self.decode(x, c), mu, logvar
 
 
-model = VAE()
+model = VAE(state.state.shape[0], 0, 2, 8, 64)
+
 if args.cuda:
     model.cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
@@ -97,13 +112,16 @@ def loss_function(recon_x, x, mu, logvar):
 
 def train(epoch, expert, Transition):
     model.train()
+    history_size = model.history_size
     train_loss = 0
     for batch_idx in range(10): # 10 batches per epoch
         batch = expert.sample(args.batch_size)
+        print len(batch.state[0])
+        print len(batch.state[1])
         x_data = torch.Tensor(batch.state)
         N = x_data.size(1)
-        x = -1*torch.ones(x_data.size(0), 4, x_data.size(2))
-        x[:,3,:] = x_data[:,0,:]
+        x = -1*torch.ones(x_data.size(0), history_size, x_data.size(2))
+        x[:,(history_size-1),:] = x_data[:,0,:]
 
         a = Variable(torch.Tensor(batch.action))
 
@@ -120,21 +138,23 @@ def train(epoch, expert, Transition):
 
         optimizer.zero_grad()
         for t in range(N):
-            x_t0 = Variable(x[:,0,:].clone().view(x.size(0), x.size(2)))
-            x_t1 = Variable(x[:,1,:].clone().view(x.size(0), x.size(2)))
-            x_t2 = Variable(x[:,2,:].clone().view(x.size(0), x.size(2)))
-            x_t3 = Variable(x[:,3,:].clone().view(x.size(0), x.size(2)))
+            #x_t0 = Variable(x[:,0,:].clone().view(x.size(0), x.size(2)))
+            #x_t1 = Variable(x[:,1,:].clone().view(x.size(0), x.size(2)))
+            #x_t2 = Variable(x[:,2,:].clone().view(x.size(0), x.size(2)))
+            #x_t3 = Variable(x[:,3,:].clone().view(x.size(0), x.size(2)))
+            input_x = Variable(x[:,:,:].view(x.size(0), history_size*x.size(2)).clone())
             c_t0 = Variable(c)
 
             if args.cuda:
-                x_t0 = x_t0.cuda()
-                x_t1 = x_t1.cuda()
-                x_t2 = x_t2.cuda()
-                x_t3 = x_t3.cuda()
+                input_x = input_x.cuda()
+                #x_t0 = x_t0.cuda()
+                #x_t1 = x_t1.cuda()
+                #x_t2 = x_t2.cuda()
+                #x_t3 = x_t3.cuda()
                 c_t0 = c_t0.cuda()
 
 
-            recon_batch, mu, logvar = model(x_t0, x_t1, x_t2, x_t3, c_t0)
+            recon_batch, mu, logvar = model(input_x, c_t0)
             loss = loss_function(recon_batch, a[:,t,:], mu, logvar)
             loss.backward()
             train_loss += loss.data[0]
@@ -165,26 +185,28 @@ def train(epoch, expert, Transition):
 
 def test(Transition):
     model.eval()
+    history_size = model.history_size
     #test_loss = 0
 
     for _ in range(20):
         c = expert.sample_c()
         N = c.shape[0]
         c = np.argmax(c[0,:])
-        if args.expert_path == 'SR_expert_trajectories/':
-            if c == 1:
-                half = 0
-            elif c == 3:
-                half = 1
-        elif args.expert_path == 'SR2_expert_trajectories/':
-            half = c
-        if args.expert_path == 'SR_expert_trajectories/' or args.expert_path == 'SR2_expert_trajectories/':
-            if half == 0: # left half
-                set_diff = list(set(product(tuple(range(0, (width/2)-3)), tuple(range(1, height)))) - set(obstacles))
-            elif half == 1: # right half
-                set_diff = list(set(product(tuple(range(width/2, width-2)), tuple(range(2, height)))) - set(obstacles))
-        else:
-            set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) - set(obstacles))
+        #if args.expert_path == 'SR_expert_trajectories/':
+        #    if c == 1:
+        #        half = 0
+        #    elif c == 3:
+        #        half = 1
+        #elif args.expert_path == 'SR2_expert_trajectories/':
+        #    half = c
+        #if args.expert_path == 'SR_expert_trajectories/' or args.expert_path == 'SR2_expert_trajectories/':
+        #    if half == 0: # left half
+        #        set_diff = list(set(product(tuple(range(0, (width/2)-3)), tuple(range(1, height)))) - set(obstacles))
+        #    elif half == 1: # right half
+        #        set_diff = list(set(product(tuple(range(width/2, width-2)), tuple(range(2, height)))) - set(obstacles))
+        #else:
+        #    set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) - set(obstacles))
+        set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) - set(obstacles))
 
         start_loc = sample_start(set_diff)
         s = State(start_loc, obstacles)
@@ -195,7 +217,7 @@ def test(Transition):
 
         c = Variable(c)
 
-        x = -1*torch.ones(1, 4, 2)
+        x = -1*torch.ones(1, history_size, 2)
 
         if args.cuda:
             x = x.cuda()
@@ -203,21 +225,23 @@ def test(Transition):
 
         for t in range(N):
 
-            x[:,:3,:] = x[:,1:,:]
+            x[:,:(history_size-1),:] = x[:,1:,:]
             curr_x = torch.from_numpy(s.state).unsqueeze(0)
             if args.cuda:
                 curr_x = curr_x.cuda()
 
-            x[:,3:,:] = curr_x
+            x[:,(history_size-1),:] = curr_x
 
-            x_t0 = Variable(x[:,0,:])
-            x_t1 = Variable(x[:,1,:])
-            x_t2 = Variable(x[:,2,:])
-            x_t3 = Variable(x[:,3,:])
+            #x_t0 = Variable(x[:,0,:])
+            #x_t1 = Variable(x[:,1,:])
+            #x_t2 = Variable(x[:,2,:])
+            #x_t3 = Variable(x[:,3,:])
 
-            mu, logvar = model.encode(torch.cat((x_t0, x_t1, x_t2, x_t3), 1), c)
+            input_x = Variable(x[:,:,:].view(x.size(0), history_size*x.size(2)).clone())
+
+            mu, logvar = model.encode(input_x, c)
             c[:,0] = model.reparameterize(mu, logvar)
-            pred_a = model.decode(torch.cat((x_t0, x_t1, x_t2, x_t3), 1), c).data.cpu().numpy()
+            pred_a = model.decode(input_x, c).data.cpu().numpy()
             pred_a = np.argmax(pred_a)
             print pred_a
             next_s = Transition(s, Action(pred_a), R.t)

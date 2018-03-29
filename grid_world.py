@@ -1,13 +1,30 @@
 import random
 import numpy as np
+from itertools import product
 
-def create_obstacles(width, height):
+def create_obstacles(width, height, env_name=None):
     #return [(4,6),(9,6),(14,6),(4,12),(9,12),(14,12)] # 19 x 19
     #return [(3,5),(7,5),(11,5),(3,10),(7,10),(11,10)] # 17 x 17
     #return [(3,4),(6,4),(9,4),(3,9),(6,9),(9,9)] # 15 x 15
     #return [(4,4),(7,4),(4,8),(7,8)] # 13 x 13
     #return [(3,3),(6,3),(3,6),(6,6)] # 12 x 12
-    return []
+    if env_name == 'diverse':
+        
+        obstacles = []
+        obs_starts = [1,15]
+        obs_ends = [5,19]
+        assert(len(obs_starts) == len(obs_ends))
+        for i in range(len(obs_starts)):
+            for j in range(len(obs_starts)):
+                product_iter = product(range(obs_starts[i], obs_ends[i]+1), 
+                                        range(obs_starts[j], obs_ends[j]+1))
+                for k in product_iter:
+                    obstacles.append(k)
+
+        return obstacles
+
+    else:
+        return []
 
 def obstacle_movement(t):
 #    if t % 6 == 0:
@@ -46,16 +63,16 @@ class State():
         if feat_type == 'view':
 
             view_size = int(view_size)
-            self.state = np.zeros(2 + view_size*view_size -1)
+            self.state = np.zeros(2 + view_size*view_size - 1)
             self.state[0] = self.coordinates[0]
             self.state[1] = self.coordinates[1]
             count = 0
-            for i in range(-view_size/2, view_size/2):
-                for j in range(-view_size/2, view_size/2):
+            for i in range(-(view_size/2), view_size/2):
+                for j in range(-(view_size/2), view_size/2):
                     if i == 0 and j == 0:
                         continue
                     count += 1
-                    if (self.state[0]+i, self.state[1]+j) in list_of_obstacles:
+                    if (self.state[0]+i, self.state[1]+j) in self.list_of_obstacles:
                         self.state[2+count] = 1
 
         elif feat_type == 'all':
@@ -63,9 +80,9 @@ class State():
             self.state = np.zeros(2*(self.n_obs+1))
             self.state[0] = self.coordinates[0]
             self.state[1] = self.coordinates[1]
-            for i in range(1,len(list_of_obstacles)+1):
-                self.state[2*i] = list_of_obstacles[i-1][0]
-                self.state[2*i+1] = list_of_obstacles[i-1][1]
+            for i in range(1,len(self.list_of_obstacles)+1):
+                self.state[2*i] = self.list_of_obstacles[i-1][0]
+                self.state[2*i+1] = self.list_of_obstacles[i-1][1]
         
 
 
