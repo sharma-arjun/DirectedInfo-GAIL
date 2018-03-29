@@ -72,11 +72,11 @@ class Expert(object):
                     if line_counter > 0:
                         temp_mem.append(Trajectory(s, a, c, 1))
                     #s = self.running_state(np.asarray(line.strip().split(), dtype='float'))
-                    s = np.asarray(line.strip().split(), dtype='float')
+                    s = np.asarray(line.strip().split(), dtype=np.float32)
                 elif line_counter % 3 == 1:
-                    a = np.asarray(line.strip().split(), dtype='float')
+                    a = np.asarray(line.strip().split(), dtype=np.float32)
                 elif line_counter % 3 == 2:
-                    c = np.asarray(line.strip().split(), dtype='float')
+                    c = np.asarray(line.strip().split(), dtype=np.float32)
                     temp_c.append(c)
 
                 line_counter += 1
@@ -129,8 +129,8 @@ class ExpertHDF5(Expert):
         h5f = h5py.File(h5_file, 'r')
         memory = []
         for k in sorted(h5f.keys()):
-            state = np.array(h5f[k]['state'])
-            action = np.array(h5f[k]['action'])
+            state = np.array(h5f[k]['state'], dtype=np.float32)
+            action = np.array(h5f[k]['action'], dtype=np.float32)
             # context = h5f[k]['context']
             context = np.zeros(action.shape[0])
             mask = np.ones((action.shape[0]))

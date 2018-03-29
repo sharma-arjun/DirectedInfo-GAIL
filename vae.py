@@ -27,6 +27,8 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--expert-path', default="L_expert_trajectories/", metavar='G',
                     help='path to the expert trajectory files')
+parser.add_argument('--use_rnn_goal', type=int, default=1, choices=[0, 1],
+                    help='Use RNN as Q network to predict the goal.')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -58,17 +60,17 @@ class VAE(nn.Module):
 
         self.history_size = 4
         self.policy = Policy(state_size=state_size*self.history_size,
-                            action_size=action_size, 
-                            latent_size=latent_size, 
-                            output_size=output_size, 
-                            hidden_size=hidden_size, 
-                            output_activation='sigmoid')
+                             action_size=action_size,
+                             latent_size=latent_size,
+                             output_size=output_size,
+                             hidden_size=hidden_size,
+                             output_activation='sigmoid')
 
-        self.posterior = Posterior(state_size=state_size*self.history_size, 
-                                   action_size=action_size, 
-                                   latent_size=latent_size, 
+        self.posterior = Posterior(state_size=state_size*self.history_size,
+                                   action_size=action_size,
+                                   latent_size=latent_size,
                                    hidden_size=hidden_size)
-        
+
 
     def encode(self, x, c):
         return self.posterior(torch.cat((x, c), 1))
@@ -92,12 +94,30 @@ class VAE(nn.Module):
         c[:,0] = self.reparameterize(mu, logvar)
         return self.decode(x, c), mu, logvar
 
-
+action_size = 4
+Q_model = nn.LSTMCell(2 + action_size, 64)
+# Output of linear model num_goals = 4
+Q_model_linear = nn.Linear(64, 4)
+Q_model_linear_softmax = nn.Softmax(dim=1)
 model = VAE(state.state.shape[0], 0, 2, 8, 64)
 
-if args.cuda:
+def convert_model_to_cuda():
     model.cuda()
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    Q_model.cuda()
+    Q_model_linear.cuda()
+
+if args.cuda:
+    convert_model_to_cuda()
+
+if args.use_rnn_goal:
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    Q_model_opt = optim.Adam([
+            {'params': Q_model.parameters()},
+            {'params': Q_model_linear.parameters()},
+        ],
+        lr=1e-3)
+else:
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 
 # Reconstruction + KL divergence losses summed over all elements and batch
@@ -115,6 +135,46 @@ def loss_function(recon_x, x, mu, logvar):
     return BCE + KLD
     #return MSE + KLD
 
+def set_models_to_train():
+    Q_model.train()
+    Q_model_linear.train()
+    model.train()
+
+def train_variable(epoch, expert, Transition, num_batches):
+    '''Train VAE with variable length expert samples.
+    '''
+    set_models_to_train()
+    history_size = model.history_size
+    train_loss = 0
+    for batch_idx in range(num_batches):
+        batch_size = 1
+        batch = expert.sample(batch_size)
+
+        ep_state, ep_action, ep_c, ep_mask = batch
+        batch_len = len(ep_state[0])
+        # Make ep_state, ep_action will be a tuple of states, tuple of actions
+        ep_state, ep_action = ep_state[0], ep_action[0]
+        ep_c, ep_mask = ep_c[0], ep_mask[0]
+
+        # Predict goal for the entire episode
+        ht = Variable(torch.zeros(batch_size, 64))
+        ct = Variable(torch.zeros(batch_size, 64))
+        final_goal = Variable(torch.zeros(batch_size, 4))
+        pred_goal = []
+        for t in range(batch_len):
+            state_tensor = torch.from_numpy(ep_state[t])
+            action_tensor = torch.from_numpy(ep_action[t])
+            ht, ct = Q_model(
+                    Variable(torch.cat((state_tensor, action_tensor), 0)),
+                    (ht, ct))
+            output = Q_model_linear(ht)
+            # pred_goal.append(Q_model_linear_softmax(output))
+            pred_goal.append(output)
+            final_goal = final_goal + pred_goal[-1]
+
+        final_goal = Q_model_linear_softmax(final_goal)
+        # final_goal = final_goal / batch_len
+        print(final_goal.size())
 
 def train(epoch, expert, Transition):
     model.train()
@@ -126,6 +186,7 @@ def train(epoch, expert, Transition):
         print("Batch len: {}".format(len(batch.state[1])))
         x_data = torch.Tensor(batch.state)
         N = x_data.size(1)
+        pdb.set_trace()
         x = -1*torch.ones(x_data.size(0), history_size, x_data.size(2))
         x[:,(history_size-1),:] = x_data[:,0,:]
 
@@ -199,6 +260,7 @@ def test(Transition):
         c = expert.sample_c()
         N = c.shape[0]
         c = np.argmax(c[0,:])
+
         #if args.expert_path == 'SR_expert_trajectories/':
         #    if c == 1:
         #        half = 0
@@ -272,7 +334,8 @@ expert = Expert(args.expert_path, 2)
 expert.push()
 
 for epoch in range(1, args.epochs + 1):
-    train(epoch, expert, T)
+    # train(epoch, expert, T)
+    train_variable(epoch, expert, T, 10)
     #test(epoch)
     #sample = Variable(torch.randn(64, 20))
     #if args.cuda:
