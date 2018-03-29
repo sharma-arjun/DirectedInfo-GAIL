@@ -1,12 +1,15 @@
-import argparse
-import torch
 import numpy as np
+import argparse
+import pdb
+import torch
+
 from torch import nn, optim
 from torch.autograd import Variable
 from torch.nn import functional as F
 
 from load_expert_traj import Expert
-from grid_world import State, Action, TransitionFunction, RewardFunction, RewardFunction_SR2
+from grid_world import State, Action, TransitionFunction
+from grid_world import RewardFunction, RewardFunction_SR2
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from itertools import product
 from models import Policy, Posterior
@@ -36,7 +39,8 @@ if args.cuda:
 width = height = 21
 obstacles = create_obstacles(width, height, 'diverse')
 
-set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) - set(obstacles))
+set_diff = list(set(product(tuple(range(7,13)),
+                            tuple(range(7,13)))) - set(obstacles))
 state = State(sample_start(set_diff), obstacles)
 
 T = TransitionFunction(width, height, obstacle_movement)
@@ -48,7 +52,8 @@ T = TransitionFunction(width, height, obstacle_movement)
 
 
 class VAE(nn.Module):
-    def __init__(self, state_size, action_size, latent_size, output_size, hidden_size):
+    def __init__(self, state_size, action_size, latent_size, output_size,
+                 hidden_size):
         super(VAE, self).__init__()
 
         self.history_size = 4
@@ -78,7 +83,8 @@ class VAE(nn.Module):
             return mu
 
     def decode(self, x, c):
-        action_mean, action_log_std, action_std = self.policy(torch.cat((x, c), 1))
+        action_mean, action_log_std, action_std = self.policy(
+                torch.cat((x, c), 1))
         return action_mean
 
     def forward(self, x, c):
@@ -116,8 +122,8 @@ def train(epoch, expert, Transition):
     train_loss = 0
     for batch_idx in range(10): # 10 batches per epoch
         batch = expert.sample(args.batch_size)
-        print len(batch.state[0])
-        print len(batch.state[1])
+        print("Batch len: {}".format(len(batch.state[0])))
+        print("Batch len: {}".format(len(batch.state[1])))
         x_data = torch.Tensor(batch.state)
         N = x_data.size(1)
         x = -1*torch.ones(x_data.size(0), history_size, x_data.size(2))
@@ -142,7 +148,8 @@ def train(epoch, expert, Transition):
             #x_t1 = Variable(x[:,1,:].clone().view(x.size(0), x.size(2)))
             #x_t2 = Variable(x[:,2,:].clone().view(x.size(0), x.size(2)))
             #x_t3 = Variable(x[:,3,:].clone().view(x.size(0), x.size(2)))
-            input_x = Variable(x[:,:,:].view(x.size(0), history_size*x.size(2)).clone())
+            input_x = Variable(x[:,:,:].view(x.size(0),
+                               history_size*x.size(2)).clone())
             c_t0 = Variable(c)
 
             if args.cuda:
@@ -199,22 +206,27 @@ def test(Transition):
         #        half = 1
         #elif args.expert_path == 'SR2_expert_trajectories/':
         #    half = c
-        #if args.expert_path == 'SR_expert_trajectories/' or args.expert_path == 'SR2_expert_trajectories/':
+        #if args.expert_path == 'SR_expert_trajectories/' or \
+        #        args.expert_path == 'SR2_expert_trajectories/':
         #    if half == 0: # left half
-        #        set_diff = list(set(product(tuple(range(0, (width/2)-3)), tuple(range(1, height)))) - set(obstacles))
+        #        set_diff = list(set(product(tuple(range(0, (width/2)-3)),
+        #                           tuple(range(1, height)))) - set(obstacles))
         #    elif half == 1: # right half
-        #        set_diff = list(set(product(tuple(range(width/2, width-2)), tuple(range(2, height)))) - set(obstacles))
+        #        set_diff = list(set(product(
+        #           tuple(range(width/2, width-2)),
+        #           tuple(range(2, height)))) - set(obstacles))
         #else:
-        #    set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) - set(obstacles))
-        set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) - set(obstacles))
+        #    set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) \
+        #           - set(obstacles))
+        set_diff = list(set(product(tuple(range(7,13)),
+                                    tuple(range(7,13)))) - set(obstacles))
 
         start_loc = sample_start(set_diff)
         s = State(start_loc, obstacles)
         R.reset()
         c = torch.from_numpy(np.array([-1.0,c])).unsqueeze(0).float()
 
-        print 'c is ', c[0,1]
-
+        print('c is '.format(c[0,1]))
         c = Variable(c)
 
         x = -1*torch.ones(1, history_size, 2)
@@ -237,13 +249,14 @@ def test(Transition):
             #x_t2 = Variable(x[:,2,:])
             #x_t3 = Variable(x[:,3,:])
 
-            input_x = Variable(x[:,:,:].view(x.size(0), history_size*x.size(2)).clone())
+            input_x = Variable(x[:,:,:].view(x.size(0),
+                                             history_size*x.size(2)).clone())
 
             mu, logvar = model.encode(input_x, c)
             c[:,0] = model.reparameterize(mu, logvar)
             pred_a = model.decode(input_x, c).data.cpu().numpy()
             pred_a = np.argmax(pred_a)
-            print pred_a
+            print("Pred a {}".format(pred_a))
             next_s = Transition(s, Action(pred_a), R.t)
 
             s = next_s
