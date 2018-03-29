@@ -192,22 +192,14 @@ def gen_diverse_trajs(grid_width, grid_height, path='diverse_path_trajs'):
     goals = [(0,0), (20,20), (20,0), (0,20)]
     n_goals = len(goals)
 
-    obstacles = []
-    obs_starts = [1,15]
-    obs_ends = [5,19]
-    assert(len(obs_starts) == len(obs_ends))
-    for i in range(len(obs_starts)):
-        for j in range(len(obs_starts)):
-            product_iter = product(range(obs_starts[i], obs_ends[i]+1), range(obs_starts[j], obs_ends[j]+1))
-            for k in product_iter:
-                obstacles.append(k)
+    obstacles = create_obstacles(21, 21, 'diverse')
 
     if not os.path.exists(path):
         os.makedirs(path)
 
     T = TransitionFunction(grid_width, grid_height, obstacle_movement)
 
-    set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))))
+    set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) - set(obstacles))
 
     for n in range(N):
 
