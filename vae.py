@@ -145,7 +145,10 @@ def train_variable(epoch, expert, Transition, num_batches):
     '''
     set_models_to_train()
     history_size = model.history_size
-    train_loss = 0
+    train_loss = 0.0
+    train_stats = {
+        'train_loss_per_batch': [],
+    }
     for batch_idx in range(num_batches):
         batch_size = 1
         batch = expert.sample(batch_size)
@@ -157,7 +160,7 @@ def train_variable(epoch, expert, Transition, num_batches):
         ep_state, ep_action = ep_state[0], ep_action[0]
         ep_c, ep_mask = ep_c[0], ep_mask[0]
 
-        # Predict goal for the entire episode
+        # Predict goal for the entire episode i.e., forward prop through Q
         ht = Variable(torch.zeros(batch_size, 64))
         ct = Variable(torch.zeros(batch_size, 64))
         final_goal = Variable(torch.zeros(batch_size, 4))
@@ -175,9 +178,10 @@ def train_variable(epoch, expert, Transition, num_batches):
 
         final_goal = Q_model_linear_softmax(final_goal)
         # final_goal = final_goal / batch_len
-        print(final_goal.size())
 
-        # VAE code
+        # Predict actions i.e. forward prop through q (posterior) and policy
+        # network.
+
         # ep_action is tuple of arrays
         action_var = Variable(torch.from_numpy(np.array(ep_action)))
         # Get the initial state
@@ -189,8 +193,8 @@ def train_variable(epoch, expert, Transition, num_batches):
             x = np.zeros((1, x.shape[0]), dtype=np.float32)
             x[:] = ep_state[0]
 
-        ep_loss, ep_loss_scalar = [], 0.0
-
+        # Store list of losses to backprop later.
+        ep_loss = []
         for t in range(batch_len):
             x_var = Variable(torch.from_numpy(x))
             c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
@@ -200,7 +204,7 @@ def train_variable(epoch, expert, Transition, num_batches):
             loss = loss_function(pred_actions_tensor, action_var[t],
                                  mu, logvar)
             ep_loss.append(loss)
-            train_loss  += loss.data[0]
+            train_loss += loss.data[0]
 
             pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
 
@@ -232,6 +236,15 @@ def train_variable(epoch, expert, Transition, num_batches):
 
         optimizer.step()
         Q_model_opt.step()
+
+        # Update stats
+        train_stats['train_loss_per_batch'].append(train_loss)
+
+        if batch_idx % args.log_interval == 0:
+            print('Train Epoch: {} [{}/{}] \tLoss: {:.3f}'.format(
+                epoch, batch_idx, num_batches, train_loss))
+
+    return train_stats
 
 
 def train(epoch, expert, Transition):
