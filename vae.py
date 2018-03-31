@@ -58,7 +58,7 @@ class VAE(nn.Module):
                  hidden_size):
         super(VAE, self).__init__()
 
-        self.history_size = 4
+        self.history_size = 1
         self.policy = Policy(state_size=state_size*self.history_size,
                              action_size=action_size,
                              latent_size=latent_size,
@@ -99,7 +99,7 @@ Q_model = nn.LSTMCell(2 + action_size, 64)
 # Output of linear model num_goals = 4
 Q_model_linear = nn.Linear(64, 4)
 Q_model_linear_softmax = nn.Softmax(dim=1)
-model = VAE(state.state.shape[0], 0, 2, 8, 64)
+model = VAE(8, 0, 2, action_size, 64)
 
 def convert_model_to_cuda():
     model.cuda()
@@ -152,7 +152,8 @@ def train_variable(epoch, expert, Transition, num_batches):
 
         ep_state, ep_action, ep_c, ep_mask = batch
         batch_len = len(ep_state[0])
-        # Make ep_state, ep_action will be a tuple of states, tuple of actions
+        # After below operation ep_state, ep_action will be a tuple of
+        # states, tuple of actions
         ep_state, ep_action = ep_state[0], ep_action[0]
         ep_c, ep_mask = ep_c[0], ep_mask[0]
 
@@ -176,6 +177,63 @@ def train_variable(epoch, expert, Transition, num_batches):
         # final_goal = final_goal / batch_len
         print(final_goal.size())
 
+        # VAE code
+        # ep_action is tuple of arrays
+        action_var = Variable(torch.from_numpy(np.array(ep_action)))
+        # Get the initial state
+        x, c = ep_state[0], ep_c[0]
+        if len(c.shape) == 1:
+            c = np.zeros((1, c.shape[0]), dtype=np.float32)
+            c[:] = ep_c[0]
+            assert len(x.shape) == 1
+            x = np.zeros((1, x.shape[0]), dtype=np.float32)
+            x[:] = ep_state[0]
+
+        ep_loss, ep_loss_scalar = [], 0.0
+
+        for t in range(batch_len):
+            x_var = Variable(torch.from_numpy(x))
+            c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
+                              dim=1)
+
+            pred_actions_tensor, mu, logvar = model(x_var, c_var)
+            loss = loss_function(pred_actions_tensor, action_var[t],
+                                 mu, logvar)
+            ep_loss.append(loss)
+            train_loss  += loss.data[0]
+
+            pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
+
+            # TODO: Update x if using history
+            # x[:,:3,:] = x[:,1:,:]
+
+            # Get next state from action
+            for b_id in range(pred_actions_numpy.shape[0]):
+                action = Action(np.argmax(pred_actions_numpy[b_id,:]))
+                # Get current state
+                state = State(ep_state[t], obstacles)
+
+                # Get next state
+                # state = State(x[b_id,3,:].cpu().numpy(), obstacles)
+                next_state = Transition(state, action, 0)
+
+                # Update x
+                # x[b_id,3,:] = torch.Tensor(next_state.state)
+                x[:] = np.array(next_state.coordinates, dtype=np.float32)
+
+            # update c
+            c[:,0] = model.reparameterize(mu, logvar).data.cpu()
+
+        # Calculate the total loss.
+        total_loss = ep_loss[0]
+        for t in range(1, len(ep_loss)):
+            total_loss = total_loss + ep_loss[t]
+        total_loss.backward()
+
+        optimizer.step()
+        Q_model_opt.step()
+
+
 def train(epoch, expert, Transition):
     model.train()
     history_size = model.history_size
@@ -184,18 +242,20 @@ def train(epoch, expert, Transition):
         batch = expert.sample(args.batch_size)
         print("Batch len: {}".format(len(batch.state[0])))
         print("Batch len: {}".format(len(batch.state[1])))
-        x_data = torch.Tensor(batch.state)
+        x_data = torch.Tensor(np.array(batch.state))
         N = x_data.size(1)
-        pdb.set_trace()
         x = -1*torch.ones(x_data.size(0), history_size, x_data.size(2))
         x[:,(history_size-1),:] = x_data[:,0,:]
 
-        a = Variable(torch.Tensor(batch.action))
+        a = Variable(torch.Tensor(np.array(batch.action)))
 
-        _, c2 = torch.Tensor(batch.c).max(2)
+        pdb.set_trace()
+        # Context variable is in one-hot, convert it to integer
+        _, c2 = torch.Tensor(np.array(batch.c)).max(2) # , (N, T)
         c2 = c2.float()[:,0].unsqueeze(1)
         c1 = -1*torch.ones(c2.size())
-        c = torch.cat((c1,c2),1)
+        c = torch.cat((c1, c2), 1)
+        pdb.set_trace()
 
         #c_t0 = Variable(c[:,0].clone().view(c.size(0), 1))
 
