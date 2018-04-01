@@ -24,11 +24,15 @@ from models import Policy, Posterior
 
 
 class VAE(nn.Module):
-    def __init__(self, state_size, action_size, latent_size, output_size,
-                 hidden_size):
+    def __init__(self,
+                 state_size=1,
+                 action_size=1,
+                 latent_size=1,
+                 output_size=1,
+                 history_size=1,
+                 hidden_size=64):
         super(VAE, self).__init__()
-
-        self.history_size = 1
+        self.history_size = history_size
         self.policy = Policy(state_size=state_size*self.history_size,
                              action_size=action_size,
                              latent_size=latent_size,
@@ -71,12 +75,14 @@ class VAETrain(object):
                  state_size=2,
                  action_size=4,
                  num_goals=4,
+                 history_size=1,
                  use_rnn_goal_predictor=False,
                  dtype=torch.FloatTensor):
         self.args = args
         self.width, self.height = width, height
         self.state_size = state_size
         self.action_size = action_size
+        self.history_size = history_size
         self.num_goals = num_goals
         self.dtype = dtype
 
@@ -85,7 +91,14 @@ class VAETrain(object):
         # Output of linear model num_goals = 4
         self.Q_model_linear = nn.Linear(64, num_goals)
         self.Q_model_linear_softmax = nn.Softmax(dim=1)
-        self.vae_model = VAE(8, 0, 2, action_size, 64)
+        # action_size is 0
+        # Hack -- VAE input dim (s + a + latent).
+        self.vae_model = VAE(state_size=state_size+2,
+                             action_size=action_size,
+                             latent_size=2,
+                             output_size=num_goals,
+                             history_size=history_size,
+                             hidden_size=64)
 
         self.obstacles, self.transition_func = None, None
 
@@ -437,8 +450,9 @@ def main(args):
         args,
         width=21,
         height=21,
-        state_size=2,
-        action_size=4,
+        state_size=args.vae_state_size,
+        action_size=args.vae_action_size,
+        history_size=args.vae_history_size,
         num_goals=4,
         use_rnn_goal_predictor=args.use_rnn_goal,
         dtype=dtype
@@ -466,6 +480,14 @@ if __name__ == '__main__':
                         help='path to the expert trajectory files')
     parser.add_argument('--use_rnn_goal', type=int, default=1, choices=[0, 1],
                         help='Use RNN as Q network to predict the goal.')
+
+    # Arguments for VAE training
+    parser.add_argument('--vae_state_size', type=int, default=2,
+                        help='State size for VAE.')
+    parser.add_argument('--vae_action_size', type=int, default=4,
+                        help='Action size for VAE.')
+    parser.add_argument('--vae_history_size', type=int, default=1,
+                         help='State history size to use in VAE.')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
