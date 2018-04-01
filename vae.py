@@ -172,6 +172,9 @@ class VAETrain(object):
         goal_preds_dict = self.test_goal_prediction(expert,
                                                     num_test_samples=50)
 
+        self.test_generate_trajectory_variable_length(expert,
+                                                      num_test_samples=10)
+
         goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
         for i in range(len(goal_preds_dict['true_goal'])):
             true_goal_one_hot = goal_preds_dict['true_goal'][i]
@@ -220,6 +223,122 @@ class VAETrain(object):
         final_goal = self.Q_model_linear_softmax(final_goal)
 
         return final_goal, pred_goal
+
+    def test_generate_trajectory_variable_length(self, expert,
+                                                 num_test_samples=10):
+        '''Test trajectory generation from VAE.
+
+        Use expert trajectories for trajectory generation.
+        '''
+        self.vae_model.eval()
+        self.Q_model.eval()
+        self.Q_model_linear.eval()
+        history_size, batch_size = self.vae_model.history_size, 1
+
+        results = {'true_goal': [], 'pred_goal': [],
+                   'true_traj': [], 'pred_traj': []}
+
+        # We need to sample expert trajectories to get (s, a) pairs which
+        # are required for goal prediction.
+        for e in range(num_test_samples):
+            batch = expert.sample(batch_size)
+            ep_state, ep_action, ep_c, ep_mask = batch
+
+            # After below operation ep_state, ep_action will be a tuple of
+            # states, tuple of actions
+            ep_state, ep_action = ep_state[0], ep_action[0]
+            ep_c, ep_mask = ep_c[0], ep_mask[0]
+
+            batch_len = len(ep_state)
+            final_goal, pred_goal = self.predict_goal(ep_state,
+                                                      ep_action,
+                                                      ep_c,
+                                                      ep_mask,
+                                                      self.num_goals)
+            true_goal_numpy = ep_c[0]
+            final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
+
+            results['true_goal'].append(true_goal_numpy)
+            results['pred_goal'].append(final_goal_numpy)
+
+            # Generate trajectories using VAE.
+
+            # ep_action is tuple of arrays
+            action_var = Variable(torch.from_numpy(np.array(ep_action)))
+
+            # Get the initial state
+            x, c = ep_state[0], ep_c[0]
+            x_state_obj = State(ep_state[0].tolist(), self.obstacles)
+
+            c = np.zeros((1, c.shape[0]), dtype=np.float32)
+            c[:] = ep_c[0]
+            if self.args.use_state_features:
+                x_feat = x_state_obj.get_features()
+                x = np.zeros((1, x_feat.shape[0]), dtype=np.float32)
+                x[:] = x_feat
+            else:
+                assert len(x.shape) == 1
+                x = np.zeros((1, x.shape[0]), dtype=np.float32)
+                x[:] = ep_state[0]
+
+            # Add history to state
+            if history_size > 1:
+                x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
+                                 dtype=np.float32)
+                if self.args.use_state_features:
+                    x[:, history_size - 1, :] = x_state_obj.get_features()
+                else:
+                    x[:, history_size - 1, :] = ep_state[0]
+
+            true_traj, pred_traj = [], []
+            curr_state_arr = ep_state[0]
+
+            # Store list of losses to backprop later.
+            for t in range(batch_len):
+                x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
+                c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
+                                  dim=1)
+
+                pred_actions_tensor, mu, logvar = self.vae_model(x_var, c_var)
+                pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
+
+                # Store the "true" state
+                # true_traj.append((ep_state[t], ep_action[t]))
+                # pred_traj.append((pred_actions_numpy.reshape((-1)))
+
+                if history_size > 1:
+                    x[:, :(history_size-1), :] = x[:,1:,:]
+
+                # Get next state from action
+                action = Action(np.argmax(pred_actions_numpy[0, :]))
+                # Get current state
+                state = State(curr_state_arr.tolist(), self.obstacles)
+                # Get next state
+                next_state = self.transition_func(state, action, 0)
+
+                # Update x
+                if self.args.use_state_features:
+                    next_state_features = np.array(
+                            next_state.get_features(), dtype=np.float32)
+                else:
+                    next_state_features = np.array(next_state.coordinates,
+                                                   dtype=np.float32)
+
+                if history_size > 1:
+                    x[:, history_size - 1, :] = next_state_features
+                else:
+                    x[:] = next_state_features
+
+                # update c
+                c[:, 0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
+
+                # Update current state
+                curr_state_arr = np.array(next_state.coordinates,
+                                          dtype=np.float32)
+
+            # results['true_traj'].append(true_actions)
+            # results['pred_traj'].append()
+        return results
 
     def train_variable_length_epoch(self, epoch, expert, batch_size=1):
         '''Train VAE with variable length expert samples.
@@ -306,11 +425,12 @@ class VAETrain(object):
                 if history_size > 1:
                     x[:,:(history_size-1),:] = x[:,1:,:]
 
+                curr_state_arr = ep_state[0]
                 # Get next state from action
                 for b_id in range(pred_actions_numpy.shape[0]):
                     action = Action(np.argmax(pred_actions_numpy[b_id,:]))
                     # Get current state
-                    state = State(ep_state[t].tolist(), self.obstacles)
+                    state = State(curr_state_arr.tolist(), self.obstacles)
 
                     # Get next state
                     # state = State(x[b_id,3,:].cpu().numpy(), self.obstacles)
@@ -328,6 +448,10 @@ class VAETrain(object):
                         x[:, history_size - 1, :] = next_state_features
                     else:
                         x[:] = next_state_features
+
+                    # Update current state
+                    curr_state_arr = np.array(next_state.coordinates,
+                                              dtype=np.float32)
 
                 # update c
                 c[:, 0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
