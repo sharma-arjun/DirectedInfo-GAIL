@@ -45,7 +45,7 @@ def save_expert_traj_dict_to_h5(traj_data_dict, save_dir,
     print("Did save data to {}".format(os.path.join(save_dir, h5_filename)))
 
 def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
-    ''' Generates trajectπories of shape L, with right turn '''
+    ''' Generates trajectories of shape L, with right turn '''
     t = 3
     n = 2
     N = 200
@@ -280,119 +280,125 @@ def gen_diverse_trajs(grid_width, grid_height):
         for g in range(n_goals): # loop over goals
             # path 1 - go up/down till boundary and then move right/left
 
-            state = start_state
-            path_key = str(n) + '_' + str(g) + '_' + str(1)  + '.txt'
-            expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+            if g == 0 or g == 2: # do path 1 only for goal 0 and goal 2
 
-            delta = 0 if g < 2 else 1
-            action = Action(delta)
+                state = start_state
+                path_key = str(n) + '_' + str(g) + '_' + str(1)  + '.txt'
+                expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
 
-            while state.state[1] != grid_height-1 and state.state[1] != 0:
-                expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action.delta)
-                expert_data_dict[path_key]['goal'].append(g)
-                state = T(state, action, 0)
+                delta = 0 if g < 2 else 1
+                action = Action(delta)
 
-            delta = 3 if g == 0 or g == 3 else 2
-            action = Action(delta)
+                while state.state[1] != grid_height-1 and state.state[1] != 0:
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action.delta)
+                    expert_data_dict[path_key]['goal'].append(g)
+                    state = T(state, action, 0)
 
-            while state.state[0] != grid_width-1 and state.state[0] != 0:
-                expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action.delta)
-                expert_data_dict[path_key]['goal'].append(g)
-                state = T(state, action, 0)
+                delta = 3 if g == 0 or g == 3 else 2
+                action = Action(delta)
 
-            assert(state.coordinates in goals)
+                while state.state[0] != grid_width-1 and state.state[0] != 0:
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action.delta)
+                    expert_data_dict[path_key]['goal'].append(g)
+                    state = T(state, action, 0)
+
+                assert(state.coordinates in goals)
 
             # path 2 - go right/left till boundary and then move up/down
 
-            state = start_state
-            path_key = str(n) + '_' + str(g) + '_' + str(2)  + '.txt'
-            expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+            if g == 1: # do path 2 only for goal 1
 
-            delta = 3 if g == 0 or g == 3 else 2
-            action = Action(delta)
+                state = start_state
+                path_key = str(n) + '_' + str(g) + '_' + str(2)  + '.txt'
+                expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
 
-            while state.state[0] != grid_width-1 and state.state[0] != 0:
-                expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action.delta)
-                expert_data_dict[path_key]['goal'].append(g)
-                state = T(state, action, 0)
+                delta = 3 if g == 0 or g == 3 else 2
+                action = Action(delta)
 
-            delta = 0 if g < 2 else 1
-            action = Action(delta)
+                while state.state[0] != grid_width-1 and state.state[0] != 0:
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action.delta)
+                    expert_data_dict[path_key]['goal'].append(g)
+                    state = T(state, action, 0)
 
-            while state.state[1] != grid_height-1 and state.state[1] != 0:
-                expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action.delta)
-                expert_data_dict[path_key]['goal'].append(g)
-                state = T(state, action, 0)
+                delta = 0 if g < 2 else 1
+                action = Action(delta)
 
-            assert(state.coordinates in goals)
+                while state.state[1] != grid_height-1 and state.state[1] != 0:
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action.delta)
+                    expert_data_dict[path_key]['goal'].append(g)
+                    state = T(state, action, 0)
+
+                assert(state.coordinates in goals)
 
             # path 3 - go diagonally till obstacle and then
             #          move up/down if x > 10 or right/left if y > 10
             #          and then move right/left or up/down till goal
 
+            if g == 3: # do path 3 only for goal 3
 
-            state = start_state
-            path_key = str(n) + '_' + str(g) + '_' + str(3)  + '.txt'
-            expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+                state = start_state
+                path_key = str(n) + '_' + str(g) + '_' + str(3)  + '.txt'
+                expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
 
-            delta = g + 4
-            action = Action(delta)
-
-            while True:
-                new_state = T(state, action, 0)
-                if new_state.coordinates == state.coordinates:
-                    break
-                expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action.delta)
-                expert_data_dict[path_key]['goal'].append(g)
-                state = new_state
-
-            if T(state, Action(2), 0).coordinates == state.coordinates \
-                or T(state, Action(3), 0).coordinates == state.coordinates:
-
-                delta = 0 if g < 2 else 1
+                delta = g + 4
                 action = Action(delta)
 
-                while state.state[1] != grid_height-1 and state.state[1] != 0:
+                while True:
+                    new_state = T(state, action, 0)
+                    if new_state.coordinates == state.coordinates:
+                        break
                     expert_data_dict[path_key]['state'].append(state.state)
                     expert_data_dict[path_key]['action'].append(action.delta)
                     expert_data_dict[path_key]['goal'].append(g)
-                    state = T(state, action, 0)
+                    state = new_state
 
-                delta = 3 if g == 0 or g == 3 else 2
-                action = Action(delta)
+                if T(state, Action(2), 0).coordinates == state.coordinates \
+                    or T(state, Action(3), 0).coordinates == state.coordinates:
 
-                while state.state[0] != grid_width-1 and state.state[0] != 0:
-                    expert_data_dict[path_key]['state'].append(state.state)
-                    expert_data_dict[path_key]['action'].append(action.delta)
-                    expert_data_dict[path_key]['goal'].append(g)
-                    state = T(state, action, 0)
+                    delta = 0 if g < 2 else 1
+                    action = Action(delta)
 
-            else:
+                    while state.state[1] != grid_height-1 and state.state[1] != 0:
+                        expert_data_dict[path_key]['state'].append(state.state)
+                        expert_data_dict[path_key]['action'].append(action.delta)
+                        expert_data_dict[path_key]['goal'].append(g)
+                        state = T(state, action, 0)
 
-                delta = 3 if g == 0 or g == 3 else 2
-                action = Action(delta)
+                    delta = 3 if g == 0 or g == 3 else 2
+                    action = Action(delta)
 
-                while state.state[0] != grid_width-1 and state.state[0] != 0:
-                    expert_data_dict[path_key]['state'].append(state.state)
-                    expert_data_dict[path_key]['action'].append(action.delta)
-                    expert_data_dict[path_key]['goal'].append(g)
-                    state = T(state, action, 0)
+                    while state.state[0] != grid_width-1 and state.state[0] != 0:
+                        expert_data_dict[path_key]['state'].append(state.state)
+                        expert_data_dict[path_key]['action'].append(action.delta)
+                        expert_data_dict[path_key]['goal'].append(g)
+                        state = T(state, action, 0)
 
-                delta = 0 if g < 2 else 1
-                action = Action(delta)
+                else:
 
-                while state.state[1] != grid_height-1 and state.state[1] != 0:
-                    expert_data_dict[path_key]['state'].append(state.state)
-                    expert_data_dict[path_key]['action'].append(action.delta)
-                    expert_data_dict[path_key]['goal'].append(g)
-                    state = T(state, action, 0)
+                    delta = 3 if g == 0 or g == 3 else 2
+                    action = Action(delta)
 
-            assert(state.coordinates in goals)
+                    while state.state[0] != grid_width-1 and state.state[0] != 0:
+                        expert_data_dict[path_key]['state'].append(state.state)
+                        expert_data_dict[path_key]['action'].append(action.delta)
+                        expert_data_dict[path_key]['goal'].append(g)
+                        state = T(state, action, 0)
+
+                    delta = 0 if g < 2 else 1
+                    action = Action(delta)
+
+                    while state.state[1] != grid_height-1 and state.state[1] != 0:
+                        expert_data_dict[path_key]['state'].append(state.state)
+                        expert_data_dict[path_key]['action'].append(action.delta)
+                        expert_data_dict[path_key]['goal'].append(g)
+                        state = T(state, action, 0)
+
+                assert(state.coordinates in goals)
+
     return expert_data_dict
 
 def main(args):
