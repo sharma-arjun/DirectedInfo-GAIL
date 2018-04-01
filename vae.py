@@ -224,14 +224,22 @@ class VAETrain(object):
 
             # ep_action is tuple of arrays
             action_var = Variable(torch.from_numpy(np.array(ep_action)))
+
             # Get the initial state
             x, c = ep_state[0], ep_c[0]
+            x_state_obj = State(ep_state[0].tolist(), self.obstacles)
+
             if len(c.shape) == 1:
                 c = np.zeros((1, c.shape[0]), dtype=np.float32)
                 c[:] = ep_c[0]
-                assert len(x.shape) == 1
-                x = np.zeros((1, x.shape[0]), dtype=np.float32)
-                x[:] = ep_state[0]
+                if self.args.use_state_features:
+                    x_feat = x_state_obj.get_features().shape[0]
+                    x = np.zeros((1, x_feat.shape[0]), dtype=np.float32)
+                    x[:] = x_feat
+                else:
+                    assert len(x.shape) == 1
+                    x = np.zeros((1, x.shape[0]), dtype=np.float32)
+                    x[:] = ep_state[0]
 
 
             # Add history to state
@@ -243,7 +251,6 @@ class VAETrain(object):
             # Store list of losses to backprop later.
             ep_loss = []
             for t in range(batch_len):
-                pdb.set_trace()
                 x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
                 c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
                                   dim=1)
@@ -270,11 +277,17 @@ class VAETrain(object):
                     next_state = self.transition_func(state, action, 0)
 
                     # Update x
-                    if history_size > 1:
-                        x[:, history_size - 1, :] = np.array(
-                                next_state.coordinates, dtype=np.float32)
+                    if self.args.use_state_features:
+                        next_state_features = np.array(
+                                next_state.get_features(), dtype=np.float32)
                     else:
-                        x[:] = np.array(next_state.coordinates, dtype=np.float32)
+                        next_state_features = np.array(next_state.coordinates,
+                                                       dtype=np.float32)
+
+                    if history_size > 1:
+                        x[:, history_size - 1, :] = next_state_features
+                    else:
+                        x[:] = next_state_features
 
                 # update c
                 c[:, 0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
@@ -499,6 +512,17 @@ if __name__ == '__main__':
                         help='Action size for VAE.')
     parser.add_argument('--vae_history_size', type=int, default=1,
                          help='State history size to use in VAE.')
+
+    # Use features
+    parser.add_argument('--use_state_features', dest='use_state_features',
+                        action='store_true', 
+                        help='Use features instead of direct (x,y) values in VAE')
+    parser.add_argument('--no-use_state_features', dest='use_state_features',
+                        action='store_true', 
+                        help='Do not use features instead of direct (x,y) ' \
+                              'values in VAE')
+    parser.set_defaults(use_state_features=False)
+    
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 

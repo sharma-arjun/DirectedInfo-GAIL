@@ -9,14 +9,14 @@ def create_obstacles(width, height, env_name=None):
     #return [(4,4),(7,4),(4,8),(7,8)] # 13 x 13
     #return [(3,3),(6,3),(3,6),(6,6)] # 12 x 12
     if env_name == 'diverse':
-        
+
         obstacles = []
         obs_starts = [1,15]
         obs_ends = [5,19]
         assert(len(obs_starts) == len(obs_ends))
         for i in range(len(obs_starts)):
             for j in range(len(obs_starts)):
-                product_iter = product(range(obs_starts[i], obs_ends[i]+1), 
+                product_iter = product(range(obs_starts[i], obs_ends[i]+1),
                                         range(obs_starts[j], obs_ends[j]+1))
                 for k in product_iter:
                     obstacles.append(k)
@@ -46,23 +46,27 @@ def sample_start(set_diff):
     return random.choice(set_diff)
 
 class State():
-    def __init__(self, coordinates, list_of_obstacles, feat_type='view',
-                 view_size=3):
+    def __init__(self, coordinates, list_of_obstacles,
+                 feat_type='view', view_size=3):
         #coordinates - tuple, list_of_obstacles - list of tuples
         assert(len(coordinates) == 2)
         self.coordinates = coordinates
         self.n_obs = 0
         for obs in list_of_obstacles:
-            assert(len(obs) == 2)
+            assert len(obs) == 2, \
+                    'Incorrect observation length {}'.format(len(obs))
             self.n_obs += 1
 
         self.list_of_obstacles = list_of_obstacles
+        self.state = None
         self.set_features(feat_type=feat_type,view_size=view_size)
 
-    def set_features(self, feat_type='view', view_size=3):
-        
-        if feat_type == 'view':
+    def get_features(self):
+        assert self.state is not None, 'Feature not set'
+        return self.state
 
+    def set_features(self, feat_type='view', view_size=3):
+        if feat_type == 'view':
             view_size = int(view_size)
             self.state = np.zeros(2 + view_size*view_size - 1)
             self.state[0] = self.coordinates[0]
@@ -77,15 +81,14 @@ class State():
                         self.state[2+count] = 1
 
         elif feat_type == 'all':
-
             self.state = np.zeros(2*(self.n_obs+1))
             self.state[0] = self.coordinates[0]
             self.state[1] = self.coordinates[1]
             for i in range(1,len(self.list_of_obstacles)+1):
                 self.state[2*i] = self.list_of_obstacles[i-1][0]
                 self.state[2*i+1] = self.list_of_obstacles[i-1][1]
-        
-
+        else:
+            raise ValueError('Incorrect feature type {}'.format(feat_type))
 
 
 class Action():
