@@ -134,7 +134,7 @@ class VAETrain(object):
     def set_models_to_train(self):
         self.Q_model.train()
         self.Q_model_linear.train()
-        self.model.train()
+        self.vae_model.train()
 
     def train(self, expert, num_epochs, batch_size):
         final_train_stats = {
@@ -156,24 +156,25 @@ class VAETrain(object):
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
-        test(T)
+        self.test(T)
 
     def train_variable_length_epoch(self, epoch, expert, batch_size=1):
         '''Train VAE with variable length expert samples.
         '''
         self.set_models_to_train()
-        history_size = model.history_size
-        train_loss = 0.0
+        history_size = self.vae_model.history_size
         train_stats = {
             'train_loss': [],
         }
 
         # TODO: The current sampling process can retrain on a single trajectory
         # multiple times. Will fix it later.
+        batch_size = 1
         num_batches = len(expert) // batch_size
 
         for batch_idx in range(num_batches):
-            batch_size = 1
+            # Train loss for this batch
+            train_loss = 0.0
             batch = expert.sample(batch_size)
 
             self.vae_opt.zero_grad()
@@ -241,10 +242,10 @@ class VAETrain(object):
                 for b_id in range(pred_actions_numpy.shape[0]):
                     action = Action(np.argmax(pred_actions_numpy[b_id,:]))
                     # Get current state
-                    state = State(ep_state[t], obstacles)
+                    state = State(ep_state[t].tolist(), self.obstacles)
 
                     # Get next state
-                    # state = State(x[b_id,3,:].cpu().numpy(), obstacles)
+                    # state = State(x[b_id,3,:].cpu().numpy(), self.obstacles)
                     next_state = self.transition_func(state, action, 0)
 
                     # Update x
@@ -264,7 +265,7 @@ class VAETrain(object):
             self.Q_model_opt.step()
 
             # Update stats
-            train_stats['train_loss_per_batch'].append(train_loss)
+            train_stats['train_loss'].append(train_loss)
 
             if batch_idx % self.args.log_interval == 0:
                 print('Train Epoch: {} [{}/{}] \tLoss: {:.3f}'.format(
@@ -273,7 +274,7 @@ class VAETrain(object):
         return train_stats
 
 
-    def train_one_epoch(self, epoch, expert, batch_size=10):
+    def train_batch_epoch(self, epoch, expert, batch_size=10):
         self.vae_model.train()
         history_size = model.history_size
         train_loss = 0
@@ -330,7 +331,7 @@ class VAETrain(object):
                 # get next state and update x
                 for b_id in range(pred_actions.shape[0]):
                     action = Action(np.argmax(pred_actions[b_id,:]))
-                    state = State(x[b_id,3,:].cpu().numpy(), obstacles)
+                    state = State(x[b_id,3,:].cpu().numpy(), self.obstacles)
                     next_state = self.transition_func(state, action, 0)
                     x[b_id,3,:] = torch.Tensor(next_state.state)
 
@@ -382,7 +383,7 @@ class VAETrain(object):
                                         tuple(range(7,13)))) - set(obstacles))
 
             start_loc = sample_start(set_diff)
-            s = State(start_loc, obstacles)
+            s = State(start_loc, self.obstacles)
             R.reset()
             c = torch.from_numpy(np.array([-1.0,c])).unsqueeze(0).float()
 
