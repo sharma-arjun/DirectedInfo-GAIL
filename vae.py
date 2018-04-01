@@ -169,7 +169,57 @@ class VAETrain(object):
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
-        self.test(T)
+        goal_preds_dict = self.test_goal_prediction(expert,
+                                                    num_test_samples=50)
+
+        goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
+        for i in range(len(goal_preds_dict['true_goal'])):
+            true_goal_one_hot = goal_preds_dict['true_goal'][i]
+            pred_goal_one_hot = goal_preds_dict['pred_goal'][i]
+            row = np.argmax(true_goal_one_hot)
+            col = np.argmax(pred_goal_one_hot)
+            goal_pred_conf_arr[row, col] += 1
+
+        print("Goal prediction confusion matrix:")
+        print(np.array_str(goal_pred_conf_arr, precision=0))
+
+
+    # TODO: Add option to not save gradients for backward pass when not needed
+    def predict_goal(self, ep_state, ep_action, ep_c, ep_mask, num_goals):
+        '''Predicts goal for 1 expert sample.
+
+        Forward pass through the Q network.
+
+        Return:
+            final_goal: Average of all goals predicted at every step.
+            pred_goal: Goal predicted at every step of the RNN.
+        '''
+        # Predict goal for the entire episode i.e., forward prop through Q
+        batch_len = len(ep_state)
+        ht = Variable(torch.zeros(1, 64))
+        ct = Variable(torch.zeros(1, 64))
+        final_goal = Variable(torch.zeros(1, num_goals))
+        pred_goal = []
+        for t in range(batch_len):
+            if args.use_state_features:
+                state_obj = State(ep_state[t].tolist(), self.obstacles)
+                state_tensor = torch.from_numpy(
+                        np.array(state_obj.get_features(), dtype=np.float32))
+            else:
+                state_tensor = torch.from_numpy(ep_state[t])
+            action_tensor = torch.from_numpy(ep_action[t])
+            ht, ct = self.Q_model(
+                    Variable(torch.cat((state_tensor, action_tensor), 0)),
+                    (ht, ct))
+            output = self.Q_model_linear(ht)
+            # pred_goal.append(Q_model_linear_softmax(output))
+            pred_goal.append(output)
+            final_goal = final_goal + pred_goal[-1]
+
+        # final_goal = final_goal / batch_len
+        final_goal = self.Q_model_linear_softmax(final_goal)
+
+        return final_goal, pred_goal
 
     def train_variable_length_epoch(self, epoch, expert, batch_size=1):
         '''Train VAE with variable length expert samples.
@@ -200,29 +250,11 @@ class VAETrain(object):
             ep_state, ep_action = ep_state[0], ep_action[0]
             ep_c, ep_mask = ep_c[0], ep_mask[0]
 
-            # Predict goal for the entire episode i.e., forward prop through Q
-            ht = Variable(torch.zeros(batch_size, 64))
-            ct = Variable(torch.zeros(batch_size, 64))
-            final_goal = Variable(torch.zeros(batch_size, 4))
-            pred_goal = []
-            for t in range(batch_len):
-                if args.use_state_features:
-                    state_obj = State(ep_state[t].tolist(), self.obstacles)
-                    state_tensor = torch.from_numpy(
-                            np.array(state_obj.get_features(), dtype=np.float32))
-                else:
-                    state_tensor = torch.from_numpy(ep_state[t])
-                action_tensor = torch.from_numpy(ep_action[t])
-                ht, ct = self.Q_model(
-                        Variable(torch.cat((state_tensor, action_tensor), 0)),
-                        (ht, ct))
-                output = self.Q_model_linear(ht)
-                # pred_goal.append(Q_model_linear_softmax(output))
-                pred_goal.append(output)
-                final_goal = final_goal + pred_goal[-1]
-
-            final_goal = self.Q_model_linear_softmax(final_goal)
-            # final_goal = final_goal / batch_len
+            final_goal, pred_goal = self.predict_goal(ep_state,
+                                                      ep_action,
+                                                      ep_c,
+                                                      ep_mask,
+                                                      self.num_goals)
 
             # Predict actions i.e. forward prop through q (posterior) and
             # policy network.
@@ -393,6 +425,43 @@ class VAETrain(object):
         print('====> Epoch: {} Average loss: {:.4f}'.format(
               epoch, train_loss / 200.0))
 
+    def sample_start_location(self):
+        set_diff = list(set(product(tuple(range(7, 13)),
+                                    tuple(range(7, 13)))) - set(obstacles))
+
+        return sample_start(set_diff)
+
+    def test_goal_prediction(self, expert, num_test_samples=10):
+        '''Test Goal prediction, i.e. is the Q-network (RNN) predicting the
+        goal correctly.
+        '''
+        self.Q_model.eval()
+        self.Q_model_linear.eval()
+        history_size, batch_size = self.vae_model.history_size, 1
+
+        results = {'true_goal': [], 'pred_goal': []}
+
+        # We need to sample expert trajectories to get (s, a) pairs which
+        # are required for goal prediction.
+        for e in range(num_test_samples):
+            batch = expert.sample(batch_size)
+            ep_state, ep_action, ep_c, ep_mask = batch
+            # After below operation ep_state, ep_action will be a tuple of
+            # states, tuple of actions
+            ep_state, ep_action = ep_state[0], ep_action[0]
+            ep_c, ep_mask = ep_c[0], ep_mask[0]
+
+            final_goal, pred_goal = self.predict_goal(ep_state,
+                                                      ep_action,
+                                                      ep_c,
+                                                      ep_mask,
+                                                      self.num_goals)
+            true_goal_numpy = ep_c[0]
+            final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
+
+            results['true_goal'].append(true_goal_numpy)
+            results['pred_goal'].append(final_goal_numpy)
+        return results
 
     # I'm pretty sure this doesn't work.
     def test(self, expert):
@@ -424,10 +493,7 @@ class VAETrain(object):
             #else:
             #    set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) \
             #           - set(obstacles))
-            set_diff = list(set(product(tuple(range(7,13)),
-                                        tuple(range(7,13)))) - set(obstacles))
-
-            start_loc = sample_start(set_diff)
+            start_loc = self.sample_start_location()
             s = State(start_loc, self.obstacles)
             R.reset()
             c = torch.from_numpy(np.array([-1.0,c])).unsqueeze(0).float()
@@ -523,14 +589,14 @@ if __name__ == '__main__':
 
     # Use features
     parser.add_argument('--use_state_features', dest='use_state_features',
-                        action='store_true', 
+                        action='store_true',
                         help='Use features instead of direct (x,y) values in VAE')
     parser.add_argument('--no-use_state_features', dest='use_state_features',
-                        action='store_true', 
+                        action='store_true',
                         help='Do not use features instead of direct (x,y) ' \
                               'values in VAE')
     parser.set_defaults(use_state_features=False)
-    
+
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
