@@ -206,7 +206,12 @@ class VAETrain(object):
             final_goal = Variable(torch.zeros(batch_size, 4))
             pred_goal = []
             for t in range(batch_len):
-                state_tensor = torch.from_numpy(ep_state[t])
+                if args.use_state_features:
+                    state_obj = State(ep_state[t].tolist(), self.obstacles)
+                    state_tensor = torch.from_numpy(
+                            np.array(state_obj.get_features(), dtype=np.float32))
+                else:
+                    state_tensor = torch.from_numpy(ep_state[t])
                 action_tensor = torch.from_numpy(ep_action[t])
                 ht, ct = self.Q_model(
                         Variable(torch.cat((state_tensor, action_tensor), 0)),
@@ -233,7 +238,7 @@ class VAETrain(object):
                 c = np.zeros((1, c.shape[0]), dtype=np.float32)
                 c[:] = ep_c[0]
                 if self.args.use_state_features:
-                    x_feat = x_state_obj.get_features().shape[0]
+                    x_feat = x_state_obj.get_features()
                     x = np.zeros((1, x_feat.shape[0]), dtype=np.float32)
                     x[:] = x_feat
                 else:
@@ -246,7 +251,10 @@ class VAETrain(object):
             if history_size > 1:
                 x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                  dtype=np.float32)
-                x[:, history_size - 1, :] = ep_state[0]
+                if self.args.use_state_features:
+                    x[:, history_size - 1, :] = x_state_obj.get_features()
+                else:
+                    x[:, history_size - 1, :] = ep_state[0]
 
             # Store list of losses to backprop later.
             ep_loss = []
