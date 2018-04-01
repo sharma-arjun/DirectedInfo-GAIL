@@ -93,8 +93,8 @@ class VAETrain(object):
         self.Q_model_linear_softmax = nn.Softmax(dim=1)
         # action_size is 0
         # Hack -- VAE input dim (s + a + latent).
-        self.vae_model = VAE(state_size=state_size+2,
-                             action_size=action_size,
+        self.vae_model = VAE(state_size=state_size,
+                             action_size=action_size+2,
                              latent_size=2,
                              output_size=num_goals,
                              history_size=history_size,
@@ -233,10 +233,18 @@ class VAETrain(object):
                 x = np.zeros((1, x.shape[0]), dtype=np.float32)
                 x[:] = ep_state[0]
 
+
+            # Add history to state
+            if history_size > 1:
+                x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
+                                 dtype=np.float32)
+                x[:, history_size - 1, :] = ep_state[0]
+
             # Store list of losses to backprop later.
             ep_loss = []
             for t in range(batch_len):
-                x_var = Variable(torch.from_numpy(x))
+                pdb.set_trace()
+                x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
                 c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
                                   dim=1)
 
@@ -248,8 +256,8 @@ class VAETrain(object):
 
                 pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
 
-                # TODO: Update x if using history
-                # x[:,:3,:] = x[:,1:,:]
+                if history_size > 1:
+                    x[:,:(history_size-1),:] = x[:,1:,:]
 
                 # Get next state from action
                 for b_id in range(pred_actions_numpy.shape[0]):
@@ -262,11 +270,14 @@ class VAETrain(object):
                     next_state = self.transition_func(state, action, 0)
 
                     # Update x
-                    # x[b_id,3,:] = torch.Tensor(next_state.state)
-                    x[:] = np.array(next_state.coordinates, dtype=np.float32)
+                    if history_size > 1:
+                        x[:, history_size - 1, :] = np.array(
+                                next_state.coordinates, dtype=np.float32)
+                    else:
+                        x[:] = np.array(next_state.coordinates, dtype=np.float32)
 
                 # update c
-                c[:,0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
+                c[:, 0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
 
             # Calculate the total loss.
             total_loss = ep_loss[0]
