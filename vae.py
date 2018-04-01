@@ -149,6 +149,13 @@ class VAETrain(object):
         self.Q_model_linear.train()
         self.vae_model.train()
 
+    def get_state_features(self, state_obj, use_state_features):
+        if use_state_features:
+            feat = np.array(state_obj.get_features(), dtype=np.float32)
+        else:
+            feat = np.array(state_obj.coordinates, dtype=np.float32)
+        return feat
+
     def train(self, expert, num_epochs, batch_size):
         final_train_stats = {
             'train_loss': [],
@@ -169,18 +176,13 @@ class VAETrain(object):
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
-        goal_preds_dict = self.test_goal_prediction(expert,
-                                                    num_test_samples=50)
-
-        self.test_generate_trajectory_variable_length(expert,
-                                                      num_test_samples=10)
+        results = self.test_generate_trajectory_variable_length(
+                expert, num_test_samples=50)
 
         goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
-        for i in range(len(goal_preds_dict['true_goal'])):
-            true_goal_one_hot = goal_preds_dict['true_goal'][i]
-            pred_goal_one_hot = goal_preds_dict['pred_goal'][i]
-            row = np.argmax(true_goal_one_hot)
-            col = np.argmax(pred_goal_one_hot)
+        for i in range(len(results['true_goal'])):
+            row = np.argmax(results['true_goal'][i])
+            col = np.argmax(results['pred_goal'][i])
             goal_pred_conf_arr[row, col] += 1
 
         print("Goal prediction confusion matrix:")
@@ -272,23 +274,16 @@ class VAETrain(object):
 
             c = np.zeros((1, c.shape[0]), dtype=np.float32)
             c[:] = ep_c[0]
-            if self.args.use_state_features:
-                x_feat = x_state_obj.get_features()
-                x = np.zeros((1, x_feat.shape[0]), dtype=np.float32)
-                x[:] = x_feat
-            else:
-                assert len(x.shape) == 1
-                x = np.zeros((1, x.shape[0]), dtype=np.float32)
-                x[:] = ep_state[0]
+            x_feat = self.get_state_features(x_state_obj,
+                                             self.args.use_state_features)
+            x = np.zeros((1, x_feat.shape[0]), dtype=np.float32)
+            x[:] = x_feat
 
             # Add history to state
             if history_size > 1:
                 x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                  dtype=np.float32)
-                if self.args.use_state_features:
-                    x[:, history_size - 1, :] = x_state_obj.get_features()
-                else:
-                    x[:, history_size - 1, :] = ep_state[0]
+                x[:, history_size - 1, :] = x_feat
 
             true_traj, pred_traj = [], []
             curr_state_arr = ep_state[0]
@@ -303,15 +298,16 @@ class VAETrain(object):
                 pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
 
                 # Store the "true" state
-                # true_traj.append((ep_state[t], ep_action[t]))
-                # pred_traj.append((pred_actions_numpy.reshape((-1)))
+                true_traj.append((ep_state[t], ep_action[t]))
+                pred_traj.append((curr_state_arr,
+                                  pred_actions_numpy.reshape((-1))))
 
                 if history_size > 1:
-                    x[:, :(history_size-1), :] = x[:,1:,:]
+                    x[:, :(history_size-1), :] = x[:,1:, :]
 
                 # Get next state from action
                 action = Action(np.argmax(pred_actions_numpy[0, :]))
-                # Get current state
+                # Get current state object
                 state = State(curr_state_arr.tolist(), self.obstacles)
                 # Get next state
                 next_state = self.transition_func(state, action, 0)
@@ -336,8 +332,8 @@ class VAETrain(object):
                 curr_state_arr = np.array(next_state.coordinates,
                                           dtype=np.float32)
 
-            # results['true_traj'].append(true_actions)
-            # results['pred_traj'].append()
+            results['true_traj'].append(true_traj)
+            results['pred_traj'].append(pred_traj)
         return results
 
     def train_variable_length_epoch(self, epoch, expert, batch_size=1):
@@ -388,27 +384,18 @@ class VAETrain(object):
             if len(c.shape) == 1:
                 c = np.zeros((1, c.shape[0]), dtype=np.float32)
                 c[:] = ep_c[0]
-                if self.args.use_state_features:
-                    x_feat = x_state_obj.get_features()
-                    x = np.zeros((1, x_feat.shape[0]), dtype=np.float32)
-                    x[:] = x_feat
-                else:
-                    assert len(x.shape) == 1
-                    x = np.zeros((1, x.shape[0]), dtype=np.float32)
-                    x[:] = ep_state[0]
-
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
+                x = np.reshape(x_feat, (1, -1))
 
             # Add history to state
             if history_size > 1:
                 x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                  dtype=np.float32)
-                if self.args.use_state_features:
-                    x[:, history_size - 1, :] = x_state_obj.get_features()
-                else:
-                    x[:, history_size - 1, :] = ep_state[0]
+                x[:, history_size - 1, :] = x_feat
 
             # Store list of losses to backprop later.
-            ep_loss = []
+            ep_loss, curr_state_arr = [], ep_state[0]
             for t in range(batch_len):
                 x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
                 c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
@@ -425,33 +412,18 @@ class VAETrain(object):
                 if history_size > 1:
                     x[:,:(history_size-1),:] = x[:,1:,:]
 
-                curr_state_arr = ep_state[0]
                 # Get next state from action
-                for b_id in range(pred_actions_numpy.shape[0]):
-                    action = Action(np.argmax(pred_actions_numpy[b_id,:]))
-                    # Get current state
-                    state = State(curr_state_arr.tolist(), self.obstacles)
+                action = Action(np.argmax(pred_actions_numpy[0, :]))
+                # Get current state
+                state = State(curr_state_arr.tolist(), self.obstacles)
+                # Get next state
+                next_state = self.transition_func(state, action, 0)
 
-                    # Get next state
-                    # state = State(x[b_id,3,:].cpu().numpy(), self.obstacles)
-                    next_state = self.transition_func(state, action, 0)
-
-                    # Update x
-                    if self.args.use_state_features:
-                        next_state_features = np.array(
-                                next_state.get_features(), dtype=np.float32)
-                    else:
-                        next_state_features = np.array(next_state.coordinates,
-                                                       dtype=np.float32)
-
-                    if history_size > 1:
-                        x[:, history_size - 1, :] = next_state_features
-                    else:
-                        x[:] = next_state_features
-
-                    # Update current state
-                    curr_state_arr = np.array(next_state.coordinates,
-                                              dtype=np.float32)
+                x[:, history_size-1] = self.get_state_features(
+                        next_state, self.args.use_state_features)
+                # Update current state
+                curr_state_arr = np.array(next_state.coordinates,
+                                          dtype=np.float32)
 
                 # update c
                 c[:, 0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
