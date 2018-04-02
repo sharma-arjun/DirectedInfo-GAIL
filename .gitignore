@@ -48,3 +48,6 @@ Thumbs.db
 *.iml
 *.ipr
 *.swp
+
+# Add ipynb_checkpoints
+plots/.ipynb_checkpoints/

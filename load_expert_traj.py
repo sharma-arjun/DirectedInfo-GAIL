@@ -132,8 +132,8 @@ class ExpertHDF5(Expert):
         h5f = h5py.File(h5_file, 'r')
         memory = []
         for k in sorted(h5f['expert_traj'].keys()):
-            state = np.array(h5f[k]['state'], dtype=np.float32)
-            action = np.array(h5f[k]['action'], dtype=np.float32)
+            state = np.array(h5f['expert_traj'][k]['state'], dtype=np.float32)
+            action = np.array(h5f['expert_traj'][k]['action'], dtype=np.float32)
             # context = h5f[k]['context']
             context = np.zeros(action.shape[0])
             mask = np.ones((action.shape[0]))
