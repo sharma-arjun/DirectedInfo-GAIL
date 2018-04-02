@@ -7,7 +7,7 @@ from torch import nn, optim
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-from load_expert_traj import Expert
+from load_expert_traj import Expert, ExpertHDF5
 from grid_world import State, Action, TransitionFunction
 from grid_world import RewardFunction, RewardFunction_SR2
 from grid_world import create_obstacles, obstacle_movement, sample_start
@@ -113,16 +113,19 @@ class VAETrain(object):
             self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
 
         self.create_environment()
+        self.expert = None
+        self.obstacles, self.set_diff = None, None
 
     def create_environment(self):
-        self.obstacles = create_obstacles(self.width, self.height, 'diverse')
         self.transition_func = TransitionFunction(self.width,
                                                   self.height,
                                                   obstacle_movement)
-        set_diff = list(set(product(tuple(range(7,13)),
-                                    tuple(range(7,13)))) - set(self.obstacles))
-        state = State(sample_start(set_diff), self.obstacles)
 
+    def set_expert(self, expert):
+        assert self.expert is None, "Trying to set non-None expert"
+        self.expert = expert
+        self.obstacles = expert.obstacles
+        self.set_diff = expert.set_diff
 
     def convert_models_to_type(self, dtype):
         self.vae_model = self.vae_model.type(dtype)
@@ -447,12 +450,12 @@ class VAETrain(object):
         return train_stats
 
 
-    def train_batch_epoch(self, epoch, expert, batch_size=10):
+    def train_batch_epoch(self, epoch, batch_size=10):
         self.vae_model.train()
         history_size = model.history_size
         train_loss = 0
         for batch_idx in range(10): # 10 batches per epoch
-            batch = expert.sample(batch_size)
+            batch = self.expert.sample(batch_size)
             print("Batch len: {}".format(len(batch.state[0])))
             print("Batch len: {}".format(len(batch.state[1])))
             x_data = torch.Tensor(np.array(batch.state))
@@ -652,9 +655,10 @@ def main(args):
         dtype=dtype
     )
 
-    expert = Expert(args.expert_path, 2)
+    expert = ExpertHDF5(args.expert_path, 2)
     expert.push()
-    vae_train.train(expert, args.num_epochs, args.batch_size)
+    vae_train.set_expert(expert)
+    vae_train.train(args.num_epochs, args.batch_size)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='VAE Example')

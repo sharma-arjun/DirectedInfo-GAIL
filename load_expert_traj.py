@@ -122,13 +122,16 @@ class ExpertHDF5(Expert):
         self.pointer = 0
         self.list_of_sample_c = []
 
+        self.obstacles = None
+        self.set_diff = None
+
     def push(self):
         h5_file = os.path.join(self.expert_dir, 'expert_traj.h5')
         assert os.path.exists(h5_file), \
                 "hdf5 file does not exist {}".format(h5_file)
         h5f = h5py.File(h5_file, 'r')
         memory = []
-        for k in sorted(h5f.keys()):
+        for k in sorted(h5f['expert_traj'].keys()):
             state = np.array(h5f[k]['state'], dtype=np.float32)
             action = np.array(h5f[k]['action'], dtype=np.float32)
             # context = h5f[k]['context']
@@ -137,6 +140,11 @@ class ExpertHDF5(Expert):
             mask[-1] = 0
             memory.append((state, action, context, mask))
         self.memory = memory
+
+        self.obstacles = np.array(h5f['obstacles'])
+        self.set_diff = np.array(h5f['set_diff'])
+
+        h5f.close()
 
     def sample(self, size=5):
         ind = np.random.randint(self.n, size=size)
