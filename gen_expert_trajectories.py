@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 import h5py
 import pdb
+import pickle
 import random
 import sys
 import os
@@ -17,7 +18,9 @@ def oned_to_onehot(action_delta, n):
 
     return action_onehot
 
-def save_expert_traj_dict_to_txt(traj_data_dict, save_dir):
+def save_expert_traj_dict_to_txt(traj_data_dict, save_dir,
+                                 num_actions, num_goals,
+                                 pickle_data=None):
     for path_key, traj in traj_data_dict.items():
         # File to save trajectory in.
         filename = os.path.join(save_dir, path_key)
@@ -29,14 +32,22 @@ def save_expert_traj_dict_to_txt(traj_data_dict, save_dir):
 
                 # Write action
                 f.write(' '.join([str(e)
-                    for e in oned_to_onehot(traj['action'][i], 8)])+'\n')
+                    for e in oned_to_onehot(traj['action'][i],
+                                            num_actions)])+'\n')
 
                 # Write goal
                 f.write(' '.join([str(g)
-                    for g in oned_to_onehot(traj['goal'][i], 4)])+'\n')
+                    for g in oned_to_onehot(traj['goal'][i], num_goals)])+'\n')
+
         print("Did save results to: {}".format(filename))
 
-def save_expert_traj_dict_to_h5(traj_data_dict, save_dir, 
+    if pickle_data is not None:
+        pickle_filepath = os.path.join(save_dir, 'env_data.pkl')
+        with open(pickle_filepath, 'wb') as pickle_f:
+            pickle.dump(pickle_data, pickle_f, protocol=2)
+        print("Did save pickle data {}".format(pickle_filepath))
+
+def save_expert_traj_dict_to_h5(traj_data_dict, save_dir,
                                 h5_filename='expert_traj.h5'):
     h5_f = h5py.File(os.path.join(save_dir, h5_filename), 'w')
     recursively_save_dict_contents_to_group(h5_f, '/', traj_data_dict)
@@ -56,13 +67,18 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
                                         - set(obstacles))
 
     T = TransitionFunction(grid_width, grid_height, obstacle_movement)
+    expert_data_dict = {}
+    # Number of goals is the same as number of actions
+    num_actions, num_goals = 4, 4
+    env_data_dict = {'num_actions': num_actions, 'num_goals': num_goals}
 
     for i in range(N):
-        filename = os.path.join(path, str(i) + '.txt')
-        f = open(filename, 'w')
+        path_key = str(i)
+        expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+
         for j in range(n):
             if j == 0:
-                action = Action(random.choice(range(0,4)))
+                action = Action(random.choice(range(0, num_actions)))
                 state = State(sample_start(set_diff), obstacles)
             else: # take right turn
                 if action.delta == 0:
@@ -73,19 +89,16 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
                     action = Action(0)
                 elif action.delta == 3:
                     action = Action(1)
+                else:
+                    raise ValueError("Invalid action delta {}".format(
+                        action.delta))
             for k in range(t):
-                # Write state
-                f.write(' '.join([str(e)
-                    for e in state.state]) + '\n')
-                # Write action
-                f.write(' '.join([str(e)
-                    for e in oned_to_onehot(action.delta, 4)]) + '\n')
-                # Write c[t]
-                f.write(' '.join([str(e)
-                    for e in oned_to_onehot(action.delta, 4)]) + '\n')
+                expert_data_dict[path_key]['state'].append(state.state)
+                expert_data_dict[path_key]['action'].append(action.delta)
+                expert_data_dict[path_key]['goal'].append(action.delta)
                 state = T(state, action, j)
 
-        f.close()
+    return env_data_dict, expert_data_dict, obstacles, set_diff
 
 def gen_sq_rec(grid_width, grid_height, path='SR_expert_trajectories'):
     ''' Generates squares if starting in quadrants 1 and 4, and rectangles if
@@ -254,7 +267,7 @@ def gen_sq_rec_2(grid_width, grid_height, path='SR2_expert_trajectories'):
 
 def gen_diverse_trajs(grid_width, grid_height):
     '''Generate diverse trajectories in a 21x21 grid with 4 goals.
-    
+
     Return: Dictionary with keys as text filenames and values as dictionary.
         Each value dictionary contains two keys, 'states' with a list of states
         as value, and 'actions' with list of actions as value.
@@ -272,6 +285,7 @@ def gen_diverse_trajs(grid_width, grid_height):
     set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) \
             - set(obstacles))
     expert_data_dict = {}
+    env_data_dict = {'num_actions': 8, 'num_goals': n_goals}
 
     for n in range(N):
 
@@ -284,7 +298,8 @@ def gen_diverse_trajs(grid_width, grid_height):
 
                 state = start_state
                 path_key = str(n) + '_' + str(g) + '_' + str(1)  + '.txt'
-                expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+                expert_data_dict[path_key] = {
+                        'state': [], 'action': [], 'goal': []}
 
                 delta = 0 if g < 2 else 1
                 action = Action(delta)
@@ -399,7 +414,7 @@ def gen_diverse_trajs(grid_width, grid_height):
 
                 assert(state.coordinates in goals)
 
-    return expert_data_dict
+    return env_data_dict, expert_data_dict, obstacles, set_diff
 
 def main(args):
 
@@ -409,21 +424,35 @@ def main(args):
     expert_data_dict = None
 
     if args.data_type == 'gen_L':
-        gen_L(args.width, args.height, path=args.save_dir)
+        env_data_dict, expert_data_dict, obstacles, set_diff = gen_L(
+                args.width, args.height, path=args.save_dir)
     elif args.data_type == 'gen_square_rect':
         gen_sq_rec(args.width, args.height, path=args.save_dir)
     elif args.data_type == 'gen_square_rect_2':
         gen_sq_rec_2(args.width, args.height, path=args.save_dir)
     elif args.data_type == 'gen_diverse_trajs':
-        expert_data_dict = gen_diverse_trajs(args.width, args.height)
+        env_data_dict, expert_data_dict, obstacles, set_diff = gen_diverse_trajs(
+                args.width, args.height)
     else:
         raise ValueError("Undefined value")
 
+    if args.save_format == 'h5':
+        data_to_save = {
+            'expert_traj': expert_data_dict,
+            'obstacles': obstacles,
+            'set_diff': set_diff,
+            'env_data': env_data_dict,
+        }
+
     if expert_data_dict is not None:
         if args.save_format == 'text':
-            save_expert_traj_dict_to_txt(expert_data_dict, args.save_dir)
+            save_expert_traj_dict_to_txt(expert_data_dict,
+                                         env_data_dict['num_actions'],
+                                         env_data_dict['num_goals'],
+                                         args.save_dir,
+                                         pickle_data=(obstacles, set_diff))
         elif args.save_format == 'h5':
-            save_expert_traj_dict_to_h5(expert_data_dict, args.save_dir)
+            save_expert_traj_dict_to_h5(data_to_save, args.save_dir)
         else:
             raise ValueError("Incorrect save format {}".format(args.save_format))
 
@@ -431,16 +460,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser("Generate expert data")
     parser.add_argument('--data_type', type=str, default='gen_L',
                         choices=['gen_L',
-                                 'gen_square_rect', 
+                                 'gen_square_rect',
                                  'gen_square_rect_2',
                                  'gen_diverse_trajs'],
                         help='Type of data to be generated.')
     parser.add_argument('--save_dir', type=str, required=True,
                         help='Directory to save expert data in.')
     parser.add_argument('--width', type=int, default=11,
-                        help='Gridworld environment width.')   
+                        help='Gridworld environment width.')
     parser.add_argument('--height', type=int, default=11,
-                        help='Gridworld environment height.')   
+                        help='Gridworld environment height.')
     parser.add_argument('--save_format', type=str, default='text',
                         choices=['text', 'h5'],
                         help='Format to save expert data in.')
