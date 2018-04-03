@@ -157,7 +157,7 @@ class ExpertHDF5(Expert):
                 action = action_one_hot
 
             # context = h5f[k]['context']
-            context = np.zeros(action.shape[0])
+            context = np.array(h5f['expert_traj'][k]['goal'], dtype=np.float32)
             mask = np.ones((action.shape[0]))
             mask[-1] = 0
             memory.append(Trajectory(state, action, context, mask))
@@ -168,7 +168,7 @@ class ExpertHDF5(Expert):
         h5f.close()
 
     def sample(self, size=5):
-        ind = np.random.randint(self.n, size=size)
+        ind = np.random.randint(len(self.memory), size=size)
         batch_list = []
         for i in ind:
             batch_list.append(self.memory[i])
@@ -176,7 +176,7 @@ class ExpertHDF5(Expert):
         return Trajectory(*zip(*batch_list))
 
     def sample_as_list(self, size=5):
-        ind = np.random.randint(self.n, size=size)
+        ind = np.random.randint(len(self.memory), size=size)
         batch_list = []
         for i in ind:
             batch_list.append(self.memory[i])
@@ -184,6 +184,6 @@ class ExpertHDF5(Expert):
         return batch_list
 
     def sample_c(self):
-        ind = random.randint(0, self.n-1)
+        ind = random.randint(0, len(self.memory)-1)
         sample_c = [data[i][2] for i in ind]
         return sample_c

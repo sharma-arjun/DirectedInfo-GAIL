@@ -1,6 +1,9 @@
 import numpy as np
 import argparse
+import h5py
+import os
 import pdb
+import pickle
 import torch
 
 from torch import nn, optim
@@ -183,7 +186,7 @@ class VAETrain(object):
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
         results = self.test_generate_trajectory_variable_length(
-                expert, num_test_samples=50)
+                expert, num_test_samples=100)
 
         goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
         for i in range(len(results['true_goal'])):
@@ -194,13 +197,22 @@ class VAETrain(object):
         print("Goal prediction confusion matrix:")
         print(np.array_str(goal_pred_conf_arr, precision=0))
 
+
+        # Save results in pickle file
+        results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
+        with open(results_pkl_path, 'wb') as results_f:
+            pickle.dump(results, results_f)
+            print('Did save results to {}'.format(results_pkl_path))
+
         # Save results in h5 file
+        '''
         save_results_dict = {
             'true_goal': np.array(results['true_goal']),
             'pred_goal': np.array(results['pred_goal']),
             'true_traj': np.array(results['true_traj']),
             'pred_traj': np.array(results['pred_traj']),
         }
+
         save_results_path = os.path.join(self.args.results_dir, 'result.h5')
         save_results_h5 = h5py.File(save_results_path, 'w')
         recursively_save_dict_contents_to_group(save_results_h5,
@@ -209,6 +221,7 @@ class VAETrain(object):
         save_results_h5.flush()
         save_results_h5.close()
         print("Did save test results to {}".format(save_results_path))
+        '''
 
 
     # TODO: Add option to not save gradients for backward pass when not needed
@@ -279,7 +292,8 @@ class VAETrain(object):
                                                       ep_c,
                                                       ep_mask,
                                                       self.num_goals)
-            true_goal_numpy = ep_c[0]
+            true_goal_numpy = np.zeros((self.num_goals))
+            true_goal_numpy[int(ep_c[0])] = 1 
             final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
 
             results['true_goal'].append(true_goal_numpy)
@@ -291,15 +305,11 @@ class VAETrain(object):
             action_var = Variable(torch.from_numpy(np.array(ep_action)))
 
             # Get the initial state
-            x, c = ep_state[0], ep_c[0]
+            c = -1 * np.ones((1, 1), dtype=np.float32)
             x_state_obj = State(ep_state[0].tolist(), self.obstacles)
-
-            c = np.zeros((1, c.shape[0]), dtype=np.float32)
-            c[:] = ep_c[0]
             x_feat = self.get_state_features(x_state_obj,
                                              self.args.use_state_features)
-            x = np.zeros((1, x_feat.shape[0]), dtype=np.float32)
-            x[:] = x_feat
+            x = np.reshape(x_feat, (1, -1))
 
             # Add history to state
             if history_size > 1:
@@ -718,10 +728,17 @@ if __name__ == '__main__':
                         action='store_false',
                         help='Do not use features instead of direct (x,y) ' \
                               'values in VAE')
+
+    # Results dir
+    parser.add_argument('--results_dir', type=str, required=True,
+                        help='Directory to save final results in.')
     parser.set_defaults(use_state_features=False)
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+    if not os.path.exists(args.results_dir):
+        os.makedirs(args.results_dir)
 
     torch.manual_seed(args.seed)
     if args.cuda:
