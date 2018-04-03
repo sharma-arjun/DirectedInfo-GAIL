@@ -31,9 +31,8 @@ from load_expert_traj import Expert
 from gru_discrete_separate import GRU
 from replay_memory import Memory, Memory_Ep
 from running_state import ZFilter
-from utils import clip_grads
+from utils.torch_utils import clip_grads
 
-# from utils import *
 
 #torch.set_default_tensor_type('torch.DoubleTensor')
 dtype = torch.FloatTensor

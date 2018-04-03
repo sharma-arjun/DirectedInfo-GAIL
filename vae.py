@@ -18,6 +18,9 @@ from grid_world import create_obstacles, obstacle_movement, sample_start
 from itertools import product
 from models import Policy, Posterior
 
+from utils.logger import Logger, TensorboardXLogger
+from utils.torch_utils import get_norm_scalar_for_layer
+from utils.torch_utils import get_norm_inf_scalar_for_layer
 
 #-----Environment-----#
 
@@ -73,7 +76,8 @@ class VAE(nn.Module):
         return self.decode(x, c), mu, logvar
 
 class VAETrain(object):
-    def __init__(self, args,
+    def __init__(self, args, 
+                 logger,
                  width=21,
                  height=21,
                  state_size=2,
@@ -83,12 +87,15 @@ class VAETrain(object):
                  use_rnn_goal_predictor=False,
                  dtype=torch.FloatTensor):
         self.args = args
+        self.logger = logger
         self.width, self.height = width, height
         self.state_size = state_size
         self.action_size = action_size
         self.history_size = history_size
         self.num_goals = num_goals
         self.dtype = dtype
+        
+        self.train_step_count = 0
 
         # Create models
         self.Q_model = nn.LSTMCell(self.state_size + action_size, 64)
@@ -100,7 +107,7 @@ class VAETrain(object):
         self.vae_model = VAE(state_size=state_size,
                              action_size=0,
                              latent_size=num_goals+args.vae_context_size,
-                             output_size=num_goals,
+                             output_size=action_size,
                              history_size=history_size,
                              hidden_size=64)
 
@@ -168,22 +175,33 @@ class VAETrain(object):
     def train(self, expert, num_epochs, batch_size):
         final_train_stats = {
             'train_loss': [],
+            'goal_pred_conf_arr': [],
         }
+        self.train_step_count = 0
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
             train_stats = self.train_variable_length_epoch(epoch,
                                                            expert,
                                                            batch_size)
-            #test(epoch)
-            #sample = Variable(torch.randn(64, 20))
-            #if args.cuda:
-            #    sample = sample.cuda()
-            #sample = model.decode(sample).cpu()
-            #save_image(sample.data.view(64, 1, 28, 28),
-            #           'results/sample_' + str(epoch) + '.png')
-
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
+
+            if epoch > 0 and epoch % 1 == 0:
+
+                results = self.test_generate_trajectory_variable_length(
+                        expert, num_test_samples=100)
+
+                goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
+                for i in range(len(results['true_goal'])):
+                    row = np.argmax(results['true_goal'][i])
+                    col = np.argmax(results['pred_goal'][i])
+                    goal_pred_conf_arr[row, col] += 1
+
+                print("Goal prediction confusion matrix:")
+                print(np.array_str(goal_pred_conf_arr, precision=0))
+
+                final_train_stats['goal_pred_conf_arr'].append(
+                        goal_pred_conf_arr)
 
         results = self.test_generate_trajectory_variable_length(
                 expert, num_test_samples=100)
@@ -193,10 +211,13 @@ class VAETrain(object):
             row = np.argmax(results['true_goal'][i])
             col = np.argmax(results['pred_goal'][i])
             goal_pred_conf_arr[row, col] += 1
+        final_train_stats['goal_pred_conf_arr'].append(goal_pred_conf_arr)
 
         print("Goal prediction confusion matrix:")
         print(np.array_str(goal_pred_conf_arr, precision=0))
 
+        # Add train stats to results_dict to save
+        results['train_stats'] = final_train_stats
 
         # Save results in pickle file
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
@@ -235,12 +256,12 @@ class VAETrain(object):
             pred_goal: Goal predicted at every step of the RNN.
         '''
         # Predict goal for the entire episode i.e., forward prop through Q
-        batch_len = len(ep_state)
+        episode_len = len(ep_state)
         ht = Variable(torch.zeros(1, 64))
         ct = Variable(torch.zeros(1, 64))
         final_goal = Variable(torch.zeros(1, num_goals))
         pred_goal = []
-        for t in range(batch_len):
+        for t in range(episode_len):
             if args.use_state_features:
                 state_obj = State(ep_state[t].tolist(), self.obstacles)
                 state_tensor = torch.from_numpy(
@@ -256,7 +277,7 @@ class VAETrain(object):
             pred_goal.append(output)
             final_goal = final_goal + pred_goal[-1]
 
-        # final_goal = final_goal / batch_len
+        # final_goal = final_goal / episode_len
         final_goal = self.Q_model_linear_softmax(final_goal)
 
         return final_goal, pred_goal
@@ -286,7 +307,7 @@ class VAETrain(object):
             ep_state, ep_action = ep_state[0], ep_action[0]
             ep_c, ep_mask = ep_c[0], ep_mask[0]
 
-            batch_len = len(ep_state)
+            episode_len = len(ep_state)
             final_goal, pred_goal = self.predict_goal(ep_state,
                                                       ep_action,
                                                       ep_c,
@@ -321,7 +342,7 @@ class VAETrain(object):
             curr_state_arr = ep_state[0]
 
             # Store list of losses to backprop later.
-            for t in range(batch_len):
+            for t in range(episode_len):
                 x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
                 c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
                                   dim=1)
@@ -381,6 +402,7 @@ class VAETrain(object):
         # multiple times. Will fix it later.
         batch_size = 1
         num_batches = len(expert) // batch_size
+        total_epoch_loss, total_epoch_per_step_loss = 0.0, 0.0
 
         for batch_idx in range(num_batches):
             # Train loss for this batch
@@ -391,7 +413,7 @@ class VAETrain(object):
             self.Q_model_opt.zero_grad()
 
             ep_state, ep_action, ep_c, ep_mask = batch
-            batch_len = len(ep_state[0])
+            episode_len = len(ep_state[0])
 
             # After below operation ep_state, ep_action will be a tuple of
             # states, tuple of actions
@@ -426,7 +448,7 @@ class VAETrain(object):
 
             # Store list of losses to backprop later.
             ep_loss, curr_state_arr = [], ep_state[0]
-            for t in range(batch_len):
+            for t in range(episode_len):
                 x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
                 c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
                                   dim=1)
@@ -464,15 +486,72 @@ class VAETrain(object):
                 total_loss = total_loss + ep_loss[t]
             total_loss.backward()
 
+            # Get the gradients and network weights
+            # TODO: ADd gradients
+            if self.args.log_gradients_tensorboard:
+                vae_model_l2_norm, vae_model_grad_l2_norm = -10000.0, -10000.0
+                for param in self.vae_model.parameters():
+                    vae_model_l2_norm = np.maximum(
+                            vae_model_l2_norm,
+                            get_norm_scalar_for_layer(param, 2)) 
+                    if param.grad is not None:
+                        vae_model_grad_l2_norm = np.maximum(
+                                vae_model_grad_l2_norm,
+                                get_norm_inf_scalar_for_layer(param.grad))
+                self.logger.summary_writer.add_scalar(
+                        'weight/vae_model_l2',
+                         vae_model_l2_norm,
+                         self.train_step_count)
+                self.logger.summary_writer.add_scalar(
+                        'grad/vae_model_l2',
+                         vae_model_grad_l2_norm,
+                         self.train_step_count)
+
+                Q_model_l2_norm, Q_model_l2_grad_norm = -10000.0, -10000.0
+                for param in self.Q_model_linear.parameters():
+                    Q_model_l2_norm = np.maximum(
+                            Q_model_l2_norm,
+                            get_norm_scalar_for_layer(param, 2)) 
+                    if param.grad is not None:
+                        Q_model_l2_grad_norm = np.maximum(
+                                Q_model_l2_grad_norm,
+                                get_norm_inf_scalar_for_layer(param.grad))
+                self.logger.summary_writer.add_scalar(
+                        'weight/Q_model_l2',
+                         Q_model_l2_norm,
+                         self.train_step_count)
+                self.logger.summary_writer.add_scalar(
+                        'grad/Q_model_l2',
+                         Q_model_l2_grad_norm,
+                         self.train_step_count)
+
+
             self.vae_opt.step()
             self.Q_model_opt.step()
 
             # Update stats
+            total_epoch_loss += train_loss
+            total_epoch_per_step_loss += (train_loss / episode_len)
             train_stats['train_loss'].append(train_loss)
+            self.logger.summary_writer.add_scalar('loss/per_sample',
+                                                   train_loss,
+                                                   self.train_step_count)
+
 
             if batch_idx % self.args.log_interval == 0:
-                print('Train Epoch: {} [{}/{}] \tLoss: {:.3f}'.format(
+                print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}'.format(
                     epoch, batch_idx, num_batches, train_loss))
+
+            self.train_step_count += 1
+
+        # Add other data to logger
+        self.logger.summary_writer.add_scalar('loss/per_epoch_all_step',
+                                               total_epoch_loss / num_batches,
+                                               self.train_step_count)
+        self.logger.summary_writer.add_scalar(
+                'loss/per_epoch_per_step',
+                total_epoch_per_step_loss  / num_batches,
+                self.train_step_count)
 
         return train_stats
 
@@ -667,11 +746,18 @@ class VAETrain(object):
 
 
 def main(args):
+
+    # Create Logger
+    if not os.path.exists(os.path.join(args.results_dir, 'log')):
+        os.makedirs(os.path.join(args.results_dir, 'log'))
+    logger = TensorboardXLogger(os.path.join(args.results_dir, 'log'))
+
     dtype = torch.FloatTensor
     if args.cuda:
         dtype = torch.cuda.FloatTensor
     vae_train = VAETrain(
         args,
+        logger,
         width=21,
         height=21,
         state_size=args.vae_state_size,
@@ -728,11 +814,20 @@ if __name__ == '__main__':
                         action='store_false',
                         help='Do not use features instead of direct (x,y) ' \
                               'values in VAE')
+    parser.set_defaults(use_state_features=False)
+
+    # Logging flags
+    parser.add_argument('--log_gradients_tensorboard', 
+                        dest='log_gradients_tensorboard', action='store_true',
+                        help='Log network weights and grads in tensorboard.')
+    parser.add_argument('--no-log_gradients_tensorboard', 
+                        dest='log_gradients_tensorboard', action='store_true',
+                        help='Log network weights and grads in tensorboard.')
+    parser.set_defaults(log_gradients_tensorboard=True)
 
     # Results dir
     parser.add_argument('--results_dir', type=str, required=True,
                         help='Directory to save final results in.')
-    parser.set_defaults(use_state_features=False)
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()

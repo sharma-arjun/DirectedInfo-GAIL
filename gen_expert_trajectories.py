@@ -59,7 +59,7 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
     ''' Generates trajectories of shape L, with right turn '''
     t = 3
     n = 2
-    N = 200
+    num_traj = 50
 
     obstacles = create_obstacles(grid_width, grid_height)
     set_diff = list(set(product(tuple(range(3, grid_width-3)),
@@ -72,31 +72,36 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
     num_actions, num_goals = 4, 4
     env_data_dict = {'num_actions': num_actions, 'num_goals': num_goals}
 
-    for i in range(N):
-        path_key = str(i)
-        expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+    for i in range(num_traj):
+        for action_idx in range(num_actions):
 
-        for j in range(n):
-            if j == 0:
-                action = Action(random.choice(range(0, num_actions)))
-                state = State(sample_start(set_diff), obstacles)
-            else: # take right turn
-                if action.delta == 0:
-                    action = Action(3)
-                elif action.delta == 1:
-                    action = Action(2)
-                elif action.delta == 2:
-                    action = Action(0)
-                elif action.delta == 3:
-                    action = Action(1)
+            path_key = str(i) + '_' + str(action_idx)
+            expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+
+            state = State(sample_start(set_diff), obstacles)
+            for j in range(n):
+                # Set initial direction
+                if j == 0:
+                    action = Action(action_idx)
                 else:
-                    raise ValueError("Invalid action delta {}".format(
-                        action.delta))
-            for k in range(t):
-                expert_data_dict[path_key]['state'].append(state.state)
-                expert_data_dict[path_key]['action'].append(action.delta)
-                expert_data_dict[path_key]['goal'].append(action.delta)
-                state = T(state, action, j)
+                    if action.delta == 0:
+                        action = Action(3)
+                    elif action.delta == 1:
+                        action = Action(2)
+                    elif action.delta == 2:
+                        action = Action(0)
+                    elif action.delta == 3:
+                        action = Action(1)
+                    else:
+                        raise ValueError("Invalid action delta {}".format(
+                            action.delta))
+
+                for k in range(t):
+                    expert_data_dict[path_key]['state'].append(state.state)
+                    expert_data_dict[path_key]['action'].append(action.delta)
+                    expert_data_dict[path_key]['goal'].append(action.delta)
+                    state = T(state, action, j)
+        # print(expert_data_dict[path_key]['goal'])
 
     return env_data_dict, expert_data_dict, obstacles, set_diff
 

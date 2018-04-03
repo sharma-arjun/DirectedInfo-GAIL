@@ -24,8 +24,6 @@ from replay_memory import Memory
 from load_expert_traj import Expert
 from running_state import ZFilter
 
-# from utils import *
-
 torch.set_default_tensor_type('torch.DoubleTensor')
 PI = torch.DoubleTensor([3.1415926])
 

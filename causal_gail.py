@@ -27,9 +27,7 @@ from grid_world import create_obstacles, obstacle_movement, sample_start
 from load_expert_traj import Expert, ExpertHDF5
 from replay_memory import Memory
 from running_state import ZFilter
-from utils import clip_grads
-
-# from utils import *
+from utils.torch_utils import clip_grads
 
 #torch.set_default_tensor_type('torch.DoubleTensor')
 dtype = torch.FloatTensor

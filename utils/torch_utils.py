@@ -60,3 +60,10 @@ def clip_grads(model, clip_val=5.0):
     #average_abs_norm /= count
 
     #return average_abs_norm, max_abs_norm
+
+def get_norm_scalar_for_layer(layer, norm_p):
+    return layer.norm(p=norm_p).cpu().data.numpy()[0]
+
+def get_norm_inf_scalar_for_layer(layer):
+    data = layer.data.cpu().numpy()
+    return np.max(np.abs(data))

@@ -19,7 +19,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.transforms as T
 from torch.autograd import Variable
-#from torch.nn.utils.rnn import pack_padded_sequence
 
 
 from models import Policy, Value
@@ -30,7 +29,7 @@ from load_expert_traj import Expert
 from gru_discrete_separate import GRU
 from replay_memory import Memory, Memory_Ep
 from running_state import ZFilter
-from utils import clip_grads
+from utils.torch_utils import clip_grads
 
 # from utils import *
 
