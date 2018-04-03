@@ -76,7 +76,7 @@ class VAE(nn.Module):
         return self.decode(x, c), mu, logvar
 
 class VAETrain(object):
-    def __init__(self, args, 
+    def __init__(self, args,
                  logger,
                  width=21,
                  height=21,
@@ -94,7 +94,7 @@ class VAETrain(object):
         self.history_size = history_size
         self.num_goals = num_goals
         self.dtype = dtype
-        
+
         self.train_step_count = 0
 
         # Create models
@@ -102,6 +102,7 @@ class VAETrain(object):
         # Output of linear model num_goals = 4
         self.Q_model_linear = nn.Linear(64, num_goals)
         self.Q_model_linear_softmax = nn.Softmax(dim=1)
+
         # action_size is 0
         # Hack -- VAE input dim (s + a + latent).
         self.vae_model = VAE(state_size=state_size,
@@ -157,8 +158,8 @@ class VAETrain(object):
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
         #KLD = 0.5 * torch.sum(mu.pow(2))
 
-        return BCE + KLD
         #return MSE + KLD
+        return BCE + KLD, BCE, KLD
 
     def set_models_to_train(self):
         self.Q_model.train()
@@ -222,7 +223,7 @@ class VAETrain(object):
         # Save results in pickle file
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
         with open(results_pkl_path, 'wb') as results_f:
-            pickle.dump(results, results_f)
+            pickle.dump(results, results_f, protocol=2)
             print('Did save results to {}'.format(results_pkl_path))
 
         # Save results in h5 file
@@ -314,7 +315,7 @@ class VAETrain(object):
                                                       ep_mask,
                                                       self.num_goals)
             true_goal_numpy = np.zeros((self.num_goals))
-            true_goal_numpy[int(ep_c[0])] = 1 
+            true_goal_numpy[int(ep_c[0])] = 1
             final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
 
             results['true_goal'].append(true_goal_numpy)
@@ -401,7 +402,7 @@ class VAETrain(object):
 
         for batch_idx in range(num_batches):
             # Train loss for this batch
-            train_loss = 0.0
+            train_loss, train_BCE_loss, train_KLD_loss = 0.0, 0.0, 0.0
             batch = expert.sample(batch_size)
 
             self.vae_opt.zero_grad()
@@ -449,10 +450,13 @@ class VAETrain(object):
                                   dim=1)
 
                 pred_actions_tensor, mu, logvar = self.vae_model(x_var, c_var)
-                loss = self.loss_function(pred_actions_tensor, action_var[t],
-                                          mu, logvar)
+
+                loss, BCE_loss, KLD_loss = self.loss_function(
+                        pred_actions_tensor, action_var[t], mu, logvar)
                 ep_loss.append(loss)
                 train_loss += loss.data[0]
+                train_BCE_loss += BCE_loss.data[0]
+                train_KLD_loss += KLD_loss.data[0]
 
                 pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
 
@@ -492,7 +496,7 @@ class VAETrain(object):
                 for param in self.vae_model.parameters():
                     vae_model_l2_norm = np.maximum(
                             vae_model_l2_norm,
-                            get_norm_scalar_for_layer(param, 2)) 
+                            get_norm_scalar_for_layer(param, 2))
                     if param.grad is not None:
                         vae_model_grad_l2_norm = np.maximum(
                                 vae_model_grad_l2_norm,
@@ -510,7 +514,7 @@ class VAETrain(object):
                 for param in self.Q_model_linear.parameters():
                     Q_model_l2_norm = np.maximum(
                             Q_model_l2_norm,
-                            get_norm_scalar_for_layer(param, 2)) 
+                            get_norm_scalar_for_layer(param, 2))
                     if param.grad is not None:
                         Q_model_l2_grad_norm = np.maximum(
                                 Q_model_l2_grad_norm,
@@ -528,6 +532,8 @@ class VAETrain(object):
             self.vae_opt.step()
             self.Q_model_opt.step()
 
+            # pdb.set_trace()
+
             # Update stats
             total_epoch_loss += train_loss
             total_epoch_per_step_loss += (train_loss / episode_len)
@@ -535,11 +541,19 @@ class VAETrain(object):
             self.logger.summary_writer.add_scalar('loss/per_sample',
                                                    train_loss,
                                                    self.train_step_count)
+            self.logger.summary_writer.add_scalar('loss/BCE_per_sample',
+                                                   train_BCE_loss,
+                                                   self.train_step_count)
+            self.logger.summary_writer.add_scalar('loss/KLD_per_sample',
+                                                   train_KLD_loss,
+                                                   self.train_step_count)
 
 
             if batch_idx % self.args.log_interval == 0:
-                print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}'.format(
-                    epoch, batch_idx, num_batches, train_loss))
+                print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
+                        'BCE Loss: {:.2f},    KLD: {:.2f}'.format(
+                    epoch, batch_idx, num_batches, train_loss,
+                    train_BCE_loss, train_KLD_loss))
 
             self.train_step_count += 1
 
@@ -602,7 +616,8 @@ class VAETrain(object):
 
 
                 recon_batch, mu, logvar = self.vae_model(input_x, c_t0)
-                loss = self.loss_function(recon_batch, a[:,t,:], mu, logvar)
+                loss, BCE_loss, KLD_loss = self.loss_function(
+                        recon_batch, a[:,t,:], mu, logvar)
                 loss.backward()
                 train_loss += loss.data[0]
 
@@ -782,8 +797,13 @@ if __name__ == '__main__':
                         help='input batch size for training (default: 128)')
     parser.add_argument('--num-epochs', type=int, default=10, metavar='N',
                         help='number of epochs to train (default: 10)')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
+    # Run on GPU
+    parser.add_argument('--cuda', dest='cuda', action='store_true',
                         help='enables CUDA training')
+    parser.add_argument('--no-cuda', dest='cuda', action='store_false',
+                        help='Disable CUDA training')
+    parser.set_defaults(cuda=False)
+
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
@@ -816,10 +836,10 @@ if __name__ == '__main__':
     parser.set_defaults(use_state_features=False)
 
     # Logging flags
-    parser.add_argument('--log_gradients_tensorboard', 
+    parser.add_argument('--log_gradients_tensorboard',
                         dest='log_gradients_tensorboard', action='store_true',
                         help='Log network weights and grads in tensorboard.')
-    parser.add_argument('--no-log_gradients_tensorboard', 
+    parser.add_argument('--no-log_gradients_tensorboard',
                         dest='log_gradients_tensorboard', action='store_true',
                         help='Log network weights and grads in tensorboard.')
     parser.set_defaults(log_gradients_tensorboard=True)
@@ -829,7 +849,8 @@ if __name__ == '__main__':
                         help='Directory to save final results in.')
 
     args = parser.parse_args()
-    args.cuda = not args.no_cuda and torch.cuda.is_available()
+    if args.cuda and not torch.cuda.is_available():
+        args.cuda = False
 
     if not os.path.exists(args.results_dir):
         os.makedirs(args.results_dir)
