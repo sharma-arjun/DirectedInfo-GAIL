@@ -366,13 +366,8 @@ class VAETrain(object):
                 next_state = self.transition_func(state, action, 0)
 
                 # Update x
-                if self.args.use_state_features:
-                    next_state_features = np.array(
-                            next_state.get_features(), dtype=np.float32)
-                else:
-                    next_state_features = np.array(next_state.coordinates,
-                                                   dtype=np.float32)
-
+                next_state_features = self.get_state_features(
+                        next_state, self.args.use_state_features)
                 if history_size > 1:
                     x[:, history_size - 1, :] = next_state_features
                 else:
@@ -471,8 +466,12 @@ class VAETrain(object):
                 # Get next state
                 next_state = self.transition_func(state, action, 0)
 
-                x[:, history_size-1] = self.get_state_features(
-                        next_state, self.args.use_state_features)
+                if history_size > 1:
+                    x[:, history_size-1] = self.get_state_features(
+                            next_state, self.args.use_state_features)
+                else:
+                    x[:] = self.get_state_features(next_state,
+                                                   self.args.use_state_features)
                 # Update current state
                 curr_state_arr = np.array(next_state.coordinates,
                                           dtype=np.float32)
