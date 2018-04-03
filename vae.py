@@ -8,6 +8,7 @@ from torch.autograd import Variable
 from torch.nn import functional as F
 
 from load_expert_traj import Expert, ExpertHDF5
+from load_expert_traj import recursively_save_dict_contents_to_group
 from grid_world import State, Action, TransitionFunction
 from grid_world import RewardFunction, RewardFunction_SR2
 from grid_world import create_obstacles, obstacle_movement, sample_start
@@ -94,8 +95,8 @@ class VAETrain(object):
         # action_size is 0
         # Hack -- VAE input dim (s + a + latent).
         self.vae_model = VAE(state_size=state_size,
-                             action_size=action_size+2,
-                             latent_size=2,
+                             action_size=0,
+                             latent_size=num_goals+args.vae_context_size,
                              output_size=num_goals,
                              history_size=history_size,
                              hidden_size=64)
@@ -124,7 +125,9 @@ class VAETrain(object):
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
         self.expert = expert
+        assert expert.obstacles is not None, "Obstacles cannot be None"
         self.obstacles = expert.obstacles
+        assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
         self.set_diff = expert.set_diff
 
     def convert_models_to_type(self, dtype):
@@ -190,6 +193,22 @@ class VAETrain(object):
 
         print("Goal prediction confusion matrix:")
         print(np.array_str(goal_pred_conf_arr, precision=0))
+
+        # Save results in h5 file
+        save_results_dict = {
+            'true_goal': np.array(results['true_goal']),
+            'pred_goal': np.array(results['pred_goal']),
+            'true_traj': np.array(results['true_traj']),
+            'pred_traj': np.array(results['pred_traj']),
+        }
+        save_results_path = os.path.join(self.args.results_dir, 'result.h5')
+        save_results_h5 = h5py.File(save_results_path, 'w')
+        recursively_save_dict_contents_to_group(save_results_h5,
+                                                '/',
+                                                save_results_dict)
+        save_results_h5.flush()
+        save_results_h5.close()
+        print("Did save test results to {}".format(save_results_path))
 
 
     # TODO: Add option to not save gradients for backward pass when not needed
@@ -335,8 +354,8 @@ class VAETrain(object):
                 curr_state_arr = np.array(next_state.coordinates,
                                           dtype=np.float32)
 
-            results['true_traj'].append(true_traj)
-            results['pred_traj'].append(pred_traj)
+            results['true_traj'].append(np.array(true_traj))
+            results['pred_traj'].append(np.array(pred_traj))
         return results
 
     def train_variable_length_epoch(self, epoch, expert, batch_size=1):
@@ -363,17 +382,19 @@ class VAETrain(object):
 
             ep_state, ep_action, ep_c, ep_mask = batch
             batch_len = len(ep_state[0])
+
             # After below operation ep_state, ep_action will be a tuple of
             # states, tuple of actions
-            ep_state, ep_action = ep_state[0], ep_action[0]
-            ep_c, ep_mask = ep_c[0], ep_mask[0]
+            ep_state = (ep_state[0])
+            ep_action = (ep_action[0])
+            ep_c = (ep_c[0])[np.newaxis, :]
+            ep_mask = (ep_mask[0])[np.newaxis, :]
 
             final_goal, pred_goal = self.predict_goal(ep_state,
                                                       ep_action,
                                                       ep_c,
                                                       ep_mask,
                                                       self.num_goals)
-
             # Predict actions i.e. forward prop through q (posterior) and
             # policy network.
 
@@ -381,15 +402,11 @@ class VAETrain(object):
             action_var = Variable(torch.from_numpy(np.array(ep_action)))
 
             # Get the initial state
-            x, c = ep_state[0], ep_c[0]
+            c = -1 * np.ones((1, 1), dtype=np.float32)
             x_state_obj = State(ep_state[0].tolist(), self.obstacles)
-
-            if len(c.shape) == 1:
-                c = np.zeros((1, c.shape[0]), dtype=np.float32)
-                c[:] = ep_c[0]
-                x_feat = self.get_state_features(x_state_obj,
-                                                 self.args.use_state_features)
-                x = np.reshape(x_feat, (1, -1))
+            x_feat = self.get_state_features(x_state_obj,
+                                             self.args.use_state_features)
+            x = np.reshape(x_feat, (1, -1))
 
             # Add history to state
             if history_size > 1:
@@ -656,9 +673,13 @@ def main(args):
     )
 
     expert = ExpertHDF5(args.expert_path, 2)
-    expert.push()
+    expert.push(only_coordinates_in_state=True, one_hot_action=True)
     vae_train.set_expert(expert)
-    vae_train.train(args.num_epochs, args.batch_size)
+
+    # expert = Expert(args.expert_path, 2)
+    # expert.push()
+
+    vae_train.train(expert, args.num_epochs, args.batch_size)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='VAE Example')
@@ -685,14 +706,16 @@ if __name__ == '__main__':
     parser.add_argument('--vae_action_size', type=int, default=4,
                         help='Action size for VAE.')
     parser.add_argument('--vae_history_size', type=int, default=1,
-                         help='State history size to use in VAE.')
+                        help='State history size to use in VAE.')
+    parser.add_argument('--vae_context_size', type=int, default=1,
+                        help='Context size for VAE.')
 
     # Use features
     parser.add_argument('--use_state_features', dest='use_state_features',
                         action='store_true',
                         help='Use features instead of direct (x,y) values in VAE')
     parser.add_argument('--no-use_state_features', dest='use_state_features',
-                        action='store_true',
+                        action='store_false',
                         help='Do not use features instead of direct (x,y) ' \
                               'values in VAE')
     parser.set_defaults(use_state_features=False)
