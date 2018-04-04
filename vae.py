@@ -687,10 +687,10 @@ class VAETrain(object):
         return results
 
     def test_models(self, expert, results_pkl_path=None,
-                    other_results_dict=None):
+                    other_results_dict=None, num_test_samples=100):
         '''Test models by generating expert trajectories.'''
         results = self.test_generate_trajectory_variable_length(
-                expert, num_test_samples=100)
+                expert, num_test_samples=num_test_samples)
 
         goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
         for i in range(len(results['true_goal'])):
@@ -828,7 +828,8 @@ def main(args):
                 'results_' + os.path.basename(args.checkpoint_path))
         # Replace pth file extension with pkl
         results_pkl_path = results_pkl_path[:-4] + '.pkl'
-        vae_train.test_models(expert, results_pkl_path=results_pkl_path)
+        vae_train.test_models(expert, results_pkl_path=results_pkl_path,
+                              num_test_samples=10)
     else:
         vae_train.train(expert, args.num_epochs, args.batch_size)
 
