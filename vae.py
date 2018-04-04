@@ -128,6 +128,14 @@ class VAETrain(object):
         self.expert = None
         self.obstacles, self.set_diff = None, None
 
+    def model_checkpoint_dir(self):
+        '''Return the directory to save models in.'''
+        return os.path.join(self.args.results_dir, 'checkpoint')
+
+    def model_checkpoint_filename(self, epoch):
+        return os.path.join(self.model_checkpoint_dir(),
+                            'cp_{}.pth'.format(epoch))
+
     def create_environment(self):
         self.transition_func = TransitionFunction(self.width,
                                                   self.height,
@@ -181,6 +189,11 @@ class VAETrain(object):
         self.train_step_count = 0
         # Convert models to right type.
         self.convert_models_to_type(self.dtype)
+
+        # Create the checkpoint directory.
+        if not os.path.exists(self.model_checkpoint_dir):
+            os.makedirs(self.model_checkpoint_dir)
+
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
             train_stats = self.train_variable_length_epoch(epoch,
@@ -189,7 +202,7 @@ class VAETrain(object):
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
-            if epoch > 0 and epoch % 1 == 0:
+            if epoch % 1 == 0:
 
                 results = self.test_generate_trajectory_variable_length(
                         expert, num_test_samples=100)
@@ -205,6 +218,25 @@ class VAETrain(object):
 
                 final_train_stats['goal_pred_conf_arr'].append(
                         goal_pred_conf_arr)
+
+            if epoch % self.args.checkpoint_every_epoch == 0:
+                if self.dtype != torch.FloatTensor:
+                    self.convert_models_to_type(torch.FloatTensor)
+
+                 # Loading opt in mac leads to CUDA error?
+                model_data = {
+                    'vae_model': self.vae_model,
+                    'Q_model': self.Q_model,
+                    'Q_model_linear': self.Q_model_linear,
+                    # 'actor_opt': self.agent.actor_opt,
+                    # 'critic_opt': self.agent.critic_opt,
+                }
+
+                torch.save(model_data, self.model_checkpoint_filename(epoch))
+                print("Did save checkpoint file: {}".format(checkpoint_file))
+
+                if self.dtype != torch.FloatTensor:
+                    self.convert_models_to_type(self.dtype)
 
         results = self.test_generate_trajectory_variable_length(
                 expert, num_test_samples=100)
@@ -812,6 +844,9 @@ if __name__ == '__main__':
                         help='input batch size for training (default: 128)')
     parser.add_argument('--num-epochs', type=int, default=10, metavar='N',
                         help='number of epochs to train (default: 10)')
+
+    parser.add_argument('--checkpoint_every_epoch', type=int, default=10,
+                        help='Save models after ever N epochs.')
     # Run on GPU
     parser.add_argument('--cuda', dest='cuda', action='store_true',
                         help='enables CUDA training')
