@@ -697,7 +697,7 @@ class VAETrain(object):
             row = np.argmax(results['true_goal'][i])
             col = np.argmax(results['pred_goal'][i])
             goal_pred_conf_arr[row, col] += 1
-        final_train_stats['goal_pred_conf_arr'].append(goal_pred_conf_arr)
+        results['goal_pred_conf_arr'] = goal_pred_conf_arr
 
         print("Goal prediction confusion matrix:")
         print(np.array_str(goal_pred_conf_arr, precision=0))
