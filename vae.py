@@ -174,6 +174,13 @@ class VAETrain(object):
         self.Q_model_linear.train()
         self.vae_model.train()
 
+    def load_checkpoint(self, checkpoint_path):
+        '''Load models from checkpoint.'''
+        checkpoint_models = torch.load(checkpoint_path)
+        self.vae_model = checkpoint_models['vae_model']
+        self.Q_model = checkpoint_models['Q_model']
+        self.Q_model_linear = checkpoint_models['Q_model_linear']
+
     def get_state_features(self, state_obj, use_state_features):
         if use_state_features:
             feat = np.array(state_obj.get_features(), dtype=np.float32)
@@ -191,8 +198,8 @@ class VAETrain(object):
         self.convert_models_to_type(self.dtype)
 
         # Create the checkpoint directory.
-        if not os.path.exists(self.model_checkpoint_dir):
-            os.makedirs(self.model_checkpoint_dir)
+        if not os.path.exists(self.model_checkpoint_dir()):
+            os.makedirs(self.model_checkpoint_dir())
 
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
@@ -203,21 +210,9 @@ class VAETrain(object):
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
             if epoch % 1 == 0:
-
-                results = self.test_generate_trajectory_variable_length(
-                        expert, num_test_samples=100)
-
-                goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
-                for i in range(len(results['true_goal'])):
-                    row = np.argmax(results['true_goal'][i])
-                    col = np.argmax(results['pred_goal'][i])
-                    goal_pred_conf_arr[row, col] += 1
-
-                print("Goal prediction confusion matrix:")
-                print(np.array_str(goal_pred_conf_arr, precision=0))
-
-                final_train_stats['goal_pred_conf_arr'].append(
-                        goal_pred_conf_arr)
+                results_pkl_path = os.path.join(self.args.results_dir,
+                                                'results.pkl')
+                self.test_models(expert, results_pkl_path=None)
 
             if epoch % self.args.checkpoint_every_epoch == 0:
                 if self.dtype != torch.FloatTensor:
@@ -228,56 +223,18 @@ class VAETrain(object):
                     'vae_model': self.vae_model,
                     'Q_model': self.Q_model,
                     'Q_model_linear': self.Q_model_linear,
-                    # 'actor_opt': self.agent.actor_opt,
-                    # 'critic_opt': self.agent.critic_opt,
                 }
 
                 torch.save(model_data, self.model_checkpoint_filename(epoch))
-                print("Did save checkpoint file: {}".format(checkpoint_file))
+                print("Did save checkpoint file: {}".format(
+                    self.model_checkpoint_filename(epoch)))
 
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(self.dtype)
-
-        results = self.test_generate_trajectory_variable_length(
-                expert, num_test_samples=100)
-
-        goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
-        for i in range(len(results['true_goal'])):
-            row = np.argmax(results['true_goal'][i])
-            col = np.argmax(results['pred_goal'][i])
-            goal_pred_conf_arr[row, col] += 1
-        final_train_stats['goal_pred_conf_arr'].append(goal_pred_conf_arr)
-
-        print("Goal prediction confusion matrix:")
-        print(np.array_str(goal_pred_conf_arr, precision=0))
-
-        # Add train stats to results_dict to save
-        results['train_stats'] = final_train_stats
-
-        # Save results in pickle file
+        
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
-        with open(results_pkl_path, 'wb') as results_f:
-            pickle.dump(results, results_f, protocol=2)
-            print('Did save results to {}'.format(results_pkl_path))
-
-        # Save results in h5 file
-        '''
-        save_results_dict = {
-            'true_goal': np.array(results['true_goal']),
-            'pred_goal': np.array(results['pred_goal']),
-            'true_traj': np.array(results['true_traj']),
-            'pred_traj': np.array(results['pred_traj']),
-        }
-
-        save_results_path = os.path.join(self.args.results_dir, 'result.h5')
-        save_results_h5 = h5py.File(save_results_path, 'w')
-        recursively_save_dict_contents_to_group(save_results_h5,
-                                                '/',
-                                                save_results_dict)
-        save_results_h5.flush()
-        save_results_h5.close()
-        print("Did save test results to {}".format(save_results_path))
-        '''
+        self.test_models(expert, results_pkl_path=results_pkl_path,
+                         other_results_dict={'train_stats': final_train_stats})
 
 
     # TODO: Add option to not save gradients for backward pass when not needed
@@ -729,6 +686,33 @@ class VAETrain(object):
             results['pred_goal'].append(final_goal_numpy)
         return results
 
+    def test_models(self, expert, results_pkl_path=None,
+                    other_results_dict=None):
+        '''Test models by generating expert trajectories.'''
+        results = self.test_generate_trajectory_variable_length(
+                expert, num_test_samples=100)
+
+        goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
+        for i in range(len(results['true_goal'])):
+            row = np.argmax(results['true_goal'][i])
+            col = np.argmax(results['pred_goal'][i])
+            goal_pred_conf_arr[row, col] += 1
+        final_train_stats['goal_pred_conf_arr'].append(goal_pred_conf_arr)
+
+        print("Goal prediction confusion matrix:")
+        print(np.array_str(goal_pred_conf_arr, precision=0))
+
+        if other_results_dict is not None:
+            # Copy other results dict into the main results
+            for k, v in other_results_dict.items():
+                results[k] = v
+
+        # Save results in pickle file
+        if results_pkl_path is not None:
+            with open(results_pkl_path, 'wb') as results_f:
+                pickle.dump(results, results_f, protocol=2)
+                print('Did save results to {}'.format(results_pkl_path))
+
     # I'm pretty sure this doesn't work.
     def test(self, expert):
         self.vae_model.eval()
@@ -836,7 +820,17 @@ def main(args):
     # expert = Expert(args.expert_path, 2)
     # expert.push()
 
-    vae_train.train(expert, args.num_epochs, args.batch_size)
+    if len(args.checkpoint_path) > 0:
+        vae_train.load_checkpoint(args.checkpoint_path)
+        print("Did load models at: {}".format(args.checkpoint_path))
+        results_pkl_path = os.path.join(
+                args.results_dir,
+                'results_' + os.path.basename(args.checkpoint_path))
+        # Replace pth file extension with pkl
+        results_pkl_path = results_pkl_path[:-4] + '.pkl'
+        vae_train.test_models(expert, results_pkl_path=results_pkl_path)
+    else:
+        vae_train.train(expert, args.num_epochs, args.batch_size)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='VAE Example')
@@ -897,6 +891,8 @@ if __name__ == '__main__':
     # Results dir
     parser.add_argument('--results_dir', type=str, required=True,
                         help='Directory to save final results in.')
+    parser.add_argument('--checkpoint_path', type=str, default='',
+                        help='Checkpoint path to load pre-trained models.')
 
     args = parser.parse_args()
     if args.cuda and not torch.cuda.is_available():
