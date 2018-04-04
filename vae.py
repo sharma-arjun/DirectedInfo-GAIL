@@ -99,6 +99,8 @@ class VAETrain(object):
 
         # Create models
         self.Q_model = nn.LSTMCell(self.state_size + action_size, 64)
+        self.Q_2_model = nn.LSTMCell(64, 64)
+
         # Output of linear model num_goals = 4
         self.Q_model_linear = nn.Linear(64, num_goals)
         self.Q_model_linear_softmax = nn.Softmax(dim=1)
@@ -118,7 +120,8 @@ class VAETrain(object):
             self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
             self.Q_model_opt = optim.Adam([
                     {'params': self.Q_model.parameters()},
-                    {'params': self.Q_model_linear.parameters()},
+                    {'params': self.Q_2_model.parameters()},
+                    # {'params': self.Q_model_linear.parameters()},
                 ],
                 lr=1e-3)
         else:
@@ -152,6 +155,7 @@ class VAETrain(object):
     def convert_models_to_type(self, dtype):
         self.vae_model = self.vae_model.type(dtype)
         self.Q_model = self.Q_model.type(dtype)
+        self.Q_2_model = self.Q_2_model.type(dtype)
         self.Q_model_linear = self.Q_model_linear.type(dtype)
 
     # Reconstruction + KL divergence losses summed over all elements and batch
@@ -171,6 +175,7 @@ class VAETrain(object):
 
     def set_models_to_train(self):
         self.Q_model.train()
+        self.Q_2_model.train()
         self.Q_model_linear.train()
         self.vae_model.train()
 
@@ -179,6 +184,8 @@ class VAETrain(object):
         checkpoint_models = torch.load(checkpoint_path)
         self.vae_model = checkpoint_models['vae_model']
         self.Q_model = checkpoint_models['Q_model']
+        if checkpoint_models.get('Q_2_model') is not None:
+            self.Q_2_model = checkpoint_models['Q_2_model']
         self.Q_model_linear = checkpoint_models['Q_model_linear']
 
     def get_state_features(self, state_obj, use_state_features):
@@ -222,6 +229,7 @@ class VAETrain(object):
                 model_data = {
                     'vae_model': self.vae_model,
                     'Q_model': self.Q_model,
+                    'Q_2_model': self.Q_2_model,
                     'Q_model_linear': self.Q_model_linear,
                 }
 
@@ -251,6 +259,8 @@ class VAETrain(object):
         episode_len = len(ep_state)
         ht = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
         ct = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
+        ht_2 = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
+        ct_2 = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
         final_goal = Variable(torch.zeros(1, num_goals).type(self.dtype))
         pred_goal = []
         for t in range(episode_len):
@@ -264,6 +274,7 @@ class VAETrain(object):
             inp_tensor = torch.cat((state_tensor, action_tensor), 0).unsqueeze(0)
 
             ht, ct = self.Q_model(Variable(inp_tensor), (ht, ct))
+            ht_2, ct_2 = self.Q_2_model(ht, (ht_2, ct_2))
 
             output = self.Q_model_linear(ht)
             final_goal = final_goal + output
