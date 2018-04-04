@@ -179,6 +179,8 @@ class VAETrain(object):
             'goal_pred_conf_arr': [],
         }
         self.train_step_count = 0
+        # Convert models to right type.
+        self.convert_models_to_type(self.dtype)
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
             train_stats = self.train_variable_length_epoch(epoch,
@@ -258,25 +260,27 @@ class VAETrain(object):
         '''
         # Predict goal for the entire episode i.e., forward prop through Q
         episode_len = len(ep_state)
-        ht = Variable(torch.zeros(1, 64))
-        ct = Variable(torch.zeros(1, 64))
-        final_goal = Variable(torch.zeros(1, num_goals))
+        ht = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
+        ct = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
+        final_goal = Variable(torch.zeros(1, num_goals).type(self.dtype))
         pred_goal = []
         for t in range(episode_len):
-            if args.use_state_features:
-                state_obj = State(ep_state[t].tolist(), self.obstacles)
-                state_tensor = torch.from_numpy(
-                        np.array(state_obj.get_features(), dtype=np.float32))
-            else:
-                state_tensor = torch.from_numpy(ep_state[t])
-            action_tensor = torch.from_numpy(ep_action[t])
-            ht, ct = self.Q_model(
-                    Variable(torch.cat((state_tensor, action_tensor), 0)),
-                    (ht, ct))
+            state_obj = State(ep_state[t].tolist(), self.obstacles)
+            state_tensor = torch.from_numpy(self.get_state_features(
+                state_obj, self.args.use_state_features)).type(self.dtype)
+            action_tensor = torch.from_numpy(ep_action[t]).type(self.dtype)
+
+            # NOTE: Input to LSTM cell needs to be of shape (N, F) where N can
+            # be 1.
+            inp_tensor = torch.cat((state_tensor, action_tensor), 0).unsqueeze(0)
+
+            ht, ct = self.Q_model(Variable(inp_tensor), (ht, ct))
+
             output = self.Q_model_linear(ht)
+            final_goal = final_goal + output
+
             # pred_goal.append(Q_model_linear_softmax(output))
             pred_goal.append(output)
-            final_goal = final_goal + pred_goal[-1]
 
         # final_goal = final_goal / episode_len
         final_goal = self.Q_model_linear_softmax(final_goal)
@@ -324,7 +328,8 @@ class VAETrain(object):
             # Generate trajectories using VAE.
 
             # ep_action is tuple of arrays
-            action_var = Variable(torch.from_numpy(np.array(ep_action)))
+            action_var = Variable(
+                    torch.from_numpy(np.array(ep_action)).type(self.dtype))
 
             # Get the initial state
             c = -1 * np.ones((1, 1), dtype=np.float32)
@@ -344,9 +349,11 @@ class VAETrain(object):
 
             # Store list of losses to backprop later.
             for t in range(episode_len):
-                x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
-                c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
-                                  dim=1)
+                x_var = Variable(torch.from_numpy(
+                    x.reshape((1, -1))).type(self.dtype))
+                c_var = torch.cat([
+                    final_goal,
+                    Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
                 pred_actions_tensor, mu, logvar = self.vae_model(x_var, c_var)
                 pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
@@ -427,7 +434,8 @@ class VAETrain(object):
             # policy network.
 
             # ep_action is tuple of arrays
-            action_var = Variable(torch.from_numpy(np.array(ep_action)))
+            action_var = Variable(
+                    torch.from_numpy(np.array(ep_action)).type(self.dtype))
 
             # Get the initial state
             c = -1 * np.ones((1, 1), dtype=np.float32)
@@ -445,14 +453,21 @@ class VAETrain(object):
             # Store list of losses to backprop later.
             ep_loss, curr_state_arr = [], ep_state[0]
             for t in range(episode_len):
-                x_var = Variable(torch.from_numpy(x.reshape((1, -1))))
-                c_var = torch.cat([final_goal, Variable(torch.from_numpy(c))],
-                                  dim=1)
+                x_var = Variable(torch.from_numpy(
+                    x.reshape((1, -1))).type(self.dtype))
+                c_var = torch.cat(
+                        [final_goal,
+                         Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
                 pred_actions_tensor, mu, logvar = self.vae_model(x_var, c_var)
 
+                expert_action_var = action_var[t].clone().unsqueeze(0)
+
                 loss, BCE_loss, KLD_loss = self.loss_function(
-                        pred_actions_tensor, action_var[t], mu, logvar)
+                        pred_actions_tensor,
+                        expert_action_var,
+                        mu,
+                        logvar)
                 ep_loss.append(loss)
                 train_loss += loss.data[0]
                 train_BCE_loss += BCE_loss.data[0]
