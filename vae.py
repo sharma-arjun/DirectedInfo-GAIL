@@ -121,7 +121,7 @@ class VAETrain(object):
             self.Q_model_opt = optim.Adam([
                     {'params': self.Q_model.parameters()},
                     {'params': self.Q_2_model.parameters()},
-                    # {'params': self.Q_model_linear.parameters()},
+                    {'params': self.Q_model_linear.parameters()},
                 ],
                 lr=1e-3)
         else:
@@ -207,6 +207,10 @@ class VAETrain(object):
         # Create the checkpoint directory.
         if not os.path.exists(self.model_checkpoint_dir()):
             os.makedirs(self.model_checkpoint_dir())
+        # Save runtime arguments to pickle file
+        args_pkl_filepath = os.path.join(self.args.results_dir, 'args.pkl')
+        with open(args_pkl_filepath, 'wb') as args_pkl_f:
+            pickle.dump(self.args, args_pkl_f, protocol=2)
 
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
@@ -239,7 +243,7 @@ class VAETrain(object):
 
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(self.dtype)
-        
+
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
         self.test_models(expert, results_pkl_path=results_pkl_path,
                          other_results_dict={'train_stats': final_train_stats})
@@ -274,16 +278,22 @@ class VAETrain(object):
             inp_tensor = torch.cat((state_tensor, action_tensor), 0).unsqueeze(0)
 
             ht, ct = self.Q_model(Variable(inp_tensor), (ht, ct))
-            ht_2, ct_2 = self.Q_2_model(ht, (ht_2, ct_2))
+            if self.args.stacked_lstm == 1:
+                ht_2, ct_2 = self.Q_2_model(ht, (ht_2, ct_2))
+                # output = self.Q_model_linear(ht_2)
+                output = ht_2
+            else:
+                # output = self.Q_model_linear(ht)
+                output = ht
 
-            output = self.Q_model_linear(ht)
-            final_goal = final_goal + output
+            # final_goal = final_goal + output
+            final_goal = output
 
             # pred_goal.append(Q_model_linear_softmax(output))
             pred_goal.append(output)
 
         # final_goal = final_goal / episode_len
-        final_goal = self.Q_model_linear_softmax(final_goal)
+        final_goal = self.Q_model_linear_softmax(self.Q_model_linear(final_goal))
 
         return final_goal, pred_goal
 
@@ -318,6 +328,7 @@ class VAETrain(object):
                                                       ep_c,
                                                       ep_mask,
                                                       self.num_goals)
+
             true_goal_numpy = np.zeros((self.num_goals))
             true_goal_numpy[int(ep_c[0])] = 1
             final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
@@ -430,6 +441,7 @@ class VAETrain(object):
                                                       ep_c,
                                                       ep_mask,
                                                       self.num_goals)
+
             # Predict actions i.e. forward prop through q (posterior) and
             # policy network.
 
@@ -903,8 +915,13 @@ if __name__ == '__main__':
     # Results dir
     parser.add_argument('--results_dir', type=str, required=True,
                         help='Directory to save final results in.')
+    # Checkpoint directory to load pre-trained models.
     parser.add_argument('--checkpoint_path', type=str, default='',
                         help='Checkpoint path to load pre-trained models.')
+
+    # Model arguments
+    parser.add_argument('--stacked_lstm', type=int, choices=[0, 1], default=1,
+                        help='Use stacked LSTM for Q network.')
 
     args = parser.parse_args()
     if args.cuda and not torch.cuda.is_available():
