@@ -89,7 +89,6 @@ class CausalGAILMLP(object):
     else:
         self.R = RewardFunction(-1.0,1.0)
 
-
   def create_environment(self, env_data):
     self.width, self.height = 21, 21
     obstacles = create_obstacles(self.width, self.height, 'diverse')
@@ -99,11 +98,60 @@ class CausalGAILMLP(object):
     s = State(start_loc, obstacles)
     self.T = TransitionFunction(width, height, obstacle_movement)
 
-
   def select_action(state):
     state = torch.from_numpy(state).unsqueeze(0).type(dtype)
     action, _, _ = policy_net(Variable(state))
     return action
+
+  def get_state_features(self, state_obj, use_state_features):
+    '''Get state features.
+
+    state_obj: State object.
+    '''
+    if use_state_features:
+      feat = np.array(state_obj.get_features(), dtype=np.float32)
+    else:
+      feat = np.array(state_obj.coordinates, dtype=np.float32)
+    return feat
+
+  def get_c_for_traj(self, traj):
+    '''Get c[1:T] for given trajectory.'''
+    num_t_steps = len(traj)
+    c = -1*np.ones((num_t_steps+1,num_c))
+    # TODO: We should use the RNN (Q-network) to predict the goal
+    c[0,1] = expert_sample.g[0]
+    x = -1*np.ones((1, self.history_size, self.state_size))
+    for t in range(len(expert_states)):
+      # Shift history
+      x[:, :(history_size-1), :] = x[:, 1:, :]
+      x[:, -1, :] = expert.states[t]
+      input_x = Variable(torch.from_numpy(
+        np.reshape(x, (1, -1))).type(self.dtype))
+      mu, logvar = vae_model.encode(input_x, c[t,:])
+      c[t+1, :] = vae_model.reparameterize(mu, logvar)
+    return c
+
+  def sample_start_state(self):
+    start_loc = sample_start(self.set_diff)
+    return State(start_loc, self.obstacles)
+
+  def checkpoint_data_to_save(self):
+    return {
+        'policy': policy_net,
+        'posterior': posterior_net,
+        'reward': self.reward_net
+        }
+
+  def load_checkpoint_data(self, checkpoint_path):
+    assert os.path.exists(checkpoint_path), \
+        'Checkpoint path does not exists {}'.format(checkpoint_path)
+    checkpoint_data = torch.load(checkpoint_path)
+    self.policy_net = checkpoint_data['policy']
+    self.posterior_net = checkpoint_data['posterior']
+    self.reward_net = checkpoint_data['reward']
+
+  def model_checkpoint_filepath(self, epoch):
+    return os.path.join(args.checkpoint, 'cp_{}.pth'.format(epoch))
 
   def update_params(self, gen_batch, expert_batch, i_episode,
                     optim_epochs, optim_batch_size):
@@ -325,33 +373,10 @@ class CausalGAILMLP(object):
         cur_id += cur_batch_size
         cur_id_exp += cur_batch_size_exp
 
-  def get_c_for_traj(self, traj):
-    '''Get c[1:T] for given trajectory.'''
-    num_t_steps = len(traj)
-    c = -1*np.ones((num_t_steps+1,num_c))
-    # TODO: We should use the RNN (Q-network) to predict the goal
-    c[0,1] = expert_sample.g[0]
-    x = -1*np.ones((1, self.history_size, self.state_size))
-    for t in range(len(expert_states)):
-      # Shift history
-      x[:, :(history_size-1), :] = x[:, 1:, :]
-      x[:, -1, :] = expert.states[t]
-      input_x = Variable(torch.from_numpy(
-        np.reshape(x, (1, -1))).type(self.dtype))
-      mu, logvar = vae_model.encode(input_x, c[t,:])
-      c[t+1, :] = vae_model.reparameterize(mu, logvar)
-    return c
-
-  def sample_start_state(self):
-    start_loc = sample_start(self.set_diff)
-    return State(start_loc, self.obstacles)
-
   def train_gail(self, expert):
     '''Train GAIL.'''
     args = self.args
-    episode_lengths = []
-    optim_percentage = 0.05
-    stats = {'true_reward': [], 'ep_length':[]}
+    stats = {'average_reward': [], 'episode_reward': []}
     for ep_idx in range(args.num_episodes):
       memory = Memory()
 
@@ -370,15 +395,17 @@ class CausalGAILMLP(object):
         c_gen = self.get_c_for_traj(state_expert, action_expert, c_expert)
 
         # Sample start state
-        curr_state = sample_start_state()
+        curr_state_obj = sample_start_state()
+        curr_state_feat = self.get_state_features(curr_state_obj,
+                                                  self.args.use_state_features)
         #state = running_state(state)
 
-        reward_sum, true_reward_sum = 0, 0
+        # TODO: Make this a separate function. Can be parallelized.
         #memory = Memory()
-
+        ep_reward = 0
         for t in range(episode_len):
           ct = c_gen[t, :]
-          action = select_action(np.concatenate((curr_state.state, ct)))
+          action = select_action(np.concatenate((curr_state_feat, ct)))
           action = epsilon_greedy_linear_decay(action.data.cpu().numpy(),
                                                args.num_episodes * 0.5,
                                                ep_idx,
@@ -421,17 +448,19 @@ class CausalGAILMLP(object):
             #     dtype)),1)).data.cpu().numpy()[0,:], c[t+1,:])))
 
 
-          reward_sum += reward
+          ep_reward += reward
 
-          next_state = self.transition_func(state, Action(action), 0)
+          next_state_obj = self.transition_func(state, Action(action), 0)
+          next_state_feat = self.get_state_features(
+              next_state_feat, self.args.use_state_features)
           #next_state = running_state(next_state)
           mask = 0 if t == args.max_ep_length - 1 else 1
 
           # Push to memory
-          memory.push(curr_state_arr.state,
+          memory.push(curr_state_feat,
                       np.array([oned_to_onehot(action)]),
                       mask,
-                      next_state.state,
+                      next_state_features,
                       reward,
                       ct,
                       next_ct)
@@ -442,41 +471,40 @@ class CausalGAILMLP(object):
           if not mask:
             break
 
-          curr_state = next_state
+          curr_state_obj, curr_state_feat = next_state_obj, next_state_feat
 
         #ep_memory.push(memory)
         num_steps += (t-1)
         num_episodes += 1
-        reward_batch += reward_sum
-        true_reward_batch += true_reward_sum
+        reward_batch += ep_reward
+        true_reward_batch += 0.0
+        stats['episode_reward'].append(ep_reward)
+
+      stats['average_reward'].append(reward_batch / num_episodes)
 
       #optim_batch_size = min(num_episodes,
-      #                        max(10,int(num_episodes*optim_percentage)))
-      reward_batch /= num_episodes
-      true_reward_batch /= num_episodes
+      #                        max(10,int(num_episodes*0.05)))
+
+      # Update parameters
       gen_batch = memory.sample()
       expert_batch = expert.sample(size=args.num_expert_trajs)
-
       update_params(gen_batch, expert_batch, ep_idx,
                     args.optim_epochs, args.optim_batch_size)
 
-      if ep_idx % args.log_interval == 0:
-        print('Episode {}\tLast reward {:.2f}\tAverage reward {:.2f}\t' \
-              'Last true reward {:.2f}\tAverage true reward {:.2f}'.format(
-              ep_idx, reward_sum, reward_batch, true_reward_sum,
-              true_reward_batch))
-
-      stats['true_reward'].append(true_reward_batch)
+      if ep_idx > 0 and  ep_idx % args.log_interval == 0:
+        print('Episode [{}/{}]   Last R: {:.2f}   Avg R: {:.2f} \t' \
+              'Last true R {:.2f}   Avg true R: {:.2f}'.format(
+              ep_idx, args.num_episodes, reward_sum, reward_batch/num_episodes,
+              true_reward_sum, true_reward_batch/num_episodes))
 
       results_path = os.path.join(args.checkpoint, 'results.pkl')
-      with open(results_path,'wb') as results_f:
+      with open(results_path, 'wb') as results_f:
         pickle.dump((stats), results_f, protocol=2)
 
-      if ep_idx % args.save_interval == 0:
-        f_w = open(os.path.join(args.checkpoint,
-                   'ep_' + str(ep_idx) + '.pth'), 'wb')
-        checkpoint = {'policy': policy_net, 'posterior': posterior_net}
-        torch.save(checkpoint, f_w)
+      if ep_idx > 0 and ep_idx % args.save_interval == 0:
+        checkpoint_filepath = self.model_checkpoint_filepath(ep_idx)
+        torch.save(self.checkpoint_data_to_save(), checkpoint_filepath)
+        print("Did save checkpoint: {}".format(checkpoint_filepath))
 
 
 def main(args):
@@ -556,6 +584,16 @@ if __name__ == '__main__':
                       help='path to checkpoint')
   parser.add_argument('--checkpoint', type=str, required=True,
                       help='path to checkpoint')
+
+  # Use features
+  parser.add_argument('--use_state_features', dest='use_state_features',
+                      action='store_true',
+                      help='Use features instead of direct (x,y) values in VAE')
+  parser.add_argument('--no-use_state_features', dest='use_state_features',
+                      action='store_false',
+                      help='Do not use features instead of direct (x,y) ' \
+                          'values in VAE')
+  parser.set_defaults(use_state_features=False)
 
   args = parser.parse_args()
   torch.manual_seed(args.seed)
