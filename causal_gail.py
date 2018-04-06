@@ -29,183 +29,110 @@ from replay_memory import Memory
 from running_state import ZFilter
 from utils.torch_utils import clip_grads
 
-#torch.set_default_tensor_type('torch.DoubleTensor')
-dtype = torch.FloatTensor
-dtype_Long = torch.LongTensor
-#dtype = torch.FloatTensor
-#dtype_Long = torch.LongTensor
-PI = torch.DoubleTensor([3.1415926]).type(dtype)
+from utils.rl_utils import epsilon_greedy_linear_decay, epsilon_greedy
+from utils.rl_utils import greedy, oned_to_onehot, normal_log_density
 
-parser = argparse.ArgumentParser(description='PyTorch actor-critic example')
-parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
-                    help='discount factor (default: 0.99)')
-parser.add_argument('--expert-path', default="L_expert_trajectories/",
-                    metavar='G',
-                    help='path to the expert trajectory files')
-parser.add_argument('--tau', type=float, default=0.95, metavar='G',
-                    help='gae (default: 0.95)')
-parser.add_argument('--learning-rate', type=float, default=3e-4, metavar='G',
-                    help='gae (default: 3e-4)')
-parser.add_argument('--seed', type=int, default=1, metavar='N',
-                    help='random seed (default: 1)')
-parser.add_argument('--batch-size', type=int, default=2048, metavar='N',
-                    help='batch size (default: 2048)')
-parser.add_argument('--num-episodes', type=int, default=500, metavar='N',
-                    help='number of episodes (default: 500)')
-parser.add_argument('--max-ep-length', type=int, default=6, metavar='N',
-                    help='maximum episode length (default: 6)')
-parser.add_argument('--optim-epochs', type=int, default=5, metavar='N',
-                    help='number of epochs over a batch (default: 5)')
-parser.add_argument('--optim-batch-size', type=int, default=64, metavar='N',
-                    help='batch size for epochs (default: 64)')
-parser.add_argument('--num-expert-trajs', type=int, default=5, metavar='N',
-                    help='number of expert trajectories in a batch (default: 5)')
-parser.add_argument('--render', action='store_true',
-                    help='render the environment')
-parser.add_argument('--log-interval', type=int, default=1, metavar='N',
-                    help='interval between training status logs (default: 10)')
-parser.add_argument('--save-interval', type=int, default=100, metavar='N',
-                    help='interval between saving policy weights (default: 100)')
-parser.add_argument('--entropy-coeff', type=float, default=0.0, metavar='N',
-                    help='coefficient for entropy cost')
-parser.add_argument('--clip-epsilon', type=float, default=0.2, metavar='N',
-                    help='Clipping for PPO grad')
-parser.add_argument('--vae_weights', type=str, required=True,
-                    help='path to checkpoint')
-parser.add_argument('--checkpoint', type=str, required=True,
-                    help='path to checkpoint')
+class CausalGAILMLP(object):
+  def __init__(self,
+               args,
+               vae_model,
+               env_data,
+               state_size=2,
+               action_size=4,
+               num_goals=4,
+               history_size=1,
+               dtype=torch.FloatTensor):
+    self.args = args
+    self.vae_model = vae_model
+    self.state_size = state_size
+    self.action_size = action_size
+    self.history_size = history_size
+    self.context_size = 0  # TODO
+    self.num_goals = num_goals
+    self.dtype = dtype
 
-args = parser.parse_args()
+    self.policy_net = Policy(num_inputs,
+                             0,
+                             num_c,
+                             num_actions,
+                             hidden_size=64,
+                             output_activation='sigmoid')
+    self.old_policy_net = Policy(num_inputs,
+                                 0,
+                                 num_c,
+                                 num_actions,
+                                 hidden_size=64,
+                                 output_activation='sigmoid')
 
+    #value_net = Value(num_inputs+num_c, hidden_size=64).type(dtype)
+    # Reward net is the discriminator network.
+    self.reward_net = Reward(num_inputs,
+                             num_actions,
+                             num_c,
+                             hidden_size=64)
 
-#-----Environment-----#
-width = height = 21
-obstacles = create_obstacles(width, height, 'diverse')
-#set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) - set(obstacles))
-set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))))
-start_loc = sample_start(set_diff)
+    self.posterior_net = Posterior(num_inputs,
+                                   num_actions,
+                                   num_c,
+                                   hidden_size=64)
 
-s = State(start_loc, obstacles)
-T = TransitionFunction(width, height, obstacle_movement)
+    self.opt_policy = optim.Adam(policy_net.parameters(), lr=0.0003)
+    #self.opt_value = optim.Adam(value_net.parameters(), lr=0.0003)
+    self.opt_reward = optim.Adam(reward_net.parameters(), lr=0.0003)
+    self.opt_posterior = optim.Adam(posterior_net.parameters(), lr=0.0003)
 
-if args.expert_path == 'SR2_expert_trajectories/':
-    R = RewardFunction_SR2(-1.0,1.0,width)
-else:
-    R = RewardFunction(-1.0,1.0)
+    self.create_environment(env_data)
 
-history_size = 4
-num_inputs = s.state.shape[0]*history_size
-num_actions = 8
-
-#if args.expert_path == 'SR2_expert_trajectories/':
-num_c = 2
-#else:
-#    num_c = 4
-
-#env.seed(args.seed)
-
-vae_model = torch.load(args.vae_weights)
-
-torch.manual_seed(args.seed)
-
-policy_net = Policy(num_inputs,
-                    0,
-                    num_c,
-                    num_actions,
-                    hidden_size=64,
-                    output_activation='sigmoid').type(dtype)
-
-old_policy_net = Policy(num_inputs,
-                        0,
-                        num_c,
-                        num_actions,
-                        hidden_size=64,
-                        output_activation='sigmoid').type(dtype)
-
-#value_net = Value(num_inputs+num_c, hidden_size=64).type(dtype)
-
-reward_net = Reward(num_inputs,
-                    num_actions,
-                    num_c,
-                    hidden_size=64).type(dtype)
-
-posterior_net = Posterior(num_inputs,
-                          num_actions,
-                          num_c,
-                          hidden_size=64).type(dtype)
-
-opt_policy = optim.Adam(policy_net.parameters(), lr=0.0003)
-#opt_value = optim.Adam(value_net.parameters(), lr=0.0003)
-opt_reward = optim.Adam(reward_net.parameters(), lr=0.0003)
-opt_posterior = optim.Adam(posterior_net.parameters(), lr=0.0003)
-
-
-def epsilon_greedy_linear_decay(action_vector,
-                                n_episodes,
-                                n,
-                                low=0.1,
-                                high=0.9):
-    if n <= n_episodes:
-        eps = ((low-high)/n_episodes)*n + high
+    # Load the true true reward
+    if args.expert_path == 'SR2_expert_trajectories/':
+        self.R = RewardFunction_SR2(-1.0,1.0,width)
     else:
-        eps = low
+        self.R = RewardFunction(-1.0,1.0)
 
-    if np.random.uniform() > eps:
-        return np.argmax(action_vector)
-    else:
-        return np.random.randint(low=0, high=num_actions)
 
-def epsilon_greedy(action_vector, eps=0.1):
-    if np.random.uniform() > eps:
-        return np.argmax(action_vector)
-    else:
-        return np.random.randint(low=0, high=num_actions)
+  def create_environment(self, env_data):
+    self.width, self.height = 21, 21
+    obstacles = create_obstacles(self.width, self.height, 'diverse')
+    set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))))
+    start_loc = sample_start(set_diff)
 
-def greedy(action_vector):
-    return np.argmax(action_vector)
+    s = State(start_loc, obstacles)
+    self.T = TransitionFunction(width, height, obstacle_movement)
 
-def oned_to_onehot(action_delta, n=num_actions):
-    action_onehot = np.zeros(n,)
-    action_onehot[int(action_delta)] = 1.0
 
-    return action_onehot
-
-def select_action(state):
+  def select_action(state):
     state = torch.from_numpy(state).unsqueeze(0).type(dtype)
     action, _, _ = policy_net(Variable(state))
     return action
 
-def normal_log_density(x, mean, log_std, std):
-    var = std.pow(2)
-    log_density = -(x - mean).pow(2) / (2 * var) \
-            - 0.5 * torch.log(2 * Variable(PI)) - log_std
-    return log_density.sum(1)
-
-
-def update_params(gen_batch, expert_batch, i_episode,
-                  optim_epochs, optim_batch_size):
+  def update_params(self, gen_batch, expert_batch, i_episode,
+                    optim_epochs, optim_batch_size):
+    dtype = self.dtype
     criterion = nn.BCELoss()
     #criterion_posterior = nn.NLLLoss()
     criterion_posterior = nn.MSELoss()
 
-    #opt_value.lr = args.learning_rate*max(1.0 - float(i_episode)/args.num_episodes, 0)
-    opt_policy.lr = args.learning_rate \
-            * max(1.0 - float(i_episode)/args.num_episodes, 0)
-    clip_epsilon = args.clip_epsilon \
-            * max(1.0 - float(i_episode)/args.num_episodes, 0)
+    opt_policy.lr = self.args.learning_rate \
+            * max(1.0 - float(i_episode)/self.args.num_episodes, 0)
+    clip_epsilon = self.args.clip_epsilon \
+            * max(1.0 - float(i_episode)/self.args.num_episodes, 0)
 
     # generated trajectories
     rewards = torch.Tensor(gen_batch.reward).type(dtype)
     masks = torch.Tensor(gen_batch.mask).type(dtype)
     actions = torch.Tensor(np.concatenate(gen_batch.action, 0)).type(dtype)
     states = torch.Tensor(gen_batch.state).type(dtype)
+
     ## Expand states to include history ##
-    expanded_states = -1*torch.ones(states.size(0), states.size(1)*history_size).type(dtype)
+    expanded_states = -1*torch.ones(
+        states.size(0), states.size(1)*self.history_size).type(dtype)
+
     for i in range(states.size(0)):
         expanded_states[i,:states.size(1)] = states[i,:]
         if i > 0:
-            expanded_states[i, states.size(1):] = expanded_states[i-1, 
-                                                :(history_size-1)*states.size(1)]
+            expanded_states[i, states.size(1):] = \
+                expanded_states[i-1, :(self.history_size-1)*states.size(1)]
+
     ## set it back to states ##
     states = expanded_states
 
@@ -236,28 +163,31 @@ def update_params(gen_batch, expert_batch, i_episode,
     expert_masks = torch.cat(list_of_masks, 0).type(dtype)
 
     ## Expand expert states ##
-    expanded_expert_states = -1*torch.ones(expert_states.size(0), 
-                                history_size*expert_states.size(1)).type(dtype)
+    expanded_expert_states = -1*torch.ones(
+        expert_states.size(0),
+        self.history_size*expert_states.size(1)).type(dtype)
     for i in range(expert_states.size(0)):
-        expanded_expert_states[i,:expert_states.size(1)] = expert_states[i,:]
-        if i > 0:
-            expanded_expert_states[i, expert_states.size(1):] = expanded_expert_states[i-1, 
-                                                    :(history_size-1)*expert_states.size(1)]
+      expanded_expert_states[i,:expert_states.size(1)] = expert_states[i,:]
+      if i > 0:
+        expanded_expert_states[i, expert_states.size(1):] = \
+            expanded_expert_states[i-1,
+                :(self.history_size-1)*expert_states.size(1)]
 
     ## set back to expert_state
     expert_states = expanded_expert_states
 
     ## Extract expert latent variables ##
     for i in range(expert_states.size(0)):
-        if i == 0 or expert_masks[i-1] == 0:
-            continue
-        mu, sigma = vae_model.encode(Variable(expert_states[i-1]), Variable(expert_latent_c[i-1]))
-        expert_latent_c[i] = vae_model.reparameterize(mu, logvar)
+      if i == 0 or expert_masks[i-1] == 0:
+        continue
+      mu, sigma = vae_model.encode(Variable(expert_states[i-1]),
+                                   Variable(expert_latent_c[i-1]))
+      expert_latent_c[i] = vae_model.reparameterize(mu, logvar)
 
 
-    returns = torch.Tensor(actions.size(0),1).type(dtype)
-    deltas = torch.Tensor(actions.size(0),1).type(dtype)
-    advantages = torch.Tensor(actions.size(0),1).type(dtype)
+    returns = torch.Tensor(actions.size(0), 1).type(dtype)
+    deltas = torch.Tensor(actions.size(0), 1).type(dtype)
+    advantages = torch.Tensor(actions.size(0), 1).type(dtype)
 
     # compute advantages
     prev_return = 0
@@ -265,284 +195,254 @@ def update_params(gen_batch, expert_batch, i_episode,
     prev_advantage = 0
     for i in reversed(range(rewards.size(0))):
         returns[i] = rewards[i] + args.gamma * prev_return * masks[i]
-        #deltas[i] = rewards[i] + args.gamma * prev_value * masks[i] - values.data[i]
-        #advantages[i] = deltas[i] + args.gamma * args.tau * prev_advantage * masks[i]
-        advantages[i] = returns[i] #changed by me to see if value function is causing problems
+        # advantages[i] = deltas[i] + \
+        #   args.gamma * args.tau * prev_advantage * masks[i]
+
+        # Changed by me to see if value function is causing problems
+        advantages[i] = returns[i]
         prev_return = returns[i, 0]
-        #prev_value = values.data[i, 0]
+
+        # prev_value = values.data[i, 0]
         prev_advantage = advantages[i, 0]
 
     targets = Variable(returns)
 
     advantages = (advantages - advantages.mean()) / advantages.std()
 
-    # backup params after computing probs but before updating new params
-    #policy_net.backup()
+    # Backup params after computing probs but before updating new params
+    # policy_net.backup()
     for old_policy_param, policy_param in zip(old_policy_net.parameters(),
                                               policy_net.parameters()):
-        old_policy_param.data.copy_(policy_param.data)
+      old_policy_param.data.copy_(policy_param.data)
 
     # update value, reward and policy networks
-    optim_iters = int(math.ceil(args.batch_size/optim_batch_size))
-    optim_batch_size_exp = int(math.floor(expert_actions.size(0)/(optim_iters)))
+    optim_iters = self.args.batch_size // optim_batch_size
+    optim_batch_size_exp = expert_actions.size(0) // optim_iters
 
     for _ in range(optim_epochs):
-        perm = np.arange(actions.size(0))
-        np.random.shuffle(perm)
-        perm = torch.LongTensor(perm).type(dtype_Long)
-        states = states[perm]
-        actions = actions[perm]
-        latent_c = latent_c[perm]
-        latent_next_c = latent_next_c[perm]
-        #values = values[perm]
-        targets = targets[perm]
-        advantages = advantages[perm]
-        perm_exp = np.arange(expert_actions.size(0))
-        np.random.shuffle(perm_exp)
-        perm_exp = torch.LongTensor(perm_exp).type(dtype_Long)
-        expert_states = expert_states[perm_exp]
-        expert_actions = expert_actions[perm_exp]
-        expert_latent_c = expert_latent_c[perm_exp]
-        cur_id = 0
-        cur_id_exp = 0
+      perm = np.arange(actions.size(0))
+      np.random.shuffle(perm)
+      perm = torch.LongTensor(perm).type(dtype_Long)
+      states = states[perm]
+      actions = actions[perm]
+      latent_c = latent_c[perm]
+      latent_next_c = latent_next_c[perm]
+      #values = values[perm]
+      targets = targets[perm]
+      advantages = advantages[perm]
+      perm_exp = np.arange(expert_actions.size(0))
+      np.random.shuffle(perm_exp)
+      perm_exp = torch.LongTensor(perm_exp).type(dtype_Long)
+      expert_states = expert_states[perm_exp]
+      expert_actions = expert_actions[perm_exp]
+      expert_latent_c = expert_latent_c[perm_exp]
+      cur_id = 0
+      cur_id_exp = 0
 
-        for _ in range(optim_iters):
-            cur_batch_size = min(optim_batch_size, actions.size(0) - cur_id)
-            cur_batch_size_exp = min(optim_batch_size_exp,
-                                     expert_actions.size(0) - cur_id_exp)
-            state_var = Variable(states[cur_id:cur_id+cur_batch_size])
-            action_var = Variable(actions[cur_id:cur_id+cur_batch_size])
-            latent_c_var = Variable(latent_c[cur_id:cur_id+cur_batch_size])
-            latent_next_c_var = Variable(
-                    latent_next_c[cur_id:cur_id+cur_batch_size])
-            advantages_var = Variable(advantages[cur_id:cur_id+cur_batch_size])
-            expert_state_var = Variable(
-                    expert_states[cur_id_exp:cur_id_exp+cur_batch_size_exp])
-            expert_action_var = Variable(
-                    expert_actions[cur_id_exp:cur_id_exp+cur_batch_size_exp])
-            expert_latent_c_var = Variable(
-                    expert_latent_c[cur_id_exp:cur_id_exp+cur_batch_size_exp])
-
-
-            # update reward net
-            opt_reward.zero_grad()
-
-            # backprop with expert demonstrations
-            o = reward_net(torch.cat((expert_state_var,
-                                      expert_action_var,
-                                      expert_latent_c_var),1))
-            loss = criterion(o, Variable(torch.zeros(
-                expert_action_var.size(0),1).type(dtype)))
-            loss.backward()
-
-            # backprop with generated demonstrations
-            o = reward_net(torch.cat((state_var, action_var, latent_c_var),1))
-            loss = criterion(o, Variable(
-                torch.ones(action_var.size(0),1)).type(dtype))
-            loss.backward()
-
-            opt_reward.step()
-
-            # update posterior net # We need to do this by reparameterization
-            # trick instead.  We should not put action_var (a_t) in the
-            # posterior net since we need c_t to predict a_t while till now we
-            # only have c_{t-1}.
-            mu, _ = posterior_net(torch.cat((state_var,
-                                             action_var,
-                                             latent_c_var), 1))
-
-            loss = criterion_posterior(mu, latent_next_c)
-            loss.backward()
-
-            # compute old and new action probabilities
-            action_means, action_log_stds, action_stds = policy_net(
-                    torch.cat((state_var, latent_c_var), 1))
-            log_prob_cur = normal_log_density(action_var,
-                                              action_means,
-                                              action_log_stds,
-                                              action_stds)
-
-            action_means_old, action_log_stds_old, action_stds_old = \
-                    old_policy_net(torch.cat((state_var, latent_c_var), 1))
-            log_prob_old = normal_log_density(action_var,
-                                              action_means_old,
-                                              action_log_stds_old,
-                                              action_stds_old)
-
-            # update value net
-            #opt_value.zero_grad()
-            #value_var = value_net(state_var)
-            #value_loss = (value_var - targets[cur_id:cur_id+cur_batch_size]).pow(2.).mean()
-            #value_loss.backward()
-            #opt_value.step()
-
-            # update policy net
-            opt_policy.zero_grad()
-            ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
-            surr1 = ratio * advantages_var[:,0]
-            surr2 = torch.clamp(ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon) \
-                    * advantages_var[:,0]
-            policy_surr = -torch.min(surr1, surr2).mean()
-            policy_surr.backward()
-            torch.nn.utils.clip_grad_norm(policy_net.parameters(), 40)
-            opt_policy.step()
-
-            # set new starting point for batch
-            cur_id += cur_batch_size
-            cur_id_exp += cur_batch_size_exp
+      for _ in range(optim_iters):
+        cur_batch_size = min(optim_batch_size, actions.size(0) - cur_id)
+        cur_batch_size_exp = min(optim_batch_size_exp,
+                                 expert_actions.size(0) - cur_id_exp)
+        state_var = Variable(states[cur_id:cur_id+cur_batch_size])
+        action_var = Variable(actions[cur_id:cur_id+cur_batch_size])
+        latent_c_var = Variable(latent_c[cur_id:cur_id+cur_batch_size])
+        latent_next_c_var = Variable(
+                latent_next_c[cur_id:cur_id+cur_batch_size])
+        advantages_var = Variable(advantages[cur_id:cur_id+cur_batch_size])
+        expert_state_var = Variable(
+                expert_states[cur_id_exp:cur_id_exp+cur_batch_size_exp])
+        expert_action_var = Variable(
+                expert_actions[cur_id_exp:cur_id_exp+cur_batch_size_exp])
+        expert_latent_c_var = Variable(
+                expert_latent_c[cur_id_exp:cur_id_exp+cur_batch_size_exp])
 
 
-#running_state = ZFilter((num_inputs,), clip=5)
-#running_reward = ZFilter((1,), demean=False, clip=10)
-episode_lengths = []
-optim_epochs = 5
-optim_percentage = 0.05
+        # update reward net
+        opt_reward.zero_grad()
 
-if not os.path.exists(args.checkpoint):
-    os.makedirs(args.checkpoint)
+        # backprop with expert demonstrations
+        o = reward_net(torch.cat((expert_state_var,
+                                  expert_action_var,
+                                  expert_latent_c_var),1))
+        loss = criterion(o, Variable(torch.zeros(
+            expert_action_var.size(0),1).type(dtype)))
+        loss.backward()
 
-stats = {'true_reward': [], 'ep_length':[]}
+        # backprop with generated demonstrations
+        o = reward_net(torch.cat((state_var, action_var, latent_c_var),1))
+        loss = criterion(o, Variable(
+            torch.ones(action_var.size(0),1)).type(dtype))
+        loss.backward()
 
-'''
-expert_h5 = ExpertHDF5(args.expert_path, num_inputs)
-expert_h5.push()
-expert_h5.sample()
-expert_h5.sample_as_list()
-expert_h5.sample_c()
-'''
+        opt_reward.step()
 
-expert = Expert(args.expert_path, num_inputs)
-print('Loading expert trajectories ...')
-expert.push()
-print('Expert trajectories loaded.')
+        # update posterior net # We need to do this by reparameterization
+        # trick instead.  We should not put action_var (a_t) in the
+        # posterior net since we need c_t to predict a_t while till now we
+        # only have c_{t-1}.
+        mu, _ = posterior_net(torch.cat((state_var,
+                                         action_var,
+                                         latent_c_var), 1))
 
+        loss = criterion_posterior(mu, latent_next_c)
+        loss.backward()
 
-for i_episode in count(1):
-    memory = Memory()
+        # compute old and new action probabilities
+        action_means, action_log_stds, action_stds = policy_net(
+                torch.cat((state_var, latent_c_var), 1))
+        log_prob_cur = normal_log_density(action_var,
+                                          action_means,
+                                          action_log_stds,
+                                          action_stds)
 
-    num_steps = 0
-    reward_batch = 0
-    true_reward_batch = 0
-    num_episodes = 0
-    while num_steps < args.batch_size:
-        # read c sequence from expert trajectories. Here you'll need to pass
-        # the expert trajectories through the pretrained posterior net.
-        expert_sample = expert.sample(size=1)
-        expert_states = expert_sample.state
-        num_t_steps = len(expert_states)
-        c = -1*np.ones((num_t_steps+1,num_c))
-        c[0,1] = expert_sample.g[0]
+        action_means_old, action_log_stds_old, action_stds_old = \
+                old_policy_net(torch.cat((state_var, latent_c_var), 1))
+        log_prob_old = normal_log_density(action_var,
+                                          action_means_old,
+                                          action_log_stds_old,
+                                          action_stds_old)
 
-        x = -1*torch.ones(1, history_size, num_inputs)
-        
-        for t in range(len(expert_states)):
-            x[:,:(history_size-1),:] = x[:,1:,:]
-            curr_x = torch.from_numpy(expert.states[t])
+        # update value net
+        # opt_value.zero_grad()
+        # value_var = value_net(state_var)
+        # value_loss = (value_var - \
+        #    targets[cur_id:cur_id+cur_batch_size]).pow(2.).mean()
+        # value_loss.backward()
+        # opt_value.step()
 
-            x[:,(history_size-1),:] = curr_x
+        # update policy net
+        opt_policy.zero_grad()
+        ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
+        surr1 = ratio * advantages_var[:,0]
+        surr2 = torch.clamp(ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon) \
+                * advantages_var[:,0]
+        policy_surr = -torch.min(surr1, surr2).mean()
+        policy_surr.backward()
+        torch.nn.utils.clip_grad_norm(policy_net.parameters(), 40)
+        opt_policy.step()
 
-            #x_t0 = Variable(x[:,0,:])
-            #x_t1 = Variable(x[:,1,:])
-            #x_t2 = Variable(x[:,2,:])
-            #x_t3 = Variable(x[:,3,:])
-            input_x = Variable(x[:,:,:].view(x.size(0), history_size*x.size(2)).clone())
+        # set new starting point for batch
+        cur_id += cur_batch_size
+        cur_id_exp += cur_batch_size_exp
 
-            mu, logvar = vae_model.encode(input_x, c[t,:])
-            c[t+1,1:num_c] = vae_model.reparameterize(mu, logvar)
+  def get_c_for_traj(self, traj):
+    '''Get c[1:T] for given trajectory.'''
+    num_t_steps = len(traj)
+    c = -1*np.ones((num_t_steps+1,num_c))
+    # TODO: We should use the RNN (Q-network) to predict the goal
+    c[0,1] = expert_sample.g[0]
+    x = -1*np.ones((1, self.history_size, self.state_size))
+    for t in range(len(expert_states)):
+      # Shift history
+      x[:, :(history_size-1), :] = x[:, 1:, :]
+      x[:, -1, :] = expert.states[t]
+      input_x = Variable(torch.from_numpy(
+        np.reshape(x, (1, -1))).type(self.dtype))
+      mu, logvar = vae_model.encode(input_x, c[t,:])
+      c[t+1, :] = vae_model.reparameterize(mu, logvar)
+    return c
 
+  def sample_start_state(self):
+    start_loc = sample_start(self.set_diff)
+    return State(start_loc, self.obstacles)
 
-        #if args.expert_path == 'SR_expert_trajectories/':
-        #    if np.argmax(c[0,:]) == 1: # left half
-        #        set_diff = list(set(product(tuple(range(0, (width/2)-3)),
-        #                                    tuple(range(1, height)))) \
-        #                                            - set(obstacles))
-        #    elif np.argmax(c[0,:]) == 3: # right half
-        #        set_diff = list(set(product(tuple(range(width/2, width-2)),
-        #                                    tuple(range(2, height)))) \
-        #                                            - set(obstacles))
+  def train_gail(self, expert):
+    '''Train GAIL.'''
+    args = self.args
+    episode_lengths = []
+    optim_percentage = 0.05
+    stats = {'true_reward': [], 'ep_length':[]}
+    for ep_idx in range(args.num_episodes):
+      memory = Memory()
 
-        start_loc = sample_start(set_diff)
-        s = State(start_loc, obstacles)
+      num_steps, num_episodes = 0, 0
+      reward_batch, true_reward_batch = 0, 0
+      while num_steps < args.batch_size:
+        traj_expert = expert.sample(size=1)
+        state_expert, action_expert, c_expert, _ = traj_expert
+
+        # Expert state and actions
+        state_expert = state_expert[0]
+        action_expert = action_expert[0]
+        episode_len = len(state_expert)
+
+        # Generate c from trained VAE
+        c_gen = self.get_c_for_traj(state_expert, action_expert, c_expert)
+
+        # Sample start state
+        curr_state = sample_start_state()
         #state = running_state(state)
-        R.reset()
 
-        reward_sum = 0
-        true_reward_sum = 0
+        reward_sum, true_reward_sum = 0, 0
         #memory = Memory()
 
-        for t in range(args.max_ep_length): # Don't infinite loop while learning
-            ct = c[t,:]
-            action = select_action(np.concatenate((s.state, ct)))
-            action = epsilon_greedy_linear_decay(action.data.cpu().numpy(),
-                                                 args.num_episodes * 0.5,
-                                                 i_episode,
-                                                 low=0.05,
-                                                 high=0.3)
+        for t in range(episode_len):
+          ct = c_gen[t, :]
+          action = select_action(np.concatenate((curr_state.state, ct)))
+          action = epsilon_greedy_linear_decay(action.data.cpu().numpy(),
+                                               args.num_episodes * 0.5,
+                                               ep_idx,
+                                               low=0.05,
+                                               high=0.3)
 
-            reward = -float(reward_net(torch.cat(
-                (Variable(torch.from_numpy(s.state).unsqueeze(0)).type(dtype),
-                 Variable(torch.from_numpy(
-                     oned_to_onehot(action)).unsqueeze(0)).type(dtype),
-                 Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
-                1)).data.cpu().numpy()[0,0])
+          # Get the discriminator reward
+          reward = -float(self.reward_net(torch.cat(
+            (Variable(torch.from_numpy(s.state).unsqueeze(0)).type(dtype),
+              Variable(torch.from_numpy(oned_to_onehot(
+                action)).unsqueeze(0)).type(dtype),
+              Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
+             1)).data.cpu().numpy()[0,0])
 
-            if t < args.max_ep_length-1:
+          if t < args.max_ep_length-1:
+            mu, sigma = self.posterior_net(
+                torch.cat((
+                  Variable(torch.from_numpy(s.state).unsqueeze(0)).type(dtype),
+                  Variable(torch.from_numpy(oned_to_onehot(
+                    action)).unsqueeze(0)).type(dtype),
+                  Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)), 1))
 
-                mu, sigma = posterior_net(
-                        torch.cat((
-                            Variable(torch.from_numpy(
-                                s.state).unsqueeze(0)).type(dtype),
-                            Variable(torch.from_numpy(
-                                oned_to_onehot(action)).unsqueeze(0)).type(dtype),
-                            Variable(torch.from_numpy(
-                                ct).unsqueeze(0)).type(dtype)), 1))
+            mu = mu.data.cpu().numpy()[0,0]
+            sigma = sigma.data.cpu().numpy()[0,0]
 
-                mu = mu.data.cpu().numpy()[0,0]
-                sigma = sigma.data.cpu().numpy()[0,0]
+            # should ideally be logpdf, but pdf may work better. Try both.
+            next_ct = c_gen[t+1,:]
+            reward += norm.pdf(np.argmax(next_ct), loc=mu, scale=sigma)
 
-                # should ideally be logpdf, but pdf may work better. Try both.
-                next_ct = c[t+1,:]
-                reward += norm.pdf(np.argmax(next_ct), loc=mu, scale=sigma)
+            # Also, argmax for now, but has to be c[t+1, 1:]
+            # when reverting to proper c ...
 
-                # Also, argmax for now, but has to be c[t+1, 1:]
-                # when reverting to proper c ...
+            #reward += math.exp(np.sum(np.multiply(
+            # posterior_net(torch.cat((
+            #   Variable(torch.from_numpy(
+            #       s.state).unsqueeze(0)).type(dtype),
+            #   Variable(torch.from_numpy(
+            #       oned_to_onehot(action)).unsqueeze(0)).type(dtype),
+            #   Variable(torch.from_numpy(ct).unsqueeze(0)).type(
+            #     dtype)),1)).data.cpu().numpy()[0,:], c[t+1,:])))
 
-                #reward += math.exp(np.sum(np.multiply(
-                # posterior_net(torch.cat((
-                #   Variable(torch.from_numpy(
-                #       s.state).unsqueeze(0)).type(dtype),
-                #   Variable(torch.from_numpy(
-                #       oned_to_onehot(action)).unsqueeze(0)).type(dtype),
-                #   Variable(torch.from_numpy(
-                #       ct).unsqueeze(0)).type(dtype)),1)).data.cpu().numpy()[0,:], c[t+1,:])))
 
-            next_s = T(s, Action(action), R.t)
-            true_reward = R(s, Action(action), ct)
-            reward_sum += reward
-            true_reward_sum += true_reward
+          reward_sum += reward
 
-            #next_state = running_state(next_state)
+          next_state = self.transition_func(state, Action(action), 0)
+          #next_state = running_state(next_state)
+          mask = 0 if t == args.max_ep_length - 1 else 1
 
-            mask = 1
-            if t == args.max_ep_length-1:
-                R.terminal = True
-                mask = 0
+          # Push to memory
+          memory.push(curr_state_arr.state,
+                      np.array([oned_to_onehot(action)]),
+                      mask,
+                      next_state.state,
+                      reward,
+                      ct,
+                      next_ct)
 
-            memory.push(s.state,
-                        np.array([oned_to_onehot(action)]),
-                        mask,
-                        next_s.state,
-                        reward,
-                        ct,
-                        next_ct)
+          if args.render:
+            env.render()
 
-            if args.render:
-                env.render()
+          if not mask:
+            break
 
-            if R.terminal:
-                break
-
-            s = next_s
+          curr_state = next_state
 
         #ep_memory.push(memory)
         num_steps += (t-1)
@@ -550,33 +450,117 @@ for i_episode in count(1):
         reward_batch += reward_sum
         true_reward_batch += true_reward_sum
 
-    #optim_batch_size = min(num_episodes,
-    #                        max(10,int(num_episodes*optim_percentage)))
-    reward_batch /= num_episodes
-    true_reward_batch /= num_episodes
-    gen_batch = memory.sample()
-    expert_batch = expert.sample(size=args.num_expert_trajs)
+      #optim_batch_size = min(num_episodes,
+      #                        max(10,int(num_episodes*optim_percentage)))
+      reward_batch /= num_episodes
+      true_reward_batch /= num_episodes
+      gen_batch = memory.sample()
+      expert_batch = expert.sample(size=args.num_expert_trajs)
 
-    update_params(gen_batch, expert_batch, i_episode,
-                  optim_epochs, args.optim_batch_size)
+      update_params(gen_batch, expert_batch, ep_idx,
+                    args.optim_epochs, args.optim_batch_size)
 
-    if i_episode % args.log_interval == 0:
+      if ep_idx % args.log_interval == 0:
         print('Episode {}\tLast reward {:.2f}\tAverage reward {:.2f}\t' \
               'Last true reward {:.2f}\tAverage true reward {:.2f}'.format(
-              i_episode, reward_sum, reward_batch, true_reward_sum,
+              ep_idx, reward_sum, reward_batch, true_reward_sum,
               true_reward_batch))
 
-    stats['true_reward'].append(true_reward_batch)
+      stats['true_reward'].append(true_reward_batch)
 
-    results_path = os.path.join(args.checkpoint, 'results.pkl')
-    with open(results_path,'wb') as results_f:
+      results_path = os.path.join(args.checkpoint, 'results.pkl')
+      with open(results_path,'wb') as results_f:
         pickle.dump((stats), results_f, protocol=2)
 
-    if i_episode % args.save_interval == 0:
+      if ep_idx % args.save_interval == 0:
         f_w = open(os.path.join(args.checkpoint,
-                   'ep_' + str(i_episode) + '.pth'), 'wb')
+                   'ep_' + str(ep_idx) + '.pth'), 'wb')
         checkpoint = {'policy': policy_net, 'posterior': posterior_net}
         torch.save(checkpoint, f_w)
 
-    if i_episode == args.num_episodes:
-        break
+
+def main(args):
+  expert = Expert(args.expert_path, num_inputs)
+  print('Loading expert trajectories ...')
+  expert.push()
+  print('Expert trajectories loaded.')
+
+  dtype = torch.FloatTensor
+  if args.cuda:
+    dtype = torch.cuda.FloatTensor
+
+  causal_gail_mlp = CausalGAILMLP(
+      args,
+      vae_model,
+      env_data,
+      state_size=args.state_size,
+      action_size=args.action_size,
+      num_goals=4,
+      history_size=args.history_size,
+      dtype=dtype)
+  causal_gail_mlp.train_gail(expert)
+
+if __name__ == '__main__':
+  parser = argparse.ArgumentParser(description='Causal GAIL using MLP.')
+  parser.add_argument('--expert-path', default="L_expert_trajectories/",
+                      help='path to the expert trajectory files')
+
+  parser.add_argument('--seed', type=int, default=1,
+                      help='random seed (default: 1)')
+
+  # Environment parameters
+  parser.add_argument('--state-size', type=int, default=2,
+                      help='State size for VAE.')
+  parser.add_argument('--action_size', type=int, default=4,
+                      help='Action size for VAE.')
+  parser.add_argument('--history-size', type=int, default=1,
+                        help='State history size to use in VAE.')
+  parser.add_argument('--vae-context-size', type=int, default=1,
+                      help='Context size for VAE.')
+
+  # RL parameters
+  parser.add_argument('--gamma', type=float, default=0.99,
+                      help='discount factor (default: 0.99)')
+  parser.add_argument('--tau', type=float, default=0.95,
+                      help='gae (default: 0.95)')
+
+  # Training parameters
+  parser.add_argument('--learning-rate', type=float, default=3e-4,
+                      help='gae (default: 3e-4)')
+  parser.add_argument('--batch-size', type=int, default=2048,
+                      help='batch size (default: 2048)')
+  parser.add_argument('--num-episodes', type=int, default=500,
+                      help='number of episodes (default: 500)')
+  parser.add_argument('--max-ep-length', type=int, default=1000,
+                      help='maximum episode length (default: 6)')
+
+  parser.add_argument('--optim-epochs', type=int, default=5,
+                      help='number of epochs over a batch (default: 5)')
+  parser.add_argument('--optim-batch-size', type=int, default=64,
+                      help='batch size for epochs (default: 64)')
+  parser.add_argument('--num-expert-trajs', type=int, default=5,
+                      help='number of expert trajectories in a batch.')
+  parser.add_argument('--render', action='store_true',
+                      help='render the environment')
+  # Log interval
+  parser.add_argument('--log-interval', type=int, default=1,
+                      help='Interval between training status logs')
+  parser.add_argument('--save-interval', type=int, default=100,
+                      help='Interval between saving policy weights')
+  parser.add_argument('--entropy-coeff', type=float, default=0.0,
+                      help='coefficient for entropy cost')
+  parser.add_argument('--clip-epsilon', type=float, default=0.2,
+                      help='Clipping for PPO grad')
+
+  parser.add_argument('--vae_weights', type=str, required=True,
+                      help='path to checkpoint')
+  parser.add_argument('--checkpoint', type=str, required=True,
+                      help='path to checkpoint')
+
+  args = parser.parse_args()
+  torch.manual_seed(args.seed)
+
+  if not os.path.exists(args.checkpoint):
+    os.makedirs(args.checkpoint)
+
+  main(args)
