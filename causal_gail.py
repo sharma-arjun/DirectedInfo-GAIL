@@ -83,21 +83,22 @@ class CausalGAILMLP(object):
     self.opt_posterior = optim.Adam(posterior_net.parameters(), lr=0.0003)
 
     self.create_environment(env_data)
-
-    # Load the true true reward
-    if args.expert_path == 'SR2_expert_trajectories/':
-        self.R = RewardFunction_SR2(-1.0,1.0,width)
-    else:
-        self.R = RewardFunction(-1.0,1.0)
+    self.expert = None
+    self.obstacles, self.set_diff = None, None
 
   def create_environment(self, env_data):
     self.width, self.height = 21, 21
-    obstacles = create_obstacles(self.width, self.height, 'diverse')
-    set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))))
-    start_loc = sample_start(set_diff)
+    self.transition_func = TransitionFunction(self.width,
+                                              self.height,
+                                              obstacle_movement)
 
-    s = State(start_loc, obstacles)
-    self.T = TransitionFunction(width, height, obstacle_movement)
+  def set_expert(self, expert):
+    assert self.expert is None, "Trying to set non-None expert"
+    self.expert = expert
+    assert expert.obstacles is not None, "Obstacles cannot be None"
+    self.obstacles = expert.obstacles
+    assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
+    self.set_diff = expert.set_diff
 
   def select_action(state):
     state = torch.from_numpy(state).unsqueeze(0).type(dtype)
@@ -152,7 +153,8 @@ class CausalGAILMLP(object):
     self.reward_net = checkpoint_data['reward']
 
   def model_checkpoint_filepath(self, epoch):
-    return os.path.join(args.checkpoint, 'cp_{}.pth'.format(epoch))
+    checkpoint_dir = os.path.join(self.args.results_dir, 'checkpoint')
+    return os.path.join(checkpoint_dir, 'cp_{}.pth'.format(epoch))
 
   def expand_states_torch(self, states, history_size):
     expanded_states = -1*torch.ones(
@@ -491,7 +493,7 @@ class CausalGAILMLP(object):
               ep_idx, args.num_episodes, reward_sum, reward_batch/num_episodes,
               true_reward_sum, true_reward_batch/num_episodes))
 
-      results_path = os.path.join(args.checkpoint, 'results.pkl')
+      results_path = os.path.join(args.results_dir, 'results.pkl')
       with open(results_path, 'wb') as results_f:
         pickle.dump((stats), results_f, protocol=2)
 
@@ -500,12 +502,46 @@ class CausalGAILMLP(object):
         torch.save(self.checkpoint_data_to_save(), checkpoint_filepath)
         print("Did save checkpoint: {}".format(checkpoint_filepath))
 
+def load_VAE_model(model_checkpoint_path, new_args):
+  '''Load pre-trained VAE model.'''
+
+  checkpoint_dir_path = os.path.dirname(model_checkpoint_path)
+  results_dir_path = os.path.dirname(checkpoint_dir_path)
+
+  # Load arguments used to train the model
+  saved_args_filepath = os.path.join(results_dir_path, 'args.pkl')
+  with open(saved_args_filepath, 'rb') as saved_args_f:
+    saved_args = pickle.load(saved_args_f)
+    print('Did load saved args {}'.format(saved_args_filepath))
+
+  dtype = torch.FloatTensor
+  if saved_args.cuda:
+    dtype = torch.cuda.FloatTensor
+  logger = TensorboardXLogger(os.path.join(args.results_dir, 'log_vae_model'))
+  vae_train = VAETrain(
+    saved_args,
+    logger,
+    width=21,
+    height=21,
+    state_size=saved_args.vae_state_size,
+    action_size=saved_args.vae_action_size,
+    history_size=saved_args.vae_history_size,
+    num_goals=4,
+    use_rnn_goal_predictor=saved_args.use_rnn_goal,
+    dtype=dtype
+  )
+  vae_train.load_checkpoint(model_checkpoint_path)
+  print("Did load models at: {}".format(model_checkpoint_path))
+  return vae_train
 
 def main(args):
-  expert = Expert(args.expert_path, num_inputs)
+  expert = ExpertHDF5(args.expert_path, num_inputs)
   print('Loading expert trajectories ...')
-  expert.push()
+  expert.push(only_coordinates_in_state=True, one_hot_action=True)
   print('Expert trajectories loaded.')
+
+  # Load pre-trained VAE model
+  vae_train = load_VAE_model(args.vae_checkpoint_path, args)
 
   dtype = torch.FloatTensor
   if args.cuda:
@@ -513,13 +549,14 @@ def main(args):
 
   causal_gail_mlp = CausalGAILMLP(
       args,
-      vae_model,
-      env_data,
+      vae_train,
+      None,
       state_size=args.state_size,
       action_size=args.action_size,
       num_goals=4,
       history_size=args.history_size,
       dtype=dtype)
+  causal_gail_mlp.set_expert(expert)
   causal_gail_mlp.train_gail(expert)
 
 if __name__ == '__main__':
@@ -537,7 +574,7 @@ if __name__ == '__main__':
                       help='Action size for VAE.')
   parser.add_argument('--history-size', type=int, default=1,
                         help='State history size to use in VAE.')
-  parser.add_argument('--vae-context-size', type=int, default=1,
+  parser.add_argument('--context-size', type=int, default=1,
                       help='Context size for VAE.')
 
   # RL parameters
@@ -574,10 +611,12 @@ if __name__ == '__main__':
   parser.add_argument('--clip-epsilon', type=float, default=0.2,
                       help='Clipping for PPO grad')
 
-  parser.add_argument('--vae_weights', type=str, required=True,
-                      help='path to checkpoint')
-  parser.add_argument('--checkpoint', type=str, required=True,
-                      help='path to checkpoint')
+  # Path to pre-trained VAE model
+  parser.add_argument('--vae_checkpoint_path', type=str, required=True,
+                      help='Path to pre-trained VAE model.')
+  # Path to store training results in
+  parser.add_argument('--results_dir', type=str, required=True,
+                      help='Path to store results in.')
 
   # Use features
   parser.add_argument('--use_state_features', dest='use_state_features',
@@ -592,7 +631,11 @@ if __name__ == '__main__':
   args = parser.parse_args()
   torch.manual_seed(args.seed)
 
-  if not os.path.exists(args.checkpoint):
-    os.makedirs(args.checkpoint)
+  if not os.path.exists(args.results_dir):
+    os.makedirs(args.results_dir)
+    # Directory for TF logs
+    os.makedirs(os.path.join(args.results_dir, 'log'))
+    # Directory for model checkpoints
+    os.makedirs(os.path.join(args.results_dir, 'checkpoint'))
 
   main(args)
