@@ -345,7 +345,7 @@ class CausalGAILMLP(object):
 
     for _ in range(optim_epochs):
       perm = np.arange(actions.size(0))
-      perm_exp = np.arange(expert_actions.size(0)))
+      perm_exp = np.arange(expert_actions.size(0))
       np.random.shuffle(perm)
       np.random.shuffle(perm_exp)
       if args.cuda:
