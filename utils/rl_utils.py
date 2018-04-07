@@ -28,10 +28,9 @@ def epsilon_greedy(action_vector, eps=0.1):
 def greedy(action_vector):
     return np.argmax(action_vector)
 
-def oned_to_onehot(action_delta, n=num_actions):
-    action_onehot = np.zeros(n,)
+def oned_to_onehot(action_delta, num_actions):
+    action_onehot = np.zeros(num_actions,)
     action_onehot[int(action_delta)] = 1.0
-
     return action_onehot
 
 def normal_log_density(x, mean, log_std, std):

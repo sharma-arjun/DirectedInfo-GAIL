@@ -412,7 +412,7 @@ class CausalGAILMLP(object):
           reward = -float(self.reward_net(torch.cat(
             (Variable(torch.from_numpy(s.state).unsqueeze(0)).type(dtype),
               Variable(torch.from_numpy(oned_to_onehot(
-                action)).unsqueeze(0)).type(dtype),
+                action, self.num_actions)).unsqueeze(0)).type(dtype),
               Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
              1)).data.cpu().numpy()[0,0])
 
@@ -421,7 +421,7 @@ class CausalGAILMLP(object):
                 torch.cat((
                   Variable(torch.from_numpy(s.state).unsqueeze(0)).type(dtype),
                   Variable(torch.from_numpy(oned_to_onehot(
-                    action)).unsqueeze(0)).type(dtype),
+                    action, self.num_actions)).unsqueeze(0)).type(dtype),
                   Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)), 1))
 
             mu = mu.data.cpu().numpy()[0,0]
@@ -454,7 +454,7 @@ class CausalGAILMLP(object):
 
           # Push to memory
           memory.push(curr_state_feat,
-                      np.array([oned_to_onehot(action)]),
+                      np.array([oned_to_onehot(action, self.num_actions)]),
                       mask,
                       next_state_features,
                       reward,
