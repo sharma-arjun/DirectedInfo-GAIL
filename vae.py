@@ -56,7 +56,6 @@ class VAE(nn.Module):
     def encode(self, x, c):
         return self.posterior(torch.cat((x, c), 1))
 
-
     def reparameterize(self, mu, logvar):
         if self.training:
             std = logvar.mul(0.5).exp_()
@@ -194,6 +193,15 @@ class VAETrain(object):
         else:
             feat = np.array(state_obj.coordinates, dtype=np.float32)
         return feat
+
+    def get_context_at_state(self, x, c):
+        '''Get context variable c_t for given x_t, c_{t-1}.
+
+        x: State at time t. (x_t)
+        c: Context at time t-1. (c_{t-1})
+        '''
+        mu, logvar = self.vae_model.encode(x, c)
+        return self.vae_model.reparameterize(mu, logvar)
 
     def train(self, expert, num_epochs, batch_size):
         final_train_stats = {

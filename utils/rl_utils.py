@@ -5,12 +5,13 @@ import torch
 from torch.autograd import Variable
 
 def epsilon_greedy_linear_decay(action_vector,
-                                n_episodes,
-                                n,
+                                num_episodes,
+                                ep_idx,
+                                num_actions,
                                 low=0.1,
                                 high=0.9):
-    if n <= n_episodes:
-        eps = ((low-high)/n_episodes)*n + high
+    if ep_idx <= num_episodes:
+        eps = ((low-high)/num_episodes)*ep_idx + high
     else:
         eps = low
 

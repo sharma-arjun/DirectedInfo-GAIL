@@ -29,6 +29,8 @@ from replay_memory import Memory
 from running_state import ZFilter
 from utils.torch_utils import clip_grads
 
+from vae import VAE, VAETrain
+from utils.logger import Logger, TensorboardXLogger
 from utils.rl_utils import epsilon_greedy_linear_decay, epsilon_greedy
 from utils.rl_utils import greedy, oned_to_onehot, normal_log_density
 from utils.rl_utils import get_advantage_for_rewards
@@ -40,6 +42,7 @@ class CausalGAILMLP(object):
                env_data,
                state_size=2,
                action_size=4,
+               context_size=1,
                num_goals=4,
                history_size=1,
                dtype=torch.FloatTensor):
@@ -48,39 +51,39 @@ class CausalGAILMLP(object):
     self.state_size = state_size
     self.action_size = action_size
     self.history_size = history_size
-    self.context_size = 0  # TODO
+    self.context_size = context_size
     self.num_goals = num_goals
     self.dtype = dtype
 
-    self.policy_net = Policy(num_inputs,
+    self.policy_net = Policy(state_size,
                              0,
-                             num_c,
-                             num_actions,
+                             context_size,
+                             action_size,
                              hidden_size=64,
                              output_activation='sigmoid')
-    self.old_policy_net = Policy(num_inputs,
+    self.old_policy_net = Policy(state_size,
                                  0,
-                                 num_c,
-                                 num_actions,
+                                 context_size,
+                                 action_size,
                                  hidden_size=64,
                                  output_activation='sigmoid')
 
     #value_net = Value(num_inputs+num_c, hidden_size=64).type(dtype)
     # Reward net is the discriminator network.
-    self.reward_net = Reward(num_inputs,
-                             num_actions,
-                             num_c,
+    self.reward_net = Reward(state_size,
+                             action_size,
+                             context_size,
                              hidden_size=64)
 
-    self.posterior_net = Posterior(num_inputs,
-                                   num_actions,
-                                   num_c,
+    self.posterior_net = Posterior(state_size,
+                                   action_size,
+                                   context_size,
                                    hidden_size=64)
 
-    self.opt_policy = optim.Adam(policy_net.parameters(), lr=0.0003)
+    self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
     #self.opt_value = optim.Adam(value_net.parameters(), lr=0.0003)
-    self.opt_reward = optim.Adam(reward_net.parameters(), lr=0.0003)
-    self.opt_posterior = optim.Adam(posterior_net.parameters(), lr=0.0003)
+    self.opt_reward = optim.Adam(self.reward_net.parameters(), lr=0.0003)
+    self.opt_posterior = optim.Adam(self.posterior_net.parameters(), lr=0.0003)
 
     self.create_environment(env_data)
     self.expert = None
@@ -100,9 +103,9 @@ class CausalGAILMLP(object):
     assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
     self.set_diff = expert.set_diff
 
-  def select_action(state):
-    state = torch.from_numpy(state).unsqueeze(0).type(dtype)
-    action, _, _ = policy_net(Variable(state))
+  def select_action(self, state):
+    state = torch.from_numpy(state).unsqueeze(0).type(self.dtype)
+    action, _, _ = self.policy_net(Variable(state))
     return action
 
   def get_state_features(self, state_obj, use_state_features):
@@ -116,21 +119,33 @@ class CausalGAILMLP(object):
       feat = np.array(state_obj.coordinates, dtype=np.float32)
     return feat
 
-  def get_c_for_traj(self, traj):
+  def get_c_for_traj(self, state_arr, action_arr, c_arr):
     '''Get c[1:T] for given trajectory.'''
-    num_t_steps = len(traj)
-    c = -1*np.ones((num_t_steps+1,num_c))
-    # TODO: We should use the RNN (Q-network) to predict the goal
-    c[0,1] = expert_sample.g[0]
+    traj_len = len(state_arr)
+    c = -1*np.ones((traj_len+1, self.context_size))
+
+    # Use the Q-network (RNN) to predict goal.
+    pred_goal, _ = self.vae_model.predict_goal(
+        state_arr, action_arr, c_arr, None, self.num_goals)
+
+    # c[0, -1] Should be -1, hence we don't change it
+    c[:, :-1] = pred_goal.data[0].cpu().numpy()
     x = -1*np.ones((1, self.history_size, self.state_size))
-    for t in range(len(expert_states)):
+
+    for t in range(traj_len):
       # Shift history
-      x[:, :(history_size-1), :] = x[:, 1:, :]
-      x[:, -1, :] = expert.states[t]
+      if self.history_size > 1:
+        x[:, :-1, :] = x[:, 1:, :]
+      x[:, -1, :] = state_arr[t]
+      # Create inputs
       input_x = Variable(torch.from_numpy(
         np.reshape(x, (1, -1))).type(self.dtype))
-      mu, logvar = vae_model.encode(input_x, c[t,:])
-      c[t+1, :] = vae_model.reparameterize(mu, logvar)
+      input_c = Variable(torch.from_numpy(
+        np.reshape(c[t, :], (1, -1))).type(self.dtype))
+      # Get c_t
+      c_t = self.vae_model.get_context_at_state(input_x, input_c)
+      c[t+1, -1] = c_t.data.cpu().numpy()
+
     return c
 
   def sample_start_state(self):
@@ -284,7 +299,7 @@ class CausalGAILMLP(object):
     #criterion_posterior = nn.NLLLoss()
     criterion_posterior = nn.MSELoss()
 
-    opt_policy.lr = self.args.learning_rate \
+    self.opt_policy.lr = self.args.learning_rate \
         * max(1.0 - float(episode_idx)/args.num_episodes, 0)
     clip_epsilon = self.args.clip_epsilon \
         * max(1.0 - float(episode_idx)/args.num_episodes, 0)
@@ -371,7 +386,7 @@ class CausalGAILMLP(object):
 
   def train_gail(self, expert):
     '''Train GAIL.'''
-    args = self.args
+    args, dtype = self.args, self.dtype
     stats = {'average_reward': [], 'episode_reward': []}
     for ep_idx in range(args.num_episodes):
       memory = Memory()
@@ -385,13 +400,14 @@ class CausalGAILMLP(object):
         # Expert state and actions
         state_expert = state_expert[0]
         action_expert = action_expert[0]
+        c_expert = c_expert[0]
         episode_len = len(state_expert)
 
         # Generate c from trained VAE
         c_gen = self.get_c_for_traj(state_expert, action_expert, c_expert)
 
         # Sample start state
-        curr_state_obj = sample_start_state()
+        curr_state_obj = self.sample_start_state()
         curr_state_feat = self.get_state_features(curr_state_obj,
                                                   self.args.use_state_features)
         #state = running_state(state)
@@ -401,27 +417,30 @@ class CausalGAILMLP(object):
         ep_reward = 0
         for t in range(episode_len):
           ct = c_gen[t, :]
-          action = select_action(np.concatenate((curr_state_feat, ct)))
+          action = self.select_action(np.concatenate((curr_state_feat, ct)))
           action = epsilon_greedy_linear_decay(action.data.cpu().numpy(),
                                                args.num_episodes * 0.5,
                                                ep_idx,
+                                               self.action_size,
                                                low=0.05,
                                                high=0.3)
 
           # Get the discriminator reward
           reward = -float(self.reward_net(torch.cat(
-            (Variable(torch.from_numpy(s.state).unsqueeze(0)).type(dtype),
+            (Variable(torch.from_numpy(curr_state_feat).unsqueeze(
+                0)).type(dtype),
               Variable(torch.from_numpy(oned_to_onehot(
-                action, self.num_actions)).unsqueeze(0)).type(dtype),
+                action, self.action_size)).unsqueeze(0)).type(dtype),
               Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
              1)).data.cpu().numpy()[0,0])
 
           if t < args.max_ep_length-1:
             mu, sigma = self.posterior_net(
                 torch.cat((
-                  Variable(torch.from_numpy(s.state).unsqueeze(0)).type(dtype),
+                  Variable(torch.from_numpy(curr_state_feat).unsqueeze(
+                    0)).type(dtype),
                   Variable(torch.from_numpy(oned_to_onehot(
-                    action, self.num_actions)).unsqueeze(0)).type(dtype),
+                    action, self.action_size)).unsqueeze(0)).type(dtype),
                   Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)), 1))
 
             mu = mu.data.cpu().numpy()[0,0]
@@ -446,17 +465,19 @@ class CausalGAILMLP(object):
 
           ep_reward += reward
 
-          next_state_obj = self.transition_func(state, Action(action), 0)
+          next_state_obj = self.transition_func(curr_state_obj,
+                                                Action(action),
+                                                0)
           next_state_feat = self.get_state_features(
-              next_state_feat, self.args.use_state_features)
+              next_state_obj, self.args.use_state_features)
           #next_state = running_state(next_state)
           mask = 0 if t == args.max_ep_length - 1 else 1
 
           # Push to memory
           memory.push(curr_state_feat,
-                      np.array([oned_to_onehot(action, self.num_actions)]),
+                      np.array([oned_to_onehot(action, self.action_size)]),
                       mask,
-                      next_state_features,
+                      next_state_feat,
                       reward,
                       ct,
                       next_ct)
@@ -535,13 +556,14 @@ def load_VAE_model(model_checkpoint_path, new_args):
   return vae_train
 
 def main(args):
-  expert = ExpertHDF5(args.expert_path, num_inputs)
+  expert = ExpertHDF5(args.expert_path, 2)
   print('Loading expert trajectories ...')
   expert.push(only_coordinates_in_state=True, one_hot_action=True)
   print('Expert trajectories loaded.')
 
   # Load pre-trained VAE model
   vae_train = load_VAE_model(args.vae_checkpoint_path, args)
+  vae_train.set_expert(expert)
 
   dtype = torch.FloatTensor
   if args.cuda:
@@ -553,6 +575,7 @@ def main(args):
       None,
       state_size=args.state_size,
       action_size=args.action_size,
+      context_size=4 + args.context_size,  # num_goals + context_size
       num_goals=4,
       history_size=args.history_size,
       dtype=dtype)
@@ -570,7 +593,7 @@ if __name__ == '__main__':
   # Environment parameters
   parser.add_argument('--state-size', type=int, default=2,
                       help='State size for VAE.')
-  parser.add_argument('--action_size', type=int, default=4,
+  parser.add_argument('--action-size', type=int, default=4,
                       help='Action size for VAE.')
   parser.add_argument('--history-size', type=int, default=1,
                         help='State history size to use in VAE.')
@@ -591,7 +614,7 @@ if __name__ == '__main__':
   parser.add_argument('--num-episodes', type=int, default=500,
                       help='number of episodes (default: 500)')
   parser.add_argument('--max-ep-length', type=int, default=1000,
-                      help='maximum episode length (default: 6)')
+                      help='maximum episode length.')
 
   parser.add_argument('--optim-epochs', type=int, default=5,
                       help='number of epochs over a batch (default: 5)')
@@ -612,17 +635,23 @@ if __name__ == '__main__':
                       help='Clipping for PPO grad')
 
   # Path to pre-trained VAE model
-  parser.add_argument('--vae_checkpoint_path', type=str, required=True,
+  parser.add_argument('--vae-checkpoint-path', type=str, required=True,
                       help='Path to pre-trained VAE model.')
   # Path to store training results in
-  parser.add_argument('--results_dir', type=str, required=True,
+  parser.add_argument('--results-dir', type=str, required=True,
                       help='Path to store results in.')
 
+  parser.add_argument('--cuda', dest='cuda', action='store_true',
+                      help='enables CUDA training')
+  parser.add_argument('--no-cuda', dest='cuda', action='store_false',
+                      help='Disable CUDA training')
+  parser.set_defaults(cuda=False)
+
   # Use features
-  parser.add_argument('--use_state_features', dest='use_state_features',
+  parser.add_argument('--use-state-features', dest='use_state_features',
                       action='store_true',
                       help='Use features instead of direct (x,y) values in VAE')
-  parser.add_argument('--no-use_state_features', dest='use_state_features',
+  parser.add_argument('--no-use-state-features', dest='use_state_features',
                       action='store_false',
                       help='Do not use features instead of direct (x,y) ' \
                           'values in VAE')
