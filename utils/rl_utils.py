@@ -36,12 +36,12 @@ def oned_to_onehot(action_delta, num_actions):
 
 def normal_log_density(x, mean, log_std, std):
     var = std.pow(2)
-    pi_tensor = torch.FloatTensor(math.pi).type(x.type)
+    pi_tensor = torch.FloatTensor([math.pi]).type(x.data.type())
     log_density = -(x - mean).pow(2) / (2 * var) \
             - 0.5 * torch.log(2 * Variable(pi_tensor)) - log_std
     return log_density.sum(1)
 
-def get_advantage_for_rewards(rewards, masks, gamma):
+def get_advantage_for_rewards(rewards, masks, gamma, dtype=torch.FloatTensor):
   returns = torch.Tensor(rewards.size(0), 1).type(dtype)
   deltas = torch.Tensor(rewards.size(0), 1).type(dtype)
   advantages = torch.Tensor(rewards.size(0), 1).type(dtype)

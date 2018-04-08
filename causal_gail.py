@@ -85,6 +85,11 @@ class CausalGAILMLP(object):
     self.opt_reward = optim.Adam(self.reward_net.parameters(), lr=0.0003)
     self.opt_posterior = optim.Adam(self.posterior_net.parameters(), lr=0.0003)
 
+    # Create loss functions
+    self.criterion = nn.BCELoss()
+    #criterion_posterior = nn.NLLLoss()
+    self.criterion_posterior = nn.MSELoss()
+
     self.create_environment(env_data)
     self.expert = None
     self.obstacles, self.set_diff = None, None
@@ -226,7 +231,7 @@ class CausalGAILMLP(object):
       expert_output = self.reward_net(torch.cat((expert_state_var,
                                                  expert_action_var,
                                                  expert_latent_c_var), 1))
-      expert_disc_loss = criterion(expert_output, Variable(torch.zeros(
+      expert_disc_loss = self.criterion(expert_output, Variable(torch.zeros(
           expert_action_var.size(0), 1).type(dtype)))
       expert_disc_loss.backward()
 
@@ -234,7 +239,7 @@ class CausalGAILMLP(object):
       gen_output = self.reward_net(torch.cat((state_var,
                                               action_var,
                                               latent_c_var), 1))
-      gen_disc_loss = criterion(gen_output, Variable(
+      gen_disc_loss = self.criterion(gen_output, Variable(
           torch.ones(action_var.size(0), 1)).type(dtype))
       gen_disc_loss.backward()
 
@@ -249,7 +254,9 @@ class CausalGAILMLP(object):
                                             action_var,
                                             latent_c_var), 1))
 
-      posterior_loss = criterion_posterior(mu, latent_next_c)
+      true_posterior = torch.zeros(latent_next_c_var.size(0), 1).type(dtype)
+      true_posterior[:, 0] = latent_next_c_var.data[:, -1]
+      posterior_loss = self.criterion_posterior(mu, Variable(true_posterior))
       posterior_loss.backward()
 
       # compute old and new action probabilities
@@ -261,7 +268,7 @@ class CausalGAILMLP(object):
                                         action_stds)
 
       action_means_old, action_log_stds_old, action_stds_old = \
-              old_policy_net(torch.cat((state_var, latent_c_var), 1))
+              self.old_policy_net(torch.cat((state_var, latent_c_var), 1))
       log_prob_old = normal_log_density(action_var,
                                         action_means_old,
                                         action_log_stds_old,
@@ -279,16 +286,17 @@ class CausalGAILMLP(object):
       self.opt_policy.zero_grad()
       ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
       surr1 = ratio * advantages_var[:, 0]
-      surr2 = torch.clamp(ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon) \
-              * advantages_var[:,0]
+      surr2 = torch.clamp(ratio,
+                          1.0 - self.args.clip_epsilon,
+                          1.0 + self.args.clip_epsilon) * advantages_var[:,0]
       policy_surr = -torch.min(surr1, surr2).mean()
       policy_surr.backward()
-      torch.nn.utils.clip_grad_norm(policy_net.parameters(), 40)
+      torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
       self.opt_policy.step()
 
       # set new starting point for batch
-      cur_id += cur_batch_size
-      cur_id_exp += cur_batch_size_exp
+      curr_id += curr_batch_size
+      curr_id_exp += curr_batch_size_exp
 
       # TODO: Save statistics in tensorboard
 
@@ -298,9 +306,6 @@ class CausalGAILMLP(object):
     '''Update params for Policy (G), Reward (D) and Posterior (q) networks.
     '''
     args, dtype = self.args, self.dtype
-    criterion = nn.BCELoss()
-    #criterion_posterior = nn.NLLLoss()
-    criterion_posterior = nn.MSELoss()
 
     self.opt_policy.lr = self.args.learning_rate \
         * max(1.0 - float(episode_idx)/args.num_episodes, 0)
@@ -340,36 +345,31 @@ class CausalGAILMLP(object):
     ## Expand expert states ##
     expert_states = self.expand_states_torch(expert_states, self.history_size)
 
-    ## Extract expert latent variables ##
-    for i in range(expert_states.size(0)):
-      if i == 0 or expert_masks[i-1] == 0:
-        continue
-      mu, logvar = self.vae_model.vae_model.encode(
-          Variable(expert_states[i-1]),
-          Variable(expert_latent_c[i-1]))
-      expert_latent_c[i] = vae_model.reparameterize(mu, logvar)
-
-
     # compute advantages
-    returns, advantages = get_advantage_for_rewards(rewards, masks, gamma)
+    returns, advantages = get_advantage_for_rewards(rewards,
+                                                    masks,
+                                                    self.args.gamma,
+                                                    dtype=dtype)
     targets = Variable(returns)
     advantages = (advantages - advantages.mean()) / advantages.std()
 
     # Backup params after computing probs but before updating new params
     # policy_net.backup()
-    for old_policy_param, policy_param in zip(old_policy_net.parameters(),
-                                              policy_net.parameters()):
+    for old_policy_param, policy_param in zip(self.old_policy_net.parameters(),
+                                              self.policy_net.parameters()):
       old_policy_param.data.copy_(policy_param.data)
 
     # update value, reward and policy networks
     optim_iters = self.args.batch_size // optim_batch_size
     optim_batch_size_exp = expert_actions.size(0) // optim_iters
 
+    # Remove extra 1 array shape from actions
+    actions = np.squeeze(actions)
+    expert_actions = np.squeeze(expert_actions)
+
     for _ in range(optim_epochs):
-      perm = np.arange(actions.size(0))
-      perm_exp = np.arange(expert_actions.size(0))
-      np.random.shuffle(perm)
-      np.random.shuffle(perm_exp)
+      perm = np.random.permutation(np.arange(actions.size(0)))
+      perm_exp = np.random.permutation(np.arange(expert_actions.size(0)))
       if args.cuda:
         perm = torch.cuda.LongTensor(perm)
         perm_exp = torch.cuda.LongTensor(perm_exp)
@@ -522,8 +522,8 @@ class CausalGAILMLP(object):
       if ep_idx > 0 and  ep_idx % args.log_interval == 0:
         print('Episode [{}/{}]   Last R: {:.2f}   Avg R: {:.2f} \t' \
               'Last true R {:.2f}   Avg true R: {:.2f}'.format(
-              ep_idx, args.num_episodes, reward_sum, reward_batch/num_episodes,
-              true_reward_sum, true_reward_batch/num_episodes))
+              ep_idx, args.num_episodes, 0.0, reward_batch/num_episodes,
+              0.0, true_reward_batch/num_episodes))
 
       results_path = os.path.join(args.results_dir, 'results.pkl')
       with open(results_path, 'wb') as results_f:
