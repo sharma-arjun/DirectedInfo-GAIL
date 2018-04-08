@@ -172,8 +172,11 @@ class CausalGAILMLP(object):
     return os.path.join(checkpoint_dir, 'cp_{}.pth'.format(epoch))
 
   def expand_states_torch(self, states, history_size):
+    if self.history_size == 1:
+      return states
+
     expanded_states = -1*torch.ones(
-        states.size(0), states.size(1)*history_size).type(dtype)
+        states.size(0), states.size(1)*history_size).type(self.dtype)
 
     for i in range(states.size(0)):
         expanded_states[i, :states.size(1)] = states[i,:]
@@ -305,26 +308,29 @@ class CausalGAILMLP(object):
         * max(1.0 - float(episode_idx)/args.num_episodes, 0)
 
     # generated trajectories
-    states = torch.Tensor(gen_batch.state).type(dtype)
-    actions = torch.Tensor(np.concatenate(gen_batch.action, 0)).type(dtype)
-    rewards = torch.Tensor(gen_batch.reward).type(dtype)
-    masks = torch.Tensor(gen_batch.mask).type(dtype)
+    states = torch.Tensor(np.array(gen_batch.state)).type(dtype)
+    actions = torch.Tensor(np.array(gen_batch.action)).type(dtype)
+    rewards = torch.Tensor(np.array(gen_batch.reward)).type(dtype)
+    masks = torch.Tensor(np.array(gen_batch.mask)).type(dtype)
 
     ## Expand states to include history ##
     states = self.expand_states_torch(states, self.history_size)
 
-    latent_c = torch.Tensor(gen_batch.c).type(dtype)
-    latent_next_c = torch.Tensor(gen_batch.next_c).type(dtype)
+    latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
+    latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
     #values = value_net(Variable(states))
 
     # expert trajectories
     list_of_expert_states, list_of_expert_actions = [], []
     list_of_expert_latent_c, list_of_masks = [], []
     for i in range(len(expert_batch.state)):
-        list_of_expert_states.append(torch.Tensor(expert_batch.state[i]))
-        list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
-        list_of_expert_latent_c.append(torch.Tensor(expert_batch.c[i]))
-        list_of_masks.append(torch.Tensor(expert_batch.mask[i]))
+      expert_c = self.get_c_for_traj(expert_batch.state[i],
+                                     expert_batch.action[i],
+                                     expert_batch.c[i])
+      list_of_expert_states.append(torch.Tensor(expert_batch.state[i]))
+      list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
+      list_of_expert_latent_c.append(torch.Tensor(expert_c))
+      list_of_masks.append(torch.Tensor(expert_batch.mask[i]))
 
     expert_states = torch.cat(list_of_expert_states,0).type(dtype)
     expert_actions = torch.cat(list_of_expert_actions, 0).type(dtype)
@@ -338,8 +344,9 @@ class CausalGAILMLP(object):
     for i in range(expert_states.size(0)):
       if i == 0 or expert_masks[i-1] == 0:
         continue
-      mu, sigma = vae_model.encode(Variable(expert_states[i-1]),
-                                   Variable(expert_latent_c[i-1]))
+      mu, logvar = self.vae_model.vae_model.encode(
+          Variable(expert_states[i-1]),
+          Variable(expert_latent_c[i-1]))
       expert_latent_c[i] = vae_model.reparameterize(mu, logvar)
 
 
@@ -504,7 +511,11 @@ class CausalGAILMLP(object):
 
       # Update parameters
       gen_batch = memory.sample()
+
+      # We do not get the context variable from expert trajectories. Hence we
+      # need to fill it in later.
       expert_batch = expert.sample(size=args.num_expert_trajs)
+
       self.update_params(gen_batch, expert_batch, ep_idx,
                          args.optim_epochs, args.optim_batch_size)
 
