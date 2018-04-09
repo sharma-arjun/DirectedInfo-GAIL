@@ -522,8 +522,9 @@ class CausalGAILMLP(object):
 
             # TODO: should ideally be logpdf, but pdf may work better. Try both.
             next_ct = c_gen[t+1, -1]
+            # Use fixed std since we do not train it yet.
             reward += (self.args.lambda_posterior *
-                norm.pdf(next_ct, loc=mu, scale=abs(sigma)))
+                norm.pdf(next_ct, loc=mu, scale=0.1))
 
           ep_reward += reward
           ep_true_reward += self.true_reward.reward_at_location(
