@@ -441,7 +441,8 @@ class CausalGAILMLP(object):
               Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
              1)).data.cpu().numpy()[0,0])
 
-          if t < args.max_ep_length-1:
+          if t < episode_len:
+            # Predict c_t given (x_t, c_{t-1})
             mu, sigma = self.posterior_net(
                 torch.cat((
                   Variable(torch.from_numpy(curr_state_feat).unsqueeze(
@@ -454,21 +455,8 @@ class CausalGAILMLP(object):
             sigma = sigma.data.cpu().numpy()[0,0]
 
             # should ideally be logpdf, but pdf may work better. Try both.
-            next_ct = c_gen[t+1,:]
-            reward += norm.pdf(np.argmax(next_ct), loc=mu, scale=sigma)
-
-            # Also, argmax for now, but has to be c[t+1, 1:]
-            # when reverting to proper c ...
-
-            #reward += math.exp(np.sum(np.multiply(
-            # posterior_net(torch.cat((
-            #   Variable(torch.from_numpy(
-            #       s.state).unsqueeze(0)).type(dtype),
-            #   Variable(torch.from_numpy(
-            #       oned_to_onehot(action)).unsqueeze(0)).type(dtype),
-            #   Variable(torch.from_numpy(ct).unsqueeze(0)).type(
-            #     dtype)),1)).data.cpu().numpy()[0,:], c[t+1,:])))
-
+            next_ct = c_gen[t+1, -1]
+            reward += norm.pdf(next_ct, loc=mu, scale=abs(sigma))
 
           ep_reward += reward
 
@@ -480,6 +468,10 @@ class CausalGAILMLP(object):
           #next_state = running_state(next_state)
           mask = 0 if t == args.max_ep_length - 1 else 1
 
+          # Create next_ct_array since next_ct is a scalar.
+          next_ct_array = np.copy(ct)
+          next_ct_array[-1] = next_ct
+
           # Push to memory
           memory.push(curr_state_feat,
                       np.array([oned_to_onehot(action, self.action_size)]),
@@ -487,7 +479,7 @@ class CausalGAILMLP(object):
                       next_state_feat,
                       reward,
                       ct,
-                      next_ct)
+                      next_ct_array)
 
           if args.render:
             env.render()
