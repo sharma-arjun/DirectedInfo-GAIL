@@ -1,4 +1,5 @@
 import argparse
+import copy
 import sys
 import os
 import pdb
@@ -159,8 +160,8 @@ class CausalGAILMLP(object):
 
   def checkpoint_data_to_save(self):
     return {
-        'policy': policy_net,
-        'posterior': posterior_net,
+        'policy': self.policy_net,
+        'posterior': self.posterior_net,
         'reward': self.reward_net
         }
 
@@ -403,12 +404,17 @@ class CausalGAILMLP(object):
   def train_gail(self, expert):
     '''Train GAIL.'''
     args, dtype = self.args, self.dtype
-    stats = {'average_reward': [], 'episode_reward': []}
+    results = {'average_reward': [], 'episode_reward': [],
+               'true_traj': {}, 'pred_traj': {}}
+
     for ep_idx in range(args.num_episodes):
       memory = Memory()
 
       num_steps, num_episodes = 0, 0
       reward_batch, true_reward_batch = 0, 0
+
+      true_traj_curr_episode, gen_traj_curr_episode = [], []
+
       while num_steps < args.batch_size:
         traj_expert = expert.sample(size=1)
         state_expert, action_expert, c_expert, _ = traj_expert
@@ -424,17 +430,26 @@ class CausalGAILMLP(object):
 
         # Sample start state or should we just choose the start state from the
         # expert trajectory sampled above.
-        curr_state_obj = self.sample_start_state()
+        # curr_state_obj = self.sample_start_state()
+        curr_state_obj = State(state_expert[0], self.obstacles)
         curr_state_feat = self.get_state_features(curr_state_obj,
                                                   self.args.use_state_features)
-        #state = running_state(state)
+
+
 
         # TODO: Make this a separate function. Can be parallelized.
         #memory = Memory()
         ep_reward = 0
+        true_traj, gen_traj = [], []
         for t in range(episode_len):
           ct = c_gen[t, :]
           action = self.select_action(np.concatenate((curr_state_feat, ct)))
+
+          # Save generated and true trajectories
+          true_traj.append((state_expert[t], action_expert[t]))
+          gen_traj.append((curr_state_obj.coordinates,
+                           action.data.cpu().numpy()))
+
           action = epsilon_greedy_linear_decay(action.data.cpu().numpy(),
                                                args.num_episodes * 0.5,
                                                ep_idx,
@@ -506,12 +521,18 @@ class CausalGAILMLP(object):
         num_episodes += 1
         reward_batch += ep_reward
         true_reward_batch += 0.0
-        stats['episode_reward'].append(ep_reward)
+        results['episode_reward'].append(ep_reward)
 
-      stats['average_reward'].append(reward_batch / num_episodes)
+        # Append trajectories
+        true_traj_curr_episode.append(true_traj)
+        gen_traj_curr_episode.append(gen_traj)
 
-      #optim_batch_size = min(num_episodes,
-      #                        max(10,int(num_episodes*0.05)))
+      results['average_reward'].append(reward_batch / num_episodes)
+
+      # Add predicted and generated trajectories to results
+      if ep_idx % self.args.save_interval == 0:
+        results['true_traj'][ep_idx] = copy.deepcopy(true_traj_curr_episode)
+        results['pred_traj'][ep_idx] = copy.deepcopy(gen_traj_curr_episode)
 
       # Update parameters
       gen_batch = memory.sample()
@@ -531,9 +552,10 @@ class CausalGAILMLP(object):
 
       results_path = os.path.join(args.results_dir, 'results.pkl')
       with open(results_path, 'wb') as results_f:
-        pickle.dump((stats), results_f, protocol=2)
+        pickle.dump((results), results_f, protocol=2)
+        # print("Did save results to {}".format(results_path))
 
-      if ep_idx > 0 and ep_idx % args.save_interval == 0:
+      if ep_idx % args.save_interval == 0:
         checkpoint_filepath = self.model_checkpoint_filepath(ep_idx)
         torch.save(self.checkpoint_data_to_save(), checkpoint_filepath)
         print("Did save checkpoint: {}".format(checkpoint_filepath))
