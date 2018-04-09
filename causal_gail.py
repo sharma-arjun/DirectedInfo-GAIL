@@ -549,6 +549,8 @@ class CausalGAILMLP(object):
           goal_reward = np.log(gen_goal_numpy[np.argmax(
             expert_goal.data.cpu().numpy().reshape((-1)))])
 
+          reward += self.args.lambda_goal_pred_reward * goal_reward
+
           ep_reward += reward
           ep_true_reward += self.true_reward.reward_at_location(
               curr_state_obj.coordinates[0], curr_state_obj.coordinates[1])
@@ -737,6 +739,8 @@ if __name__ == '__main__':
 
   parser.add_argument('--lambda_posterior', type=float, default=1.0,
                       help='Parameter to scale MI loss from the posterior.')
+  parser.add_argument('--lambda_goal_pred_reward', type=float, default=1.0,
+                      help='Reward scale for goal prediction reward from RNN.')
 
   # Training parameters
   parser.add_argument('--learning_rate', type=float, default=3e-4,
