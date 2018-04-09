@@ -204,7 +204,11 @@ class CausalGAILMLP(object):
                               optim_batch_size,
                               optim_batch_size_exp,
                               optim_iters):
-    '''Update parameters for one batch of data.'''
+    '''Update parameters for one batch of data.
+
+    Update the policy network, discriminator (reward) network and the posterior
+    network here.
+    '''
     args, dtype = self.args, self.dtype
     curr_id, curr_id_exp = 0, 0
     for _ in range(optim_iters):
@@ -254,6 +258,9 @@ class CausalGAILMLP(object):
                                             action_var,
                                             latent_c_var), 1))
 
+      # latent_next_c is of shape (N, 5) where the 1-4 columns of each row
+      # represent the goal vector hence we need to extract the last column for
+      # the true posterior.
       true_posterior = torch.zeros(latent_next_c_var.size(0), 1).type(dtype)
       true_posterior[:, 0] = latent_next_c_var.data[:, -1]
       posterior_loss = self.criterion_posterior(mu, Variable(true_posterior))
@@ -329,6 +336,8 @@ class CausalGAILMLP(object):
     list_of_expert_states, list_of_expert_actions = [], []
     list_of_expert_latent_c, list_of_masks = [], []
     for i in range(len(expert_batch.state)):
+      # c sampled from expert trajectories is incorrect since we don't have
+      # "true c". Hence, we use the trained VAE to get the "true c".
       expert_c = self.get_c_for_traj(expert_batch.state[i],
                                      expert_batch.action[i],
                                      expert_batch.c[i])
@@ -354,7 +363,6 @@ class CausalGAILMLP(object):
     advantages = (advantages - advantages.mean()) / advantages.std()
 
     # Backup params after computing probs but before updating new params
-    # policy_net.backup()
     for old_policy_param, policy_param in zip(self.old_policy_net.parameters(),
                                               self.policy_net.parameters()):
       old_policy_param.data.copy_(policy_param.data)
@@ -363,7 +371,8 @@ class CausalGAILMLP(object):
     optim_iters = self.args.batch_size // optim_batch_size
     optim_batch_size_exp = expert_actions.size(0) // optim_iters
 
-    # Remove extra 1 array shape from actions
+    # Remove extra 1 array shape from actions, since actions were added as
+    # 1-hot vector of shape (1, A).
     actions = np.squeeze(actions)
     expert_actions = np.squeeze(expert_actions)
 
@@ -413,7 +422,8 @@ class CausalGAILMLP(object):
         # Generate c from trained VAE
         c_gen = self.get_c_for_traj(state_expert, action_expert, c_expert)
 
-        # Sample start state
+        # Sample start state or should we just choose the start state from the
+        # expert trajectory sampled above.
         curr_state_obj = self.sample_start_state()
         curr_state_feat = self.get_state_features(curr_state_obj,
                                                   self.args.use_state_features)
@@ -433,6 +443,7 @@ class CausalGAILMLP(object):
                                                high=0.3)
 
           # Get the discriminator reward
+          # TODO: Shouldn't we take the log of discriminator reward.
           reward = -float(self.reward_net(torch.cat(
             (Variable(torch.from_numpy(curr_state_feat).unsqueeze(
                 0)).type(dtype),
@@ -454,9 +465,10 @@ class CausalGAILMLP(object):
             mu = mu.data.cpu().numpy()[0,0]
             sigma = sigma.data.cpu().numpy()[0,0]
 
-            # should ideally be logpdf, but pdf may work better. Try both.
+            # TODO: should ideally be logpdf, but pdf may work better. Try both.
             next_ct = c_gen[t+1, -1]
-            reward += norm.pdf(next_ct, loc=mu, scale=abs(sigma))
+            reward += (self.args.lambda_posterior *
+                norm.pdf(next_ct, loc=mu, scale=abs(sigma)))
 
           ep_reward += reward
 
@@ -608,6 +620,9 @@ if __name__ == '__main__':
                       help='discount factor (default: 0.99)')
   parser.add_argument('--tau', type=float, default=0.95,
                       help='gae (default: 0.95)')
+
+  parser.add_argument('--lambda_posterior', type=float, default=1.0,
+                      help='Parameter to scale MI loss from the posterior.')
 
   # Training parameters
   parser.add_argument('--learning-rate', type=float, default=3e-4,
