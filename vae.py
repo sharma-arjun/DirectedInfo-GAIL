@@ -19,8 +19,7 @@ from itertools import product
 from models import Policy, Posterior
 
 from utils.logger import Logger, TensorboardXLogger
-from utils.torch_utils import get_norm_scalar_for_layer
-from utils.torch_utils import get_norm_inf_scalar_for_layer
+from utils.torch_utils import get_weight_norm_for_network
 
 #-----Environment-----#
 
@@ -527,15 +526,8 @@ class VAETrain(object):
             # Get the gradients and network weights
             # TODO: ADd gradients
             if self.args.log_gradients_tensorboard:
-                vae_model_l2_norm, vae_model_grad_l2_norm = -10000.0, -10000.0
-                for param in self.vae_model.parameters():
-                    vae_model_l2_norm = np.maximum(
-                            vae_model_l2_norm,
-                            get_norm_scalar_for_layer(param, 2))
-                    if param.grad is not None:
-                        vae_model_grad_l2_norm = np.maximum(
-                                vae_model_grad_l2_norm,
-                                get_norm_inf_scalar_for_layer(param.grad))
+                vae_model_l2_norm, vae_model_grad_l2_norm = \
+                        get_weight_norm_for_network(self.vae_model)
                 self.logger.summary_writer.add_scalar(
                         'weight/vae_model_l2',
                          vae_model_l2_norm,
@@ -545,15 +537,8 @@ class VAETrain(object):
                          vae_model_grad_l2_norm,
                          self.train_step_count)
 
-                Q_model_l2_norm, Q_model_l2_grad_norm = -10000.0, -10000.0
-                for param in self.Q_model_linear.parameters():
-                    Q_model_l2_norm = np.maximum(
-                            Q_model_l2_norm,
-                            get_norm_scalar_for_layer(param, 2))
-                    if param.grad is not None:
-                        Q_model_l2_grad_norm = np.maximum(
-                                Q_model_l2_grad_norm,
-                                get_norm_inf_scalar_for_layer(param.grad))
+                Q_model_l2_norm, Q_model_l2_grad_norm = \
+                        get_weight_norm_for_network(self.Q_model_linear)
                 self.logger.summary_writer.add_scalar(
                         'weight/Q_model_l2',
                          Q_model_l2_norm,

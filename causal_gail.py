@@ -35,6 +35,7 @@ from utils.logger import Logger, TensorboardXLogger
 from utils.rl_utils import epsilon_greedy_linear_decay, epsilon_greedy
 from utils.rl_utils import greedy, oned_to_onehot, normal_log_density
 from utils.rl_utils import get_advantage_for_rewards
+from utils.torch_utils import get_weight_norm_for_network
 
 class CausalGAILMLP(object):
   def __init__(self,
@@ -262,7 +263,21 @@ class CausalGAILMLP(object):
           torch.ones(action_var.size(0), 1)).type(dtype))
       gen_disc_loss.backward()
 
+      # Add loss scalars.
+      self.logger.summary_writer.add_scalars(
+          'loss/discriminator',
+          {
+            'total': expert_disc_loss.data[0] + gen_disc_loss.data[0],
+            'expert': expert_disc_loss.data[0],
+            'gen': gen_disc_loss.data[0],
+            })
       self.opt_reward.step()
+      reward_l2_norm, reward_grad_l2_norm = \
+                        get_weight_norm_for_network(self.reward_net)
+      self.logger.summary_writer.add_scalar('weight/discriminator/param',
+                                            reward_l2_norm)
+      self.logger.summary_writer.add_scalar('weight/discriminator/grad',
+                                            reward_grad_l2_norm)
 
 
       # Update posterior net. We need to do this by reparameterization
@@ -280,6 +295,9 @@ class CausalGAILMLP(object):
       true_posterior[:, 0] = latent_next_c_var.data[:, -1]
       posterior_loss = self.criterion_posterior(mu, Variable(true_posterior))
       posterior_loss.backward()
+      self.logger.summary_writer.add_scalar('loss/posterior',
+                                            posterior_loss.data[0])
+
 
       # compute old and new action probabilities
       action_means, action_log_stds, action_stds = self.policy_net(
@@ -313,15 +331,21 @@ class CausalGAILMLP(object):
                           1.0 + self.args.clip_epsilon) * advantages_var[:,0]
       policy_surr = -torch.min(surr1, surr2).mean()
       policy_surr.backward()
-      torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
+      # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
       self.opt_policy.step()
+      self.logger.summary_writer.add_scalar('loss/policy',
+                                            policy_surr.data[0])
+
+      policy_l2_norm, policy_grad_l2_norm = \
+                        get_weight_norm_for_network(self.policy_net)
+      self.logger.summary_writer.add_scalar('weight/policy/param',
+                                            policy_l2_norm)
+      self.logger.summary_writer.add_scalar('weight/policy/grad',
+                                            policy_grad_l2_norm)
 
       # set new starting point for batch
       curr_id += curr_batch_size
       curr_id_exp += curr_batch_size_exp
-
-      # TODO: Save statistics in tensorboard
-
 
   def update_params(self, gen_batch, expert_batch, episode_idx,
                     optim_epochs, optim_batch_size):
