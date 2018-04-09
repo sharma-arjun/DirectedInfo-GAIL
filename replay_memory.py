@@ -13,7 +13,13 @@ class Memory(object):
 
     def push(self, state, action, mask, next_state, reward, c=0.0, next_c=0.0):
         """Saves a transition."""
-        self.memory.append(Transition(state, action, mask, next_state, reward, c, next_c))
+        self.memory.append(Transition(state,
+                                      action,
+                                      mask,
+                                      next_state,
+                                      reward,
+                                      c,
+                                      next_c))
 
     def sample(self):
         return Transition(*zip(*self.memory))
