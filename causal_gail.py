@@ -621,20 +621,20 @@ def main(args):
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Causal GAIL using MLP.')
-  parser.add_argument('--expert-path', default="L_expert_trajectories/",
+  parser.add_argument('--expert_path', default="L_expert_trajectories/",
                       help='path to the expert trajectory files')
 
   parser.add_argument('--seed', type=int, default=1,
                       help='random seed (default: 1)')
 
   # Environment parameters
-  parser.add_argument('--state-size', type=int, default=2,
+  parser.add_argument('--state_size', type=int, default=2,
                       help='State size for VAE.')
-  parser.add_argument('--action-size', type=int, default=4,
+  parser.add_argument('--action_size', type=int, default=4,
                       help='Action size for VAE.')
-  parser.add_argument('--history-size', type=int, default=1,
+  parser.add_argument('--history_size', type=int, default=1,
                         help='State history size to use in VAE.')
-  parser.add_argument('--context-size', type=int, default=1,
+  parser.add_argument('--context_size', type=int, default=1,
                       help='Context size for VAE.')
 
   # RL parameters
@@ -647,38 +647,38 @@ if __name__ == '__main__':
                       help='Parameter to scale MI loss from the posterior.')
 
   # Training parameters
-  parser.add_argument('--learning-rate', type=float, default=3e-4,
+  parser.add_argument('--learning_rate', type=float, default=3e-4,
                       help='gae (default: 3e-4)')
-  parser.add_argument('--batch-size', type=int, default=2048,
+  parser.add_argument('--batch_size', type=int, default=2048,
                       help='batch size (default: 2048)')
-  parser.add_argument('--num-episodes', type=int, default=500,
+  parser.add_argument('--num_episodes', type=int, default=500,
                       help='number of episodes (default: 500)')
-  parser.add_argument('--max-ep-length', type=int, default=1000,
+  parser.add_argument('--max_ep_length', type=int, default=1000,
                       help='maximum episode length.')
 
-  parser.add_argument('--optim-epochs', type=int, default=5,
+  parser.add_argument('--optim_epochs', type=int, default=5,
                       help='number of epochs over a batch (default: 5)')
-  parser.add_argument('--optim-batch-size', type=int, default=64,
+  parser.add_argument('--optim_batch_size', type=int, default=64,
                       help='batch size for epochs (default: 64)')
-  parser.add_argument('--num-expert-trajs', type=int, default=5,
+  parser.add_argument('--num_expert_trajs', type=int, default=5,
                       help='number of expert trajectories in a batch.')
   parser.add_argument('--render', action='store_true',
                       help='render the environment')
   # Log interval
-  parser.add_argument('--log-interval', type=int, default=1,
+  parser.add_argument('--log_interval', type=int, default=1,
                       help='Interval between training status logs')
-  parser.add_argument('--save-interval', type=int, default=100,
+  parser.add_argument('--save_interval', type=int, default=100,
                       help='Interval between saving policy weights')
-  parser.add_argument('--entropy-coeff', type=float, default=0.0,
+  parser.add_argument('--entropy_coeff', type=float, default=0.0,
                       help='coefficient for entropy cost')
-  parser.add_argument('--clip-epsilon', type=float, default=0.2,
+  parser.add_argument('--clip_epsilon', type=float, default=0.2,
                       help='Clipping for PPO grad')
 
   # Path to pre-trained VAE model
-  parser.add_argument('--vae-checkpoint-path', type=str, required=True,
+  parser.add_argument('--vae_checkpoint_path', type=str, required=True,
                       help='Path to pre-trained VAE model.')
   # Path to store training results in
-  parser.add_argument('--results-dir', type=str, required=True,
+  parser.add_argument('--results_dir', type=str, required=True,
                       help='Path to store results in.')
 
   parser.add_argument('--cuda', dest='cuda', action='store_true',
@@ -688,10 +688,10 @@ if __name__ == '__main__':
   parser.set_defaults(cuda=False)
 
   # Use features
-  parser.add_argument('--use-state-features', dest='use_state_features',
+  parser.add_argument('--use_state_features', dest='use_state_features',
                       action='store_true',
                       help='Use features instead of direct (x,y) values in VAE')
-  parser.add_argument('--no-use-state-features', dest='use_state_features',
+  parser.add_argument('--no-use_state_features', dest='use_state_features',
                       action='store_false',
                       help='Do not use features instead of direct (x,y) ' \
                           'values in VAE')
@@ -706,5 +706,10 @@ if __name__ == '__main__':
     os.makedirs(os.path.join(args.results_dir, 'log'))
     # Directory for model checkpoints
     os.makedirs(os.path.join(args.results_dir, 'checkpoint'))
+
+    # Save runtime arguments to pickle file
+    args_pkl_filepath = os.path.join(args.results_dir, 'args.pkl')
+    with open(args_pkl_filepath, 'wb') as args_pkl_f:
+      pickle.dump(args, args_pkl_f, protocol=2)
 
   main(args)
