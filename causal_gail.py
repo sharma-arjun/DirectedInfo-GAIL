@@ -40,7 +40,7 @@ class CausalGAILMLP(object):
   def __init__(self,
                args,
                vae_model,
-               env_data,
+               logger,
                state_size=2,
                action_size=4,
                context_size=1,
@@ -49,12 +49,14 @@ class CausalGAILMLP(object):
                dtype=torch.FloatTensor):
     self.args = args
     self.vae_model = vae_model
+    self.logger = logger
     self.state_size = state_size
     self.action_size = action_size
     self.history_size = history_size
     self.context_size = context_size
     self.num_goals = num_goals
     self.dtype = dtype
+    self.train_step_count = 0
 
     self.policy_net = Policy(state_size,
                              0,
@@ -91,11 +93,11 @@ class CausalGAILMLP(object):
     #criterion_posterior = nn.NLLLoss()
     self.criterion_posterior = nn.MSELoss()
 
-    self.create_environment(env_data)
+    self.create_environment()
     self.expert = None
     self.obstacles, self.set_diff = None, None
 
-  def create_environment(self, env_data):
+  def create_environment(self):
     self.width, self.height = 21, 21
     self.transition_func = TransitionFunction(self.width,
                                               self.height,
@@ -407,11 +409,13 @@ class CausalGAILMLP(object):
     results = {'average_reward': [], 'episode_reward': [],
                'true_traj': {}, 'pred_traj': {}}
 
+    self.train_step_count = 0
+
     for ep_idx in range(args.num_episodes):
       memory = Memory()
 
       num_steps, num_episodes = 0, 0
-      reward_batch, true_reward_batch = 0, 0
+      reward_batch, true_reward_batch = [], 0
 
       true_traj_curr_episode, gen_traj_curr_episode = [], []
 
@@ -519,7 +523,7 @@ class CausalGAILMLP(object):
         #ep_memory.push(memory)
         num_steps += (t-1)
         num_episodes += 1
-        reward_batch += ep_reward
+        reward_batch.append(ep_reward)
         true_reward_batch += 0.0
         results['episode_reward'].append(ep_reward)
 
@@ -527,7 +531,13 @@ class CausalGAILMLP(object):
         true_traj_curr_episode.append(true_traj)
         gen_traj_curr_episode.append(gen_traj)
 
-      results['average_reward'].append(reward_batch / num_episodes)
+      results['average_reward'].append(np.mean(reward_batch))
+
+      # Add to tensorboard
+      self.logger.summary_writer.add_scalars(
+          'gen_traj/reward', {'average': np.mean(reward_batch),
+                              'max': np.max(reward_batch),
+                              'min': np.min(reward_batch)})
 
       # Add predicted and generated trajectories to results
       if ep_idx % self.args.save_interval == 0:
@@ -544,11 +554,13 @@ class CausalGAILMLP(object):
       self.update_params(gen_batch, expert_batch, ep_idx,
                          args.optim_epochs, args.optim_batch_size)
 
+      self.train_step_count += 1
+
       if ep_idx > 0 and  ep_idx % args.log_interval == 0:
         print('Episode [{}/{}]   Last R: {:.2f}   Avg R: {:.2f} \t' \
               'Last true R {:.2f}   Avg true R: {:.2f}'.format(
-              ep_idx, args.num_episodes, 0.0, reward_batch/num_episodes,
-              0.0, true_reward_batch/num_episodes))
+              ep_idx, args.num_episodes, 0.0, np.mean(reward_batch), 0.0,
+              true_reward_batch/num_episodes))
 
       results_path = os.path.join(args.results_dir, 'results.pkl')
       with open(results_path, 'wb') as results_f:
@@ -593,6 +605,11 @@ def load_VAE_model(model_checkpoint_path, new_args):
   return vae_train
 
 def main(args):
+  # Create Logger
+  if not os.path.exists(os.path.join(args.results_dir, 'log')):
+    os.makedirs(os.path.join(args.results_dir, 'log'))
+  logger = TensorboardXLogger(os.path.join(args.results_dir, 'log'))
+
   expert = ExpertHDF5(args.expert_path, 2)
   print('Loading expert trajectories ...')
   expert.push(only_coordinates_in_state=True, one_hot_action=True)
@@ -609,7 +626,7 @@ def main(args):
   causal_gail_mlp = CausalGAILMLP(
       args,
       vae_train,
-      None,
+      logger,
       state_size=args.state_size,
       action_size=args.action_size,
       context_size=4 + args.context_size,  # num_goals + context_size
