@@ -23,7 +23,7 @@ from torch.autograd import Variable
 
 from models import Policy, Posterior, Reward, Value
 from grid_world import State, Action, TransitionFunction
-from grid_world import RewardFunction, RewardFunction_SR2
+from grid_world import RewardFunction, RewardFunction_SR2, GridWorldReward
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from load_expert_traj import Expert, ExpertHDF5
 from replay_memory import Memory
@@ -93,6 +93,7 @@ class CausalGAILMLP(object):
     #criterion_posterior = nn.NLLLoss()
     self.criterion_posterior = nn.MSELoss()
 
+    self.transition_func, self.true_reward = None, None
     self.create_environment()
     self.expert = None
     self.obstacles, self.set_diff = None, None
@@ -102,7 +103,6 @@ class CausalGAILMLP(object):
     self.transition_func = TransitionFunction(self.width,
                                               self.height,
                                               obstacle_movement)
-
   def set_expert(self, expert):
     assert self.expert is None, "Trying to set non-None expert"
     self.expert = expert
@@ -110,6 +110,18 @@ class CausalGAILMLP(object):
     self.obstacles = expert.obstacles
     assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
     self.set_diff = expert.set_diff
+
+    # TODO: Hardcoded for now remove this, load it from the expert trajectory
+    # file. Also, since the final state is not in expert trajectory we append
+    # very next states as goal as well. Else reward is sparse.
+    goals = [(0,0), (1,0), (0,1), (1,1),
+             (20,20), (20, 19), (19, 20), (19, 19),
+             (20,0), (20, 1), (19, 0), (19, 1),
+             (0,20), (1, 20), (0, 19), (1, 19)]
+    self.true_reward = GridWorldReward(self.width,
+                                       self.height,
+                                       goals,
+                                       self.obstacles)
 
   def select_action(self, state):
     state = torch.from_numpy(state).unsqueeze(0).type(self.dtype)
@@ -318,9 +330,9 @@ class CausalGAILMLP(object):
     args, dtype = self.args, self.dtype
 
     self.opt_policy.lr = self.args.learning_rate \
-        * max(1.0 - float(episode_idx)/args.num_episodes, 0)
+        * max(1.0 - float(episode_idx)/args.num_epochs, 0)
     clip_epsilon = self.args.clip_epsilon \
-        * max(1.0 - float(episode_idx)/args.num_episodes, 0)
+        * max(1.0 - float(episode_idx)/args.num_epochs, 0)
 
     # generated trajectories
     states = torch.Tensor(np.array(gen_batch.state)).type(dtype)
@@ -411,12 +423,12 @@ class CausalGAILMLP(object):
 
     self.train_step_count = 0
 
-    for ep_idx in range(args.num_episodes):
+    for ep_idx in range(args.num_epochs):
       memory = Memory()
 
-      num_steps, num_episodes = 0, 0
-      reward_batch, true_reward_batch = [], 0
-
+      num_steps = 0
+      reward_batch, true_reward_batch = [], []
+      expert_true_reward_batch = []
       true_traj_curr_episode, gen_traj_curr_episode = [], []
 
       while num_steps < args.batch_size:
@@ -443,7 +455,7 @@ class CausalGAILMLP(object):
 
         # TODO: Make this a separate function. Can be parallelized.
         #memory = Memory()
-        ep_reward = 0
+        ep_reward, ep_true_reward, expert_true_reward = 0, 0, 0
         true_traj, gen_traj = [], []
         for t in range(episode_len):
           ct = c_gen[t, :]
@@ -455,7 +467,7 @@ class CausalGAILMLP(object):
                            action.data.cpu().numpy()))
 
           action = epsilon_greedy_linear_decay(action.data.cpu().numpy(),
-                                               args.num_episodes * 0.5,
+                                               args.num_epochs * 0.5,
                                                ep_idx,
                                                self.action_size,
                                                low=0.05,
@@ -490,6 +502,10 @@ class CausalGAILMLP(object):
                 norm.pdf(next_ct, loc=mu, scale=abs(sigma)))
 
           ep_reward += reward
+          ep_true_reward += self.true_reward.reward_at_location(
+              curr_state_obj.coordinates[0], curr_state_obj.coordinates[1])
+          expert_true_reward += self.true_reward.reward_at_location(
+              state_expert[t][0], state_expert[t][1])
 
           next_state_obj = self.transition_func(curr_state_obj,
                                                 Action(action),
@@ -522,9 +538,9 @@ class CausalGAILMLP(object):
 
         #ep_memory.push(memory)
         num_steps += (t-1)
-        num_episodes += 1
         reward_batch.append(ep_reward)
-        true_reward_batch += 0.0
+        true_reward_batch.append(ep_true_reward)
+        expert_true_reward_batch.append(expert_true_reward)
         results['episode_reward'].append(ep_reward)
 
         # Append trajectories
@@ -538,6 +554,14 @@ class CausalGAILMLP(object):
           'gen_traj/reward', {'average': np.mean(reward_batch),
                               'max': np.max(reward_batch),
                               'min': np.min(reward_batch)})
+      self.logger.summary_writer.add_scalars(
+          'gen_traj/true_reward',
+          {
+            'average': np.mean(true_reward_batch),
+            'max': np.max(true_reward_batch),
+            'min': np.min(true_reward_batch),
+            'expert_true': np.mean(expert_true_reward_batch)
+          })
 
       # Add predicted and generated trajectories to results
       if ep_idx % self.args.save_interval == 0:
@@ -557,10 +581,12 @@ class CausalGAILMLP(object):
       self.train_step_count += 1
 
       if ep_idx > 0 and  ep_idx % args.log_interval == 0:
-        print('Episode [{}/{}]   Last R: {:.2f}   Avg R: {:.2f} \t' \
-              'Last true R {:.2f}   Avg true R: {:.2f}'.format(
-              ep_idx, args.num_episodes, 0.0, np.mean(reward_batch), 0.0,
-              true_reward_batch/num_episodes))
+        print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
+              'True Avg {:.2f}   True Max R: {:.2f}   ' \
+              'Expert (Avg): {:.2f}'.format(
+              ep_idx, args.num_epochs, np.mean(reward_batch),
+              np.max(reward_batch), np.mean(true_reward_batch),
+              np.max(true_reward_batch), np.mean(expert_true_reward_batch)))
 
       results_path = os.path.join(args.results_dir, 'results.pkl')
       with open(results_path, 'wb') as results_f:
@@ -668,7 +694,7 @@ if __name__ == '__main__':
                       help='gae (default: 3e-4)')
   parser.add_argument('--batch_size', type=int, default=2048,
                       help='batch size (default: 2048)')
-  parser.add_argument('--num_episodes', type=int, default=500,
+  parser.add_argument('--num_epochs', type=int, default=500,
                       help='number of episodes (default: 500)')
   parser.add_argument('--max_ep_length', type=int, default=1000,
                       help='maximum episode length.')

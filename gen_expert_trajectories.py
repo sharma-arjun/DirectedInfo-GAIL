@@ -290,7 +290,11 @@ def gen_diverse_trajs(grid_width, grid_height):
     set_diff = list(set(product(tuple(range(7,13)),tuple(range(7,13)))) \
             - set(obstacles))
     expert_data_dict = {}
-    env_data_dict = {'num_actions': 8, 'num_goals': n_goals}
+    env_data_dict = {
+            'num_actions': 8,
+            'num_goals': n_goals,
+            'goals': np.array(goals),
+            }
 
     for n in range(N):
 
