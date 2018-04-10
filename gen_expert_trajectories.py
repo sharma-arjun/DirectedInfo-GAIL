@@ -73,12 +73,14 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
     env_data_dict = {'num_actions': num_actions, 'num_goals': num_goals}
 
     for i in range(num_traj):
+        start_state = State(sample_start(set_diff), obstacles)
         for action_idx in range(num_actions):
 
             path_key = str(i) + '_' + str(action_idx)
             expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
 
-            state = State(sample_start(set_diff), obstacles)
+            state = start_state
+
             for j in range(n):
                 # Set initial direction
                 if j == 0:
@@ -102,6 +104,7 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
                     expert_data_dict[path_key]['goal'].append(action.delta)
                     state = T(state, action, j)
         # print(expert_data_dict[path_key]['goal'])
+
 
     return env_data_dict, expert_data_dict, obstacles, set_diff
 
