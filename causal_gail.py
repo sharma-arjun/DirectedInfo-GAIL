@@ -598,8 +598,6 @@ class CausalGAILMLP(object):
           memory_t[4] += (goal_reward / expert_episode_len)
           memory.push(*memory_t)
 
-        print("Disc: {:.2f},   Posterior: {:.2f},    Goal: {:.2f}".format(
-          disc_reward, posterior_reward, goal_reward))
         self.logger.summary_writer.add_scalars(
             'gen_traj/gen_reward',
             {
