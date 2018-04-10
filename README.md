@@ -12,3 +12,14 @@ python -m pdb causal_gail.py --num_epochs 1000 --state_size 2 --action_size 8 --
     --vae_checkpoint_path ./results/diverse_traj/results_lr_001_epoch_1000_save_freq_100_use_ht_as_goal_2/checkpoint/cp_500.pth \ 
     --learning_rate 0.0003 --max_ep_length 20 --batch_size 1024 --num_expert_trajs 50
 ```
+
+
+- Running `vae` on L trajectories
+
+```
+python -m pdb vae.py --use_rnn_goal 1 --num-epochs 500 --vae_state_size 2 \
+        --vae_action_size 4 --vae_history_size 4 --no-use_state_features \
+        --expert-path ./h5_trajs/L_trajs/  \
+        --results_dir /tmp/results/L_traj
+
+```
