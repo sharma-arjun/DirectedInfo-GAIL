@@ -245,9 +245,10 @@ class GridWorldReward(object):
     self.obstacle_reward = -100
     self.other_reward = -1
 
-  def reward_at_location(self, x, y):
-    pos = (int(y), int(x))
-    if pos in self.goals:
+  def reward_at_location(self, x, y, goals=None):
+    pos = [int(x), int(y)]
+    goals = self.goals if goals is None else goals
+    if pos in goals:
       return self.goal_reward
     if pos in self.obstacles:
       return self.obstacle_reward

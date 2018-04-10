@@ -539,10 +539,13 @@ class CausalGAILMLP(object):
 
           # Update Rewards
           ep_reward += (disc_reward_t + posterior_reward_t)
+          true_goal_state = [int(x) for x in state_expert[-1].tolist()]
           ep_true_reward += self.true_reward.reward_at_location(
-              curr_state_obj.coordinates[0], curr_state_obj.coordinates[1])
+              curr_state_obj.coordinates[0], curr_state_obj.coordinates[1],
+              goals=[true_goal_state])
           expert_true_reward += self.true_reward.reward_at_location(
-                state_expert[t][0], state_expert[t][1])
+                state_expert[t][0], state_expert[t][1],
+                goals=[true_goal_state])
 
           # Update next state
           next_state_obj = self.transition_func(curr_state_obj,
