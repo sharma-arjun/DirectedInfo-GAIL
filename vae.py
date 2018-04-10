@@ -305,7 +305,7 @@ class VAETrain(object):
             pred_goal.append(output)
 
         if self.args.flag_goal_pred == 'sum_all_hidden':
-            final_goal = self.Q_model_linear_softmax(final_goal)
+            final_goal = self.Q_model_linear_softmax(final_goal / episode_len)
         elif self.args.flag_goal_pred == 'last_hidden':
             final_goal = self.Q_model_linear_softmax(self.Q_model_linear(
                 final_goal))
