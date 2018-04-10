@@ -293,14 +293,26 @@ class VAETrain(object):
                 # output = self.Q_model_linear(ht)
                 output = ht
 
-            # final_goal = final_goal + output
-            final_goal = output
+            if self.args.flag_goal_pred == 'sum_all_hidden':
+                final_goal = final_goal + self.Q_model_linear(output)
+            elif self.args.flag_goal_pred == 'last_hidden':
+                final_goal = output
+            else:
+                raise ValueError("Invalid goal pred flag {}".format(
+                    self.args.flag_goal_pred))
 
             # pred_goal.append(Q_model_linear_softmax(output))
             pred_goal.append(output)
 
-        # final_goal = final_goal / episode_len
-        final_goal = self.Q_model_linear_softmax(self.Q_model_linear(final_goal))
+        if self.args.flag_goal_pred == 'sum_all_hidden':
+            final_goal = self.Q_model_linear_softmax(final_goal)
+        elif self.args.flag_goal_pred == 'last_hidden':
+            final_goal = final_goal / episode_len
+            final_goal = self.Q_model_linear_softmax(self.Q_model_linear(
+                final_goal))
+        else:
+            raise ValueError("Invalid goal pred flag {}".format(
+                    self.args.flag_goal_pred))
 
         return final_goal, pred_goal
 
@@ -885,6 +897,11 @@ if __name__ == '__main__':
                         help='State history size to use in VAE.')
     parser.add_argument('--vae_context_size', type=int, default=1,
                         help='Context size for VAE.')
+
+    # Goal prediction
+    parser.add_argument('--flag_goal_pred', type=str, default='last_hidden',
+                        choices=['last_hidden', 'sum_all_hidden'],
+                        help='Type of network to use for goal prediction')
 
     # Use features
     parser.add_argument('--use_state_features', dest='use_state_features',
