@@ -598,6 +598,17 @@ class CausalGAILMLP(object):
           memory_t[4] += (goal_reward / expert_episode_len)
           memory.push(*memory_t)
 
+        print("Disc: {:.2f},   Posterior: {:.2f},    Goal: {:.2f}".format(
+          disc_reward, posterior_reward, goal_reward))
+        self.logger.summary_writer.add_scalars(
+            'gen_traj/gen_reward',
+            {
+              'discriminator': disc_reward,
+              'posterior': posterior_reward,
+              'goal': goal_reward,
+            }
+        )
+
         #ep_memory.push(memory)
         num_steps += (t-1)
         reward_batch.append(ep_reward)
@@ -613,9 +624,11 @@ class CausalGAILMLP(object):
 
       # Add to tensorboard
       self.logger.summary_writer.add_scalars(
-          'gen_traj/reward', {'average': np.mean(reward_batch),
-                              'max': np.max(reward_batch),
-                              'min': np.min(reward_batch)})
+          'gen_traj/reward', {
+            'average': np.mean(reward_batch),
+            'max': np.max(reward_batch),
+            'min': np.min(reward_batch)
+            })
       self.logger.summary_writer.add_scalars(
           'gen_traj/true_reward',
           {
