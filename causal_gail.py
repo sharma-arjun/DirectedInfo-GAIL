@@ -85,7 +85,7 @@ class CausalGAILMLP(object):
                              hidden_size=64)
 
     self.posterior_net = Posterior(state_size * history_size,
-                                   action_size,
+                                   0,
                                    context_size,
                                    hidden_size=64)
 
@@ -296,7 +296,6 @@ class CausalGAILMLP(object):
       # posterior net since we need c_t to predict a_t while till now we
       # only have c_{t-1}.
       mu, logvar = self.posterior_net(torch.cat((state_var,
-                                            action_var,
                                             latent_c_var), 1))
 
       if args.use_reparameterize:
@@ -530,7 +529,12 @@ class CausalGAILMLP(object):
         memory_list = []
         for t in range(expert_episode_len):
           ct = c_gen[t, :]
-          action = self.select_action(np.concatenate((curr_state, ct)))
+          next_ct = c_gen[t+1, -1]
+          # Create next_ct_array since next_ct is a scalar.
+          next_ct_array = np.copy(ct)
+          next_ct_array[-1] = next_ct
+
+          action = self.select_action(np.concatenate((curr_state, next_ct_array)))
           action_numpy = action.data.cpu().numpy()
 
           # Save generated and true trajectories
@@ -574,15 +578,12 @@ class CausalGAILMLP(object):
                 torch.cat((
                   Variable(torch.from_numpy(curr_state).unsqueeze(
                     0)).type(dtype),
-                  Variable(torch.from_numpy(oned_to_onehot(
-                    action, self.action_size)).unsqueeze(0)).type(dtype),
                   Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)), 1))
 
           mu = mu.data.cpu().numpy()[0,0]
           sigma = np.exp(0.5 * sigma.data.cpu().numpy()[0,0])
 
           # TODO: should ideally be logpdf, but pdf may work better. Try both.
-          next_ct = c_gen[t+1, -1]
 
           # use norm.logpdf if flag else use norm.pdf
           if args.use_log_rewards:
@@ -625,9 +626,6 @@ class CausalGAILMLP(object):
 
           mask = 0 if t == expert_episode_len - 1 else 1
 
-          # Create next_ct_array since next_ct is a scalar.
-          next_ct_array = np.copy(ct)
-          next_ct_array[-1] = next_ct
 
           # Push to memory
           memory_list.append([
