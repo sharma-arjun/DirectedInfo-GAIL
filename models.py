@@ -70,9 +70,9 @@ class Posterior(nn.Module):
             
 
 class Value(nn.Module):
-    def __init__(self, num_inputs, hidden_size=100):
+    def __init__(self, state_size, hidden_size=64):
         super(Value, self).__init__()
-        self.affine1 = nn.Linear(num_inputs, hidden_size)
+        self.affine1 = nn.Linear(state_size, hidden_size)
         self.affine2 = nn.Linear(hidden_size, hidden_size)
         self.value_head = nn.Linear(hidden_size, 1)
         self.value_head.weight.data.mul_(0.1)

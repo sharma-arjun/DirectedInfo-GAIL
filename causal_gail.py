@@ -60,35 +60,40 @@ class CausalGAILMLP(object):
     self.dtype = dtype
     self.train_step_count, self.gail_step_count = 0, 0
 
-    self.policy_net = Policy(state_size*history_size,
+    self.policy_net = Policy(state_size * history_size,
                              0,
                              context_size,
                              action_size,
                              hidden_size=64,
                              output_activation='sigmoid')
-    self.old_policy_net = Policy(state_size*history_size,
+    self.old_policy_net = Policy(state_size * history_size,
                                  0,
                                  context_size,
                                  action_size,
                                  hidden_size=64,
                                  output_activation='sigmoid')
 
-    #value_net = Value(num_inputs+num_c, hidden_size=64).type(dtype)
+    if args.use_value_net:
+      self.value_net = Value(state_size * history_size + \
+                               context_size + num_goals,
+                             hidden_size=64)
+
     # Reward net is the discriminator network.
-    self.reward_net = Reward(state_size*history_size,
+    self.reward_net = Reward(state_size * history_size,
                              action_size,
                              context_size,
                              hidden_size=64)
 
-    self.posterior_net = Posterior(state_size*history_size,
+    self.posterior_net = Posterior(state_size * history_size,
                                    action_size,
                                    context_size,
                                    hidden_size=64)
 
     self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
-    #self.opt_value = optim.Adam(value_net.parameters(), lr=0.0003)
     self.opt_reward = optim.Adam(self.reward_net.parameters(), lr=0.0003)
     self.opt_posterior = optim.Adam(self.posterior_net.parameters(), lr=0.0003)
+    if args.use_value_net:
+      self.opt_value = optim.Adam(self.value_net.parameters(), lr=0.0003)
 
     # Create loss functions
     self.criterion = nn.BCELoss()
@@ -329,13 +334,14 @@ class CausalGAILMLP(object):
                                         action_log_stds_old,
                                         action_stds_old)
 
-      # update value net
-      # opt_value.zero_grad()
-      # value_var = value_net(state_var)
-      # value_loss = (value_var - \
-      #    targets[cur_id:cur_id+cur_batch_size]).pow(2.).mean()
-      # value_loss.backward()
-      # opt_value.step()
+      if args.use_value_net:
+        # update value net
+        opt_value.zero_grad()
+        value_var = value_net(torch.cat((state_var, latent_c_var), 1))
+        value_loss = (value_var - \
+                targets[cur_id:cur_id+cur_batch_size]).pow(2.).mean()
+        value_loss.backward()
+        opt_value.step()
 
       # Update policy net (PPO step)
       self.opt_policy.zero_grad()
@@ -389,7 +395,10 @@ class CausalGAILMLP(object):
 
     latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
     latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
-    #values = value_net(Variable(states))
+    if args.use_value_net:
+      values = value_net(Variable(torch.cat((states, latent_c), 1)))
+    else:
+      values = None
 
     # expert trajectories
     list_of_expert_states, list_of_expert_actions = [], []
@@ -417,6 +426,7 @@ class CausalGAILMLP(object):
     returns, advantages = get_advantage_for_rewards(rewards,
                                                     masks,
                                                     self.args.gamma,
+                                                    values,
                                                     dtype=dtype)
     targets = Variable(returns)
     advantages = (advantages - advantages.mean()) / advantages.std()

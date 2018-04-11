@@ -41,22 +41,31 @@ def normal_log_density(x, mean, log_std, std):
             - 0.5 * torch.log(2 * Variable(pi_tensor)) - log_std
     return log_density.sum(1)
 
-def get_advantage_for_rewards(rewards, masks, gamma, dtype=torch.FloatTensor):
+def get_advantage_for_rewards(rewards,
+                              masks,
+                              gamma,
+                              values=None,
+                              dtype=torch.FloatTensor):
+
   returns = torch.Tensor(rewards.size(0), 1).type(dtype)
   deltas = torch.Tensor(rewards.size(0), 1).type(dtype)
   advantages = torch.Tensor(rewards.size(0), 1).type(dtype)
 
   # compute advantages
   prev_return, prev_value, prev_advantage = 0, 0, 0
+
   for i in reversed(range(rewards.size(0))):
     returns[i] = rewards[i] + gamma * prev_return * masks[i]
-    # advantages[i] = deltas[i] + \
-    #   args.gamma * args.tau * prev_advantage * masks[i]
+    if values is not None:
+      deltas[i] = rewards[i] + args.gamma * prev_value * masks[i] \
+                             - values.data[i]
+      advantages[i] = deltas[i] + \
+            args.gamma * args.tau * prev_advantage * masks[i]
+      prev_value = values.data[i, 0]
+    else:
+      advantages[i] = returns[i]
 
-    # Changed by me to see if value function is causing problems
-    advantages[i] = returns[i]
     prev_return = returns[i, 0]
-
-    # prev_value = values.data[i, 0]
     prev_advantage = advantages[i, 0]
+
   return returns, advantages
