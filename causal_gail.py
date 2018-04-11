@@ -300,13 +300,13 @@ class CausalGAILMLP(object):
         predicted_posterior = eps.mul(std).add_(mu)
       else:
         predicted_posterior = mu
-      
+
       # latent_next_c is of shape (N, 5) where the 1-4 columns of each row
       # represent the goal vector hence we need to extract the last column for
       # the true posterior.
       true_posterior = torch.zeros(latent_next_c_var.size(0), 1).type(dtype)
       true_posterior[:, 0] = latent_next_c_var.data[:, -1]
-      posterior_loss = self.criterion_posterior(predicted_posterior, 
+      posterior_loss = self.criterion_posterior(predicted_posterior,
                                                 Variable(true_posterior))
       posterior_loss.backward()
       self.logger.summary_writer.add_scalar('loss/posterior',
@@ -600,7 +600,7 @@ class CausalGAILMLP(object):
                   state_expert[t], goals=[true_goal_state])
           elif self.args.flag_true_reward == 'action_reward':
             ep_true_reward += self.true_reward.reward_at_location(
-                np.argmax(action_expert[t]), action) 
+                np.argmax(action_expert[t]), action)
             expert_true_reward += self.true_reward.corret_action_reward
           else:
             raise ValueError("Incorrect true reward type")
@@ -658,8 +658,8 @@ class CausalGAILMLP(object):
             self.num_goals)
         # Goal reward is sum(p*log(p_hat))
         gen_goal_numpy = gen_goal.data.cpu().numpy().reshape((-1))
-        goal_reward = np.log(gen_goal_numpy) * 
-                        expert_goal.data.cpu().numpy().reshape((-1))
+        goal_reward = np.sum(np.log(gen_goal_numpy)
+            * expert_goal.data.cpu().numpy().reshape((-1)))
         # Add goal_reward to memory
         assert memory_list[-1][2] == 0, "Mask for final end state is not 0."
         for memory_t in memory_list:
