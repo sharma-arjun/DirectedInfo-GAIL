@@ -75,7 +75,7 @@ class CausalGAILMLP(object):
 
     if args.use_value_net:
       # context_size contains num_goals
-      self.value_net = Value(state_size * history_size + context_size,
+      self.value_net = Value(state_size * history_size + context_size ,
                              hidden_size=64)
 
     # Reward net is the discriminator network.
@@ -425,7 +425,6 @@ class CausalGAILMLP(object):
     returns, advantages = get_advantage_for_rewards(rewards,
                                                     masks,
                                                     self.args.gamma,
-                                                    self.args.tau,
                                                     values,
                                                     dtype=dtype)
     targets = Variable(returns)
@@ -511,10 +510,11 @@ class CausalGAILMLP(object):
 
         # Add history to state
         if args.history_size > 1:
-          curr_state = -1 * np.ones((args.history_size * curr_state_feat.shape[0]),
-                                    dtype=np.float32)
-
-          curr_state[(args.history_size-1) * curr_state_feat.shape[0]:] = curr_state_feat
+          curr_state = -1 * np.ones(
+                  (args.history_size * curr_state_feat.shape[0]),
+                  dtype=np.float32)
+          curr_state[(args.history_size-1) * curr_state_feat.shape[0]:] = \
+                  curr_state_feat
 
         else:
           curr_state = curr_state_feat
@@ -561,16 +561,16 @@ class CausalGAILMLP(object):
                   0)).type(dtype),
                 Variable(torch.from_numpy(oned_to_onehot(
                   action, self.action_size)).unsqueeze(0)).type(dtype),
-                Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
-               1)).data.cpu().numpy()[0,0]))
+                Variable(torch.from_numpy(next_ct_array).unsqueeze(0)).type(
+                  dtype)), 1)).data.cpu().numpy()[0,0]))
           else:
             disc_reward_t = -float(self.reward_net(torch.cat(
               (Variable(torch.from_numpy(curr_state).unsqueeze(
                   0)).type(dtype),
                 Variable(torch.from_numpy(oned_to_onehot(
                   action, self.action_size)).unsqueeze(0)).type(dtype),
-                Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
-               1)).data.cpu().numpy()[0,0])
+                Variable(torch.from_numpy(next_ct_array).unsqueeze(0)).type(
+                  dtype)), 1)).data.cpu().numpy()[0,0])
 
           disc_reward += disc_reward_t
 
