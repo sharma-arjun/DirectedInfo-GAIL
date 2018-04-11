@@ -59,13 +59,13 @@ class CausalGAILMLP(object):
     self.dtype = dtype
     self.train_step_count = 0
 
-    self.policy_net = Policy(state_size,
+    self.policy_net = Policy(state_size*history_size,
                              0,
                              context_size,
                              action_size,
                              hidden_size=64,
                              output_activation='sigmoid')
-    self.old_policy_net = Policy(state_size,
+    self.old_policy_net = Policy(state_size*history_size,
                                  0,
                                  context_size,
                                  action_size,
@@ -74,12 +74,12 @@ class CausalGAILMLP(object):
 
     #value_net = Value(num_inputs+num_c, hidden_size=64).type(dtype)
     # Reward net is the discriminator network.
-    self.reward_net = Reward(state_size,
+    self.reward_net = Reward(state_size*history_size,
                              action_size,
                              context_size,
                              hidden_size=64)
 
-    self.posterior_net = Posterior(state_size,
+    self.posterior_net = Posterior(state_size*history_size,
                                    action_size,
                                    context_size,
                                    hidden_size=64)
@@ -284,16 +284,24 @@ class CausalGAILMLP(object):
       # trick instead.  We should not put action_var (a_t) in the
       # posterior net since we need c_t to predict a_t while till now we
       # only have c_{t-1}.
-      mu, _ = self.posterior_net(torch.cat((state_var,
+      mu, logvar = self.posterior_net(torch.cat((state_var,
                                             action_var,
                                             latent_c_var), 1))
 
+      if args.use_reparameterize:
+        std = logvar.mul(0.5).exp_()
+        eps = Variable(std.data.new(std.size()).normal_())
+        predicted_posterior = eps.mul(std).add_(mu)
+      else:
+        predicted_posterior = mu
+      
       # latent_next_c is of shape (N, 5) where the 1-4 columns of each row
       # represent the goal vector hence we need to extract the last column for
       # the true posterior.
       true_posterior = torch.zeros(latent_next_c_var.size(0), 1).type(dtype)
       true_posterior[:, 0] = latent_next_c_var.data[:, -1]
-      posterior_loss = self.criterion_posterior(mu, Variable(true_posterior))
+      posterior_loss = self.criterion_posterior(predicted_posterior, 
+                                                Variable(true_posterior))
       posterior_loss.backward()
       self.logger.summary_writer.add_scalar('loss/posterior',
                                             posterior_loss.data[0])
@@ -365,7 +373,7 @@ class CausalGAILMLP(object):
     masks = torch.Tensor(np.array(gen_batch.mask)).type(dtype)
 
     ## Expand states to include history ##
-    states = self.expand_states_torch(states, self.history_size)
+    #states = self.expand_states_torch(states, self.history_size) # already expanded earlier
 
     latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
     latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
@@ -477,6 +485,17 @@ class CausalGAILMLP(object):
         curr_state_feat = self.get_state_features(curr_state_obj,
                                                   self.args.use_state_features)
 
+        #curr_state = np.reshape(curr_state_feat, (1, -1))
+
+        # Add history to state
+        if args.history_size > 1:
+          curr_state = -1 * np.ones((args.history_size * curr_state_feat.shape[0]),
+                                    dtype=np.float32)
+
+          curr_state[(args.history_size-1) * curr_state_feat.shape[0]:] = curr_state_feat
+
+        else:
+          curr_state = curr_state_feat
 
 
         # TODO: Make this a separate function. Can be parallelized.
@@ -489,7 +508,7 @@ class CausalGAILMLP(object):
         memory_list = []
         for t in range(expert_episode_len):
           ct = c_gen[t, :]
-          action = self.select_action(np.concatenate((curr_state_feat, ct)))
+          action = self.select_action(np.concatenate((curr_state, ct)))
           action_numpy = action.data.cpu().numpy()
 
           # Save generated and true trajectories
@@ -510,7 +529,7 @@ class CausalGAILMLP(object):
           # Get the discriminator reward
           # TODO: Shouldn't we take the log of discriminator reward.
           disc_reward_t = -float(self.reward_net(torch.cat(
-            (Variable(torch.from_numpy(curr_state_feat).unsqueeze(
+            (Variable(torch.from_numpy(curr_state).unsqueeze(
                 0)).type(dtype),
               Variable(torch.from_numpy(oned_to_onehot(
                 action, self.action_size)).unsqueeze(0)).type(dtype),
@@ -521,7 +540,7 @@ class CausalGAILMLP(object):
           # Predict c_t given (x_t, c_{t-1})
           mu, sigma = self.posterior_net(
                 torch.cat((
-                  Variable(torch.from_numpy(curr_state_feat).unsqueeze(
+                  Variable(torch.from_numpy(curr_state).unsqueeze(
                     0)).type(dtype),
                   Variable(torch.from_numpy(oned_to_onehot(
                     action, self.action_size)).unsqueeze(0)).type(dtype),
@@ -532,9 +551,13 @@ class CausalGAILMLP(object):
 
           # TODO: should ideally be logpdf, but pdf may work better. Try both.
           next_ct = c_gen[t+1, -1]
-          # Use fixed std since we do not train it yet.
-          posterior_reward_t = (self.args.lambda_posterior *
-              norm.pdf(next_ct, loc=mu, scale=0.1))
+          # Use fixed std if not using reparameterize otherwise use sigma.
+          if args.use_reparameterize:
+            posterior_reward_t = (self.args.lambda_posterior *
+                norm.pdf(next_ct, loc=mu, scale=sigma))
+          else:
+            posterior_reward_t = (self.args.lambda_posterior *
+                norm.pdf(next_ct, loc=mu, scale=0.1))
           posterior_reward += posterior_reward_t
 
           # Update Rewards
@@ -563,7 +586,7 @@ class CausalGAILMLP(object):
 
           # Push to memory
           memory_list.append([
-            curr_state_feat,
+            curr_state,
             np.array([oned_to_onehot(action, self.action_size)]),
             mask,
             next_state_feat,
@@ -578,6 +601,16 @@ class CausalGAILMLP(object):
             break
 
           curr_state_obj, curr_state_feat = next_state_obj, next_state_feat
+
+          if args.history_size > 1:
+            curr_state[:(args.history_size-1) * curr_state_feat.shape[0]] = \
+                                    curr_state[curr_state_feat.shape[0]:]
+            curr_state[(args.history_size-1) * curr_state_feat.shape[0]:] = \
+                                    curr_state_feat
+          else:
+            curr_state = curr_state_feat
+
+
 
         # Add RNN goal reward, i.e. compare the goal generated by Q-network
         # for the generated trajectory and the predicted goal for expert
@@ -812,6 +845,10 @@ if __name__ == '__main__':
   parser.add_argument('--no-use_state_features', dest='use_state_features',
                       action='store_false',
                       help='Do not use features instead of direct (x,y) ' \
+                          'values in VAE')
+  parser.add_argument('--use_reparameterize', dest='use_reparameterize',
+                      action='store_true',
+                      help='Use reparameterization during posterior training ' \
                           'values in VAE')
   parser.set_defaults(use_state_features=False)
 
