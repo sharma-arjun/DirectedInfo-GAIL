@@ -74,8 +74,8 @@ class CausalGAILMLP(object):
                                  output_activation='sigmoid')
 
     if args.use_value_net:
-      self.value_net = Value(state_size * history_size + \
-                               context_size + num_goals,
+      # context_size contains num_goals
+      self.value_net = Value(state_size * history_size + context_size,
                              hidden_size=64)
 
     # Reward net is the discriminator network.
@@ -335,12 +335,12 @@ class CausalGAILMLP(object):
 
       if args.use_value_net:
         # update value net
-        opt_value.zero_grad()
-        value_var = value_net(torch.cat((state_var, latent_c_var), 1))
+        self.opt_value.zero_grad()
+        value_var = self.value_net(torch.cat((state_var, latent_c_var), 1))
         value_loss = (value_var - \
-                targets[cur_id:cur_id+cur_batch_size]).pow(2.).mean()
+                targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
         value_loss.backward()
-        opt_value.step()
+        self.opt_value.step()
 
       # Update policy net (PPO step)
       self.opt_policy.zero_grad()
@@ -395,7 +395,7 @@ class CausalGAILMLP(object):
     latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
     latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
     if args.use_value_net:
-      values = value_net(Variable(torch.cat((states, latent_c), 1)))
+      values = self.value_net(Variable(torch.cat((states, latent_c), 1)))
     else:
       values = None
 
@@ -425,6 +425,7 @@ class CausalGAILMLP(object):
     returns, advantages = get_advantage_for_rewards(rewards,
                                                     masks,
                                                     self.args.gamma,
+                                                    self.args.tau,
                                                     values,
                                                     dtype=dtype)
     targets = Variable(returns)

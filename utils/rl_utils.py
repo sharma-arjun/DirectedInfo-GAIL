@@ -44,6 +44,7 @@ def normal_log_density(x, mean, log_std, std):
 def get_advantage_for_rewards(rewards,
                               masks,
                               gamma,
+                              tau,
                               values=None,
                               dtype=torch.FloatTensor):
 
@@ -57,10 +58,10 @@ def get_advantage_for_rewards(rewards,
   for i in reversed(range(rewards.size(0))):
     returns[i] = rewards[i] + gamma * prev_return * masks[i]
     if values is not None:
-      deltas[i] = rewards[i] + args.gamma * prev_value * masks[i] \
+      deltas[i] = rewards[i] + gamma * prev_value * masks[i] \
                              - values.data[i]
       advantages[i] = deltas[i] + \
-            args.gamma * args.tau * prev_advantage * masks[i]
+            gamma * tau * prev_advantage * masks[i]
       prev_value = values.data[i, 0]
     else:
       advantages[i] = returns[i]
