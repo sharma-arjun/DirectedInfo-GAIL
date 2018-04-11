@@ -58,7 +58,7 @@ class CausalGAILMLP(object):
     self.context_size = context_size
     self.num_goals = num_goals
     self.dtype = dtype
-    self.train_step_count = 0
+    self.train_step_count, self.gail_step_count = 0, 0
 
     self.policy_net = Policy(state_size*history_size,
                              0,
@@ -273,14 +273,17 @@ class CausalGAILMLP(object):
             'total': expert_disc_loss.data[0] + gen_disc_loss.data[0],
             'expert': expert_disc_loss.data[0],
             'gen': gen_disc_loss.data[0],
-            })
+            },
+          self.gail_step_count)
       self.opt_reward.step()
       reward_l2_norm, reward_grad_l2_norm = \
                         get_weight_norm_for_network(self.reward_net)
       self.logger.summary_writer.add_scalar('weight/discriminator/param',
-                                            reward_l2_norm)
+                                            reward_l2_norm,
+                                            self.gail_step_count)
       self.logger.summary_writer.add_scalar('weight/discriminator/grad',
-                                            reward_grad_l2_norm)
+                                            reward_grad_l2_norm,
+                                            self.gail_step_count)
 
 
       # Update posterior net. We need to do this by reparameterization
@@ -307,7 +310,8 @@ class CausalGAILMLP(object):
                                                 Variable(true_posterior))
       posterior_loss.backward()
       self.logger.summary_writer.add_scalar('loss/posterior',
-                                            posterior_loss.data[0])
+                                            posterior_loss.data[0],
+                                            self.gail_step_count)
 
 
       # compute old and new action probabilities
@@ -345,18 +349,23 @@ class CausalGAILMLP(object):
       # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
       self.opt_policy.step()
       self.logger.summary_writer.add_scalar('loss/policy',
-                                            policy_surr.data[0])
+                                            policy_surr.data[0],
+                                            self.gail_step_count)
 
       policy_l2_norm, policy_grad_l2_norm = \
                         get_weight_norm_for_network(self.policy_net)
       self.logger.summary_writer.add_scalar('weight/policy/param',
-                                            policy_l2_norm)
+                                            policy_l2_norm,
+                                            self.gail_step_count)
       self.logger.summary_writer.add_scalar('weight/policy/grad',
-                                            policy_grad_l2_norm)
+                                            policy_grad_l2_norm,
+                                            self.gail_step_count)
 
       # set new starting point for batch
       curr_id += curr_batch_size
       curr_id_exp += curr_batch_size_exp
+
+      self.gail_step_count += 1
 
   def update_params(self, gen_batch, expert_batch, episode_idx,
                     optim_epochs, optim_batch_size):
@@ -456,7 +465,7 @@ class CausalGAILMLP(object):
     results = {'average_reward': [], 'episode_reward': [],
                'true_traj': {}, 'pred_traj': {}}
 
-    self.train_step_count = 0
+    self.train_step_count, self.gail_step_count = 0, 0
 
     for ep_idx in range(args.num_epochs):
       memory = Memory()
@@ -645,7 +654,8 @@ class CausalGAILMLP(object):
               'discriminator': disc_reward,
               'posterior': posterior_reward,
               'goal': goal_reward,
-            }
+            },
+            self.train_step_count
         )
 
         #ep_memory.push(memory)
@@ -667,7 +677,8 @@ class CausalGAILMLP(object):
             'average': np.mean(reward_batch),
             'max': np.max(reward_batch),
             'min': np.min(reward_batch)
-            })
+            },
+          self.train_step_count)
       self.logger.summary_writer.add_scalars(
           'gen_traj/true_reward',
           {
@@ -675,7 +686,8 @@ class CausalGAILMLP(object):
             'max': np.max(true_reward_batch),
             'min': np.min(true_reward_batch),
             'expert_true': np.mean(expert_true_reward_batch)
-          })
+          },
+          self.train_step_count)
 
       # Add predicted and generated trajectories to results
       if ep_idx % self.args.save_interval == 0:
