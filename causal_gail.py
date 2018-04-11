@@ -24,6 +24,7 @@ from torch.autograd import Variable
 from models import Policy, Posterior, Reward, Value
 from grid_world import State, Action, TransitionFunction
 from grid_world import RewardFunction, RewardFunction_SR2, GridWorldReward
+from grid_world import ActionBasedGridWorldReward
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from load_expert_traj import Expert, ExpertHDF5
 from replay_memory import Memory
@@ -115,14 +116,16 @@ class CausalGAILMLP(object):
     # TODO: Hardcoded for now remove this, load it from the expert trajectory
     # file. Also, since the final state is not in expert trajectory we append
     # very next states as goal as well. Else reward is sparse.
-    goals = [(0,0), (1,0), (0,1), (1,1),
-             (20,20), (20, 19), (19, 20), (19, 19),
-             (20,0), (20, 1), (19, 0), (19, 1),
-             (0,20), (1, 20), (0, 19), (1, 19)]
-    self.true_reward = GridWorldReward(self.width,
-                                       self.height,
-                                       goals,
-                                       self.obstacles)
+
+    if self.args.flag_true_reward == 'grid_reward':
+        self.true_reward = GridWorldReward(self.width,
+                                           self.height,
+                                           None,  # No default goals
+                                           self.obstacles)
+    elif self.args.flag_true_reward == 'action_reward':
+        self.true_reward = ActionBasedGridWorldReward(
+                self.width, self.height, None, self.obstacles)
+
 
   def select_action(self, state):
     state = torch.from_numpy(state).unsqueeze(0).type(self.dtype)
@@ -547,7 +550,7 @@ class CausalGAILMLP(object):
                   Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)), 1))
 
           mu = mu.data.cpu().numpy()[0,0]
-          sigma = sigma.data.cpu().numpy()[0,0]
+          sigma = np.exp(0.5 * sigma.data.cpu().numpy()[0,0])
 
           # TODO: should ideally be logpdf, but pdf may work better. Try both.
           next_ct = c_gen[t+1, -1]
@@ -563,12 +566,17 @@ class CausalGAILMLP(object):
           # Update Rewards
           ep_reward += (disc_reward_t + posterior_reward_t)
           true_goal_state = [int(x) for x in state_expert[-1].tolist()]
-          ep_true_reward += self.true_reward.reward_at_location(
-              curr_state_obj.coordinates[0], curr_state_obj.coordinates[1],
-              goals=[true_goal_state])
-          expert_true_reward += self.true_reward.reward_at_location(
-                state_expert[t][0], state_expert[t][1],
-                goals=[true_goal_state])
+          if self.args.flag_true_reward == 'grid_reward':
+            ep_true_reward += self.true_reward.reward_at_location(
+                curr_state_obj.coordinates, goals=[true_goal_state])
+            expert_true_reward += self.true_reward.reward_at_location(
+                  state_expert[t], goals=[true_goal_state])
+          elif self.args.flag_true_reward == 'action_reward':
+            ep_true_reward += self.true_reward.reward_at_location(
+                np.argmax(action_expert[t]), action) 
+            expert_true_reward += self.true_reward.corret_action_reward
+          else:
+            raise ValueError("Incorrect true reward type")
 
           # Update next state
           next_state_obj = self.transition_func(curr_state_obj,
@@ -846,11 +854,22 @@ if __name__ == '__main__':
                       action='store_false',
                       help='Do not use features instead of direct (x,y) ' \
                           'values in VAE')
+  parser.set_defaults(use_state_features=False)
+
+  # Use reparameterization for posterior training.
   parser.add_argument('--use_reparameterize', dest='use_reparameterize',
                       action='store_true',
                       help='Use reparameterization during posterior training ' \
                           'values in VAE')
-  parser.set_defaults(use_state_features=False)
+  parser.add_argument('--no-use_reparameterize', dest='use_reparameterize',
+                      action='store_false',
+                      help='Use reparameterization during posterior training ' \
+                          'values in VAE')
+  parser.set_defaults(use_reparameterize=False)
+
+  parser.add_argument('--flag_true_reward', type=str, default='grid_reward',
+                      choices=['grid_reward', 'action_reward'],
+                      help='True reward type to use.')
 
   args = parser.parse_args()
   torch.manual_seed(args.seed)

@@ -245,11 +245,24 @@ class GridWorldReward(object):
     self.obstacle_reward = -100
     self.other_reward = -1
 
-  def reward_at_location(self, x, y, goals=None):
-    pos = [int(x), int(y)]
+  def reward_at_location(self, pos, goals=None):
+    pos = [int(pos[0]), int(pos[1])]
     goals = self.goals if goals is None else goals
     if pos in goals:
       return self.goal_reward
     if pos in self.obstacles:
       return self.obstacle_reward
     return self.other_reward
+
+class ActionBasedGridWorldReward(GridWorldReward):
+  def __init__(self, width, height, goals, obstacles):
+    super(ActionBasedGridWorldReward, self).__init__(width, height,
+                                                     goals, obstacles)
+    self.corret_action_reward = 1.0
+    self.incorrect_action_reward = -1.0
+
+  def reward_at_location(self, expert_action, gen_action):
+    if expert_action == gen_action:
+      return self.corret_action_reward
+    else:
+      return self.incorrect_action_reward
