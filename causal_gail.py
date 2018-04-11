@@ -914,12 +914,18 @@ if __name__ == '__main__':
   parser.add_argument('--use_log_rewards', dest='use_log_rewards',
                       action='store_true',
                       help='Use log with rewards.')
-
   parser.add_argument('--no_use_log_rewards', dest='use_log_rewards',
                       action='store_false',
                       help='Don\'t Use log with rewards.')
-
   parser.set_defaults(use_log_rewards=True)
+
+  parser.add_argument('--use_value_net', dest='use_value_net',
+                      action='store_true',
+                      help='Use value network.')
+  parser.add_argument('--no_use_value_net', dest='use_value_net',
+                      action='store_false',
+                      help='Don\'t use value network.')
+  parser.set_defaults(use_value_net=True)
 
   args = parser.parse_args()
   torch.manual_seed(args.seed)
