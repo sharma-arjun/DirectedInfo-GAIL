@@ -540,13 +540,23 @@ class CausalGAILMLP(object):
 
           # Get the discriminator reward
           # TODO: Shouldn't we take the log of discriminator reward.
-          disc_reward_t = -float(self.reward_net(torch.cat(
-            (Variable(torch.from_numpy(curr_state).unsqueeze(
-                0)).type(dtype),
-              Variable(torch.from_numpy(oned_to_onehot(
-                action, self.action_size)).unsqueeze(0)).type(dtype),
-              Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
-             1)).data.cpu().numpy()[0,0])
+          if args.use_log_rewards:
+            disc_reward_t = -math.log(float(self.reward_net(torch.cat(
+              (Variable(torch.from_numpy(curr_state).unsqueeze(
+                  0)).type(dtype),
+                Variable(torch.from_numpy(oned_to_onehot(
+                  action, self.action_size)).unsqueeze(0)).type(dtype),
+                Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
+               1)).data.cpu().numpy()[0,0]))
+          else:
+            disc_reward_t = -float(self.reward_net(torch.cat(
+              (Variable(torch.from_numpy(curr_state).unsqueeze(
+                  0)).type(dtype),
+                Variable(torch.from_numpy(oned_to_onehot(
+                  action, self.action_size)).unsqueeze(0)).type(dtype),
+                Variable(torch.from_numpy(ct).unsqueeze(0)).type(dtype)),
+               1)).data.cpu().numpy()[0,0])
+
           disc_reward += disc_reward_t
 
           # Predict c_t given (x_t, c_{t-1})
@@ -563,13 +573,21 @@ class CausalGAILMLP(object):
 
           # TODO: should ideally be logpdf, but pdf may work better. Try both.
           next_ct = c_gen[t+1, -1]
-          # Use fixed std if not using reparameterize otherwise use sigma.
+
+          # use norm.logpdf if flag else use norm.pdf
+          if args.use_log_rewards:
+            reward_func = norm.logpdf
+          else:
+            reward_func = norm.pdf
+
+          # use fixed std if not using reparameterize otherwise use sigma.
           if args.use_reparameterize:
             posterior_reward_t = (self.args.lambda_posterior *
-                norm.pdf(next_ct, loc=mu, scale=sigma))
+                reward_func(next_ct, loc=mu, scale=sigma))
           else:
             posterior_reward_t = (self.args.lambda_posterior *
-                norm.pdf(next_ct, loc=mu, scale=0.1))
+                reward_func(next_ct, loc=mu, scale=0.1))
+
           posterior_reward += posterior_reward_t
 
           # Update Rewards
@@ -640,8 +658,8 @@ class CausalGAILMLP(object):
             self.num_goals)
         # Goal reward is sum(p*log(p_hat))
         gen_goal_numpy = gen_goal.data.cpu().numpy().reshape((-1))
-        goal_reward = np.log(gen_goal_numpy[np.argmax(
-          expert_goal.data.cpu().numpy().reshape((-1)))])
+        goal_reward = np.log(gen_goal_numpy) * 
+                        expert_goal.data.cpu().numpy().reshape((-1))
         # Add goal_reward to memory
         assert memory_list[-1][2] == 0, "Mask for final end state is not 0."
         for memory_t in memory_list:
@@ -882,6 +900,16 @@ if __name__ == '__main__':
   parser.add_argument('--flag_true_reward', type=str, default='grid_reward',
                       choices=['grid_reward', 'action_reward'],
                       help='True reward type to use.')
+
+  parser.add_argument('--use_log_rewards', dest='use_log_rewards',
+                      action='store_true',
+                      help='Use log with rewards.')
+
+  parser.add_argument('--no_use_log_rewards', dest='use_log_rewards',
+                      action='store_false',
+                      help='Don\'t Use log with rewards.')
+
+  parser.set_defaults(use_log_rewards=True)
 
   args = parser.parse_args()
   torch.manual_seed(args.seed)
