@@ -23,3 +23,14 @@ python -m pdb vae.py --use_rnn_goal 1 --num-epochs 500 --vae_state_size 2 \
         --results_dir /tmp/results/L_traj
 
 ```
+
+- Running `GAIL` on L trajectories
+
+```
+python -m pdb causal_gail.py --num_epochs 1000 --state_size 2 --action_size 4 --history_size 4 \
+    --no-use_state_features --expert_path ./h5_trajs/L_trajs/final_correct_traj \
+    --results_dir /tmp/check_gail_reward \
+    --vae_checkpoint_path ./results/L_traj/correct_multiple_actions_per_state/lr_001_last_hidden/checkpoint/cp_160.pth \
+    --learning_rate 0.0003 --max_ep_length 6 --batch_size 1024 --num_expert_trajs 50 \
+    --log_interval 1 --use_reparameterize --flag_true_reward action_reward
+```
