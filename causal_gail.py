@@ -211,18 +211,18 @@ class CausalGAILMLP(object):
     checkpoint_dir = os.path.join(self.args.results_dir, 'checkpoint')
     return os.path.join(checkpoint_dir, 'cp_{}.pth'.format(epoch))
 
-  def expand_states_torch(self, states, history_size):
+  def expand_states_numpy(self, states, history_size):
     if self.history_size == 1:
       return states
 
-    expanded_states = -1*torch.ones(
-        states.size(0), states.size(1)*history_size).type(self.dtype)
-
-    for i in range(states.size(0)):
-        expanded_states[i, :states.size(1)] = states[i,:]
-        if i > 0:
-            expanded_states[i, states.size(1):] = \
-                expanded_states[i-1, :(history_size-1)*states.size(1)]
+    N, C = states.shape
+    expanded_states = -1*np.ones((N, C*history_size), dtype=np.float32)
+    for i in range(N):
+      # Append states to the right
+      expanded_states[i, -C:] = states[i,:]
+      # Copy C:end state values from i-1 to 0:End-C in i
+      if i > 0:
+        expanded_states[i, :-C] = expanded_states[i-1, C:]
 
     return expanded_states
 
@@ -401,7 +401,7 @@ class CausalGAILMLP(object):
     masks = torch.Tensor(np.array(gen_batch.mask)).type(dtype)
 
     ## Expand states to include history ##
-    #states = self.expand_states_torch(states, self.history_size) # already expanded earlier
+    # Generated trajectories already have history in them.
 
     latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
     latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
@@ -419,7 +419,10 @@ class CausalGAILMLP(object):
       expert_c, _ = self.get_c_for_traj(expert_batch.state[i],
                                         expert_batch.action[i],
                                         expert_batch.c[i])
-      list_of_expert_states.append(torch.Tensor(expert_batch.state[i]))
+      ## Expand expert states ##
+      expanded_states = self.expand_states_numpy(expert_batch.state[i],
+                                                 self.history_size)
+      list_of_expert_states.append(torch.Tensor(expanded_states))
       list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
       list_of_expert_latent_c.append(torch.Tensor(expert_c))
       list_of_masks.append(torch.Tensor(expert_batch.mask[i]))
@@ -428,9 +431,6 @@ class CausalGAILMLP(object):
     expert_actions = torch.cat(list_of_expert_actions, 0).type(dtype)
     expert_latent_c = torch.cat(list_of_expert_latent_c, 0).type(dtype)
     expert_masks = torch.cat(list_of_masks, 0).type(dtype)
-
-    ## Expand expert states ##
-    expert_states = self.expand_states_torch(expert_states, self.history_size)
 
     # compute advantages
     returns, advantages = get_advantage_for_rewards(rewards,
@@ -517,8 +517,6 @@ class CausalGAILMLP(object):
         curr_state_feat = self.get_state_features(curr_state_obj,
                                                   self.args.use_state_features)
 
-        #curr_state = np.reshape(curr_state_feat, (1, -1))
-
         # Add history to state
         if args.history_size > 1:
           curr_state = -1 * np.ones(
@@ -565,23 +563,21 @@ class CausalGAILMLP(object):
                                                high=0.3)
 
           # Get the discriminator reward
-          # TODO: Shouldn't we take the log of discriminator reward.
-          if args.use_log_rewards:
-            disc_reward_t = -math.log(float(self.reward_net(torch.cat(
-              (Variable(torch.from_numpy(curr_state).unsqueeze(
-                  0)).type(dtype),
-                Variable(torch.from_numpy(oned_to_onehot(
-                  action, self.action_size)).unsqueeze(0)).type(dtype),
-                Variable(torch.from_numpy(next_ct_array).unsqueeze(0)).type(
-                  dtype)), 1)).data.cpu().numpy()[0,0]))
-          else:
-            disc_reward_t = -float(self.reward_net(torch.cat(
+          disc_reward_t = float(self.reward_net(torch.cat(
               (Variable(torch.from_numpy(curr_state).unsqueeze(
                   0)).type(dtype),
                 Variable(torch.from_numpy(oned_to_onehot(
                   action, self.action_size)).unsqueeze(0)).type(dtype),
                 Variable(torch.from_numpy(next_ct_array).unsqueeze(0)).type(
                   dtype)), 1)).data.cpu().numpy()[0,0])
+
+          if disc_reward_t < 1e-6:
+            disc_reward_t += 1e-6
+
+          if args.use_log_rewards:
+            disc_reward_t = -math.log(disc_reward_t)
+          else:
+            disc_reward_t = -disc_reward_t
 
           disc_reward += disc_reward_t
 
@@ -656,7 +652,6 @@ class CausalGAILMLP(object):
             break
 
           curr_state_obj, curr_state_feat = next_state_obj, next_state_feat
-
           if args.history_size > 1:
             curr_state[:(args.history_size-1) * curr_state_feat.shape[0]] = \
                                     curr_state[curr_state_feat.shape[0]:]
