@@ -275,9 +275,10 @@ class CausalGAILMLP(object):
       expert_disc_loss.backward()
 
       # Backprop with generated demonstrations
+      # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
       gen_output = self.reward_net(torch.cat((state_var,
                                               action_var,
-                                              latent_c_var), 1))
+                                              latent_next_c_var), 1))
       gen_disc_loss = self.criterion(gen_output, Variable(
           torch.ones(action_var.size(0), 1)).type(dtype))
       gen_disc_loss.backward()
@@ -306,8 +307,8 @@ class CausalGAILMLP(object):
       # trick instead.  We should not put action_var (a_t) in the
       # posterior net since we need c_t to predict a_t while till now we
       # only have c_{t-1}.
-      mu, logvar = self.posterior_net(torch.cat((state_var,
-                                            latent_c_var), 1))
+      mu, logvar = self.posterior_net(
+          torch.cat((state_var, latent_c_var), 1))
 
       if args.use_reparameterize:
         std = logvar.mul(0.5).exp_()
@@ -331,14 +332,14 @@ class CausalGAILMLP(object):
 
       # compute old and new action probabilities
       action_means, action_log_stds, action_stds = self.policy_net(
-              torch.cat((state_var, latent_c_var), 1))
+              torch.cat((state_var, latent_next_c_var), 1))
       log_prob_cur = normal_log_density(action_var,
                                         action_means,
                                         action_log_stds,
                                         action_stds)
 
       action_means_old, action_log_stds_old, action_stds_old = \
-              self.old_policy_net(torch.cat((state_var, latent_c_var), 1))
+              self.old_policy_net(torch.cat((state_var, latent_next_c_var), 1))
       log_prob_old = normal_log_density(action_var,
                                         action_means_old,
                                         action_log_stds_old,
@@ -347,7 +348,7 @@ class CausalGAILMLP(object):
       if args.use_value_net:
         # update value net
         self.opt_value.zero_grad()
-        value_var = self.value_net(torch.cat((state_var, latent_c_var), 1))
+        value_var = self.value_net(torch.cat((state_var, latent_next_c_var), 1))
         value_loss = (value_var - \
                 targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
         value_loss.backward()
@@ -419,6 +420,8 @@ class CausalGAILMLP(object):
       expert_c, _ = self.get_c_for_traj(expert_batch.state[i],
                                         expert_batch.action[i],
                                         expert_batch.c[i])
+      # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
+      expert_c = expert_c[1:, :]
       ## Expand expert states ##
       expanded_states = self.expand_states_numpy(expert_batch.state[i],
                                                  self.history_size)
@@ -431,6 +434,13 @@ class CausalGAILMLP(object):
     expert_actions = torch.cat(list_of_expert_actions, 0).type(dtype)
     expert_latent_c = torch.cat(list_of_expert_latent_c, 0).type(dtype)
     expert_masks = torch.cat(list_of_masks, 0).type(dtype)
+
+    assert expert_states.size(0) == expert_actions.size(0), \
+        "Expert transition size do not match"
+    assert expert_states.size(0) == expert_latent_c.size(0), \
+        "Expert transition size do not match"
+    assert expert_states.size(0) == expert_masks.size(0), \
+        "Expert transition size do not match"
 
     # compute advantages
     returns, advantages = get_advantage_for_rewards(rewards,
