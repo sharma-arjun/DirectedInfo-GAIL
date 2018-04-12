@@ -37,7 +37,8 @@ class VAE(nn.Module):
                  posterior_goal_size=1,
                  policy_output_size=1,
                  history_size=1,
-                 hidden_size=64):
+                 hidden_size=64,
+                 use_goal_in_policy=True):
         '''
         state_size: State size
         latent_size: Size of 'c' variable
@@ -45,13 +46,19 @@ class VAE(nn.Module):
         output_size:
         '''
         super(VAE, self).__init__()
+
         self.history_size = history_size
         self.posterior_latent_size = posterior_latent_size
-        self.policy_latent_size = policy_latent_size
         self.posterior_goal_size = posterior_goal_size
+        self.use_goal_in_policy = use_goal_in_policy
+
+        self.policy_latent_size = policy_latent_size
+        if use_goal_in_policy:
+          self.policy_latent_size += posterior_goal_size
+
         self.policy = Policy(state_size=policy_state_size*self.history_size,
                              action_size=policy_action_size,
-                             latent_size=policy_latent_size,
+                             latent_size=self.policy_latent_size,
                              output_size=policy_output_size,
                              hidden_size=hidden_size,
                              output_activation='sigmoid')
@@ -82,7 +89,10 @@ class VAE(nn.Module):
     def forward(self, x, c):
         mu, logvar = self.encode(x, c)
         c[:,-self.posterior_latent_size:] = self.reparameterize(mu, logvar)
-        return self.decode(x, c[:,-self.posterior_latent_size:]), mu, logvar
+        if self.use_goal_in_policy:
+          return self.decode(x, c), mu, logvar
+        else:
+          return self.decode(x, c[:,-self.posterior_latent_size:]), mu, logvar
 
 class VAETrain(object):
     def __init__(self, args,
@@ -125,7 +135,8 @@ class VAETrain(object):
                              posterior_goal_size=num_goals,
                              policy_output_size=action_size,
                              history_size=history_size,
-                             hidden_size=64)
+                             hidden_size=64,
+                             use_goal_in_policy=True)
 
         self.obstacles, self.transition_func = None, None
 
