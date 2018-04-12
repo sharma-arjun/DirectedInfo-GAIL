@@ -31,26 +31,36 @@ from utils.torch_utils import get_weight_norm_for_network
 
 class VAE(nn.Module):
     def __init__(self,
-                 state_size=1,
-                 action_size=1,
-                 latent_size=1,
-                 goal_size=1,
-                 output_size=1,
+                 policy_state_size=1, posterior_state_size=1,
+                 policy_action_size=1, posterior_action_size=1,
+                 policy_latent_size=1, posterior_latent_size=1,
+                 posterior_goal_size=1,
+                 policy_output_size=1,
                  history_size=1,
                  hidden_size=64):
+        '''
+        state_size: State size
+        latent_size: Size of 'c' variable
+        goal_size: Number of goals.
+        output_size:
+        '''
         super(VAE, self).__init__()
         self.history_size = history_size
-        self.policy = Policy(state_size=state_size*self.history_size,
-                             action_size=action_size,
-                             latent_size=latent_size,
-                             output_size=output_size,
+        self.posterior_latent_size = posterior_latent_size
+        self.policy_latent_size = policy_latent_size
+        self.posterior_goal_size = posterior_goal_size
+        self.policy = Policy(state_size=policy_state_size*self.history_size,
+                             action_size=policy_action_size,
+                             latent_size=policy_latent_size,
+                             output_size=policy_output_size,
                              hidden_size=hidden_size,
                              output_activation='sigmoid')
 
-        self.posterior = Posterior(state_size=state_size*self.history_size,
-                                   action_size=action_size,
-                                   latent_size=latent_size+goal_size,
-                                   hidden_size=hidden_size)
+        self.posterior = Posterior(
+                state_size=posterior_state_size*self.history_size,
+                action_size=posterior_action_size,
+                latent_size=posterior_latent_size+posterior_goal_size,
+                hidden_size=hidden_size)
 
 
     def encode(self, x, c):
@@ -71,8 +81,8 @@ class VAE(nn.Module):
 
     def forward(self, x, c):
         mu, logvar = self.encode(x, c)
-        c[:,-1] = self.reparameterize(mu, logvar)
-        return self.decode(x, c[:,-1]), mu, logvar
+        c[:,-self.posterior_latent_size:] = self.reparameterize(mu, logvar)
+        return self.decode(x, c[:,-self.posterior_latent_size:]), mu, logvar
 
 class VAETrain(object):
     def __init__(self, args,
@@ -106,11 +116,14 @@ class VAETrain(object):
 
         # action_size is 0
         # Hack -- VAE input dim (s + a + latent).
-        self.vae_model = VAE(state_size=state_size,
-                             action_size=0,
-                             latent_size=args.vae_context_size,
-                             goal_size=num_goals,
-                             output_size=action_size,
+        self.vae_model = VAE(policy_state_size=state_size,
+                             posterior_state_size=state_size,
+                             policy_action_size=0,
+                             posterior_action_size=0,
+                             policy_latent_size=args.vae_context_size,
+                             posterior_latent_size=args.vae_context_size,
+                             posterior_goal_size=num_goals,
+                             policy_output_size=action_size,
                              history_size=history_size,
                              hidden_size=64)
 
@@ -413,7 +426,8 @@ class VAETrain(object):
                     x[:] = next_state_features
 
                 # update c
-                c[:, -1] = self.vae_model.reparameterize(mu, logvar).data.cpu()
+                c[:, -self.vae_model.posterior_latent_size:] = \
+                    self.vae_model.reparameterize(mu, logvar).data.cpu()
 
                 # Update current state
                 curr_state_arr = np.array(next_state.coordinates,
@@ -487,6 +501,7 @@ class VAETrain(object):
             for t in range(episode_len):
                 x_var = Variable(torch.from_numpy(
                     x.reshape((1, -1))).type(self.dtype))
+                # Append 'c' at the end.
                 c_var = torch.cat(
                         [final_goal,
                          Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
@@ -528,7 +543,8 @@ class VAETrain(object):
                                           dtype=np.float32)
 
                 # update c
-                c[:, -1] = self.vae_model.reparameterize(mu, logvar).data.cpu()
+                c[:, -self.vae_model.posterior_latent_size:] = \
+                    self.vae_model.reparameterize(mu, logvar).data.cpu()
 
             # Calculate the total loss.
             total_loss = ep_loss[0]

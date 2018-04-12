@@ -48,7 +48,8 @@ class Policy(nn.Module):
 
 class Posterior(nn.Module):
 
-    def __init__(self, state_size, action_size, latent_size, hidden_size):
+    def __init__(self, state_size, action_size, latent_size, hidden_size,
+                 output_size=1):
         super(Posterior, self).__init__()
         
         self.input_size = state_size + action_size + latent_size
@@ -59,8 +60,8 @@ class Posterior(nn.Module):
         
         self.affine1 = nn.Linear(self.input_size, self.hidden_size)
         self.affine2 = nn.Linear(self.hidden_size, self.hidden_size)
-        self.affine31 = nn.Linear(self.hidden_size, 1)
-        self.affine32 = nn.Linear(self.hidden_size, 1)
+        self.affine31 = nn.Linear(self.hidden_size, output_size)
+        self.affine32 = nn.Linear(self.hidden_size, output_size)
 
     def forward(self, x):
         h1 = F.relu(self.affine1(x))
