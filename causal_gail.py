@@ -5,6 +5,7 @@ import os
 import pdb
 import pickle
 import math
+import copy
 import random
 from collections import namedtuple
 from itertools import count, product
@@ -195,6 +196,16 @@ class CausalGAILMLP(object):
     self.policy_net = checkpoint_data['policy']
     self.posterior_net = checkpoint_data['posterior']
     self.reward_net = checkpoint_data['reward']
+
+  def load_weights_from_vae(self):
+    # deepcopy from vae
+    self.policy = copy.deepcopy(self.vae_model.policy)
+    self.old_policy = copy.deepcopy(self.vae_model.policy)
+    self.posterior = copy.deepcopy(self.vae_model.posterior)
+    
+    # re-initialize optimizers 
+    self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
+    self.opt_posterior = optim.Adam(self.posterior_net.parameters(), lr=0.0003)
 
   def model_checkpoint_filepath(self, epoch):
     checkpoint_dir = os.path.join(self.args.results_dir, 'checkpoint')
@@ -815,6 +826,9 @@ def main(args):
   causal_gail_mlp.set_expert(expert)
   causal_gail_mlp.train_gail(expert)
 
+  if args.init_from_vae:
+    causal_gail_mlp.load_weights_from_vae()
+
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Causal GAIL using MLP.')
   parser.add_argument('--expert_path', default="L_expert_trajectories/",
@@ -925,6 +939,14 @@ if __name__ == '__main__':
                       action='store_false',
                       help='Don\'t use value network.')
   parser.set_defaults(use_value_net=True)
+
+  parser.add_argument('--init_from_vae', dest='init_from_vae',
+                      action='store_true',
+                      help='Init policy and posterior from vae.')
+  parser.add_argument('--no_init_from_vae', dest='init_from_vae',
+                      action='store_false',
+                      help='Don\'t init policy and posterior from vae.')
+  parser.set_defaults(init_from_vae=True)
 
   args = parser.parse_args()
   torch.manual_seed(args.seed)
