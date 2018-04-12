@@ -80,10 +80,10 @@ class CausalGAILMLP(object):
                              hidden_size=64)
 
     # Reward net is the discriminator network.
-    self.reward_net = Reward(state_size * history_size,
+    self.reward_net = Reward(0,
                              action_size,
                              context_size,
-                             hidden_size=64)
+                             hidden_size=128)
 
     self.posterior_net = Posterior(state_size * history_size,
                                    0,
@@ -267,7 +267,7 @@ class CausalGAILMLP(object):
       self.opt_reward.zero_grad()
 
       # Backprop with expert demonstrations
-      expert_output = self.reward_net(torch.cat((expert_state_var,
+      expert_output = self.reward_net(torch.cat((#expert_state_var,
                                                  expert_action_var,
                                                  expert_latent_c_var), 1))
       expert_disc_loss = self.criterion(expert_output, Variable(torch.zeros(
@@ -276,7 +276,7 @@ class CausalGAILMLP(object):
 
       # Backprop with generated demonstrations
       # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
-      gen_output = self.reward_net(torch.cat((state_var,
+      gen_output = self.reward_net(torch.cat((#state_var,
                                               action_var,
                                               latent_next_c_var), 1))
       gen_disc_loss = self.criterion(gen_output, Variable(
@@ -519,6 +519,11 @@ class CausalGAILMLP(object):
         c_gen, expert_goal = self.get_c_for_traj(state_expert,
                                                  action_expert,
                                                  c_expert)
+        print("Goal: {} Context:\n {}".format(
+          np.array_str(expert_goal.data.cpu().numpy(),
+                       suppress_small=True,
+                       precision=2), 
+          np.array_str(c_gen, suppress_small=True, precision=5)))
 
         # Sample start state or should we just choose the start state from the
         # expert trajectory sampled above.
@@ -574,12 +579,14 @@ class CausalGAILMLP(object):
 
           # Get the discriminator reward
           disc_reward_t = float(self.reward_net(torch.cat(
-              (Variable(torch.from_numpy(curr_state).unsqueeze(
-                  0)).type(dtype),
+              (#Variable(torch.from_numpy(curr_state).unsqueeze( 0)).type(dtype),
                 Variable(torch.from_numpy(oned_to_onehot(
                   action, self.action_size)).unsqueeze(0)).type(dtype),
                 Variable(torch.from_numpy(next_ct_array).unsqueeze(0)).type(
                   dtype)), 1)).data.cpu().numpy()[0,0])
+
+          #print("t: {}, disc: {:.6f}, log disc: {:.6f}".format(
+          #  t, disc_reward_t, -math.log(disc_reward_t)))
 
           if disc_reward_t < 1e-6:
             disc_reward_t += 1e-6
