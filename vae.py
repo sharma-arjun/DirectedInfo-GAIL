@@ -34,6 +34,7 @@ class VAE(nn.Module):
                  state_size=1,
                  action_size=1,
                  latent_size=1,
+                 goal_size=1,
                  output_size=1,
                  history_size=1,
                  hidden_size=64):
@@ -48,7 +49,7 @@ class VAE(nn.Module):
 
         self.posterior = Posterior(state_size=state_size*self.history_size,
                                    action_size=action_size,
-                                   latent_size=latent_size,
+                                   latent_size=latent_size+goal_size,
                                    hidden_size=hidden_size)
 
 
@@ -70,8 +71,8 @@ class VAE(nn.Module):
 
     def forward(self, x, c):
         mu, logvar = self.encode(x, c)
-        c[:,0] = self.reparameterize(mu, logvar)
-        return self.decode(x, c), mu, logvar
+        c[:,-1] = self.reparameterize(mu, logvar)
+        return self.decode(x, c[:,-1]), mu, logvar
 
 class VAETrain(object):
     def __init__(self, args,
@@ -107,7 +108,8 @@ class VAETrain(object):
         # Hack -- VAE input dim (s + a + latent).
         self.vae_model = VAE(state_size=state_size,
                              action_size=0,
-                             latent_size=num_goals+args.vae_context_size,
+                             latent_size=args.vae_context_size,
+                             goal_size=num_goals,
                              output_size=action_size,
                              history_size=history_size,
                              hidden_size=64)
@@ -411,7 +413,7 @@ class VAETrain(object):
                     x[:] = next_state_features
 
                 # update c
-                c[:, 0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
+                c[:, -1] = self.vae_model.reparameterize(mu, logvar).data.cpu()
 
                 # Update current state
                 curr_state_arr = np.array(next_state.coordinates,
@@ -526,7 +528,7 @@ class VAETrain(object):
                                           dtype=np.float32)
 
                 # update c
-                c[:, 0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
+                c[:, -1] = self.vae_model.reparameterize(mu, logvar).data.cpu()
 
             # Calculate the total loss.
             total_loss = ep_loss[0]
