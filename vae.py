@@ -38,7 +38,8 @@ class VAE(nn.Module):
                  policy_output_size=1,
                  history_size=1,
                  hidden_size=64,
-                 use_goal_in_policy=True):
+                 use_goal_in_policy=True,
+                 use_separate_goal_policy=True):
         '''
         state_size: State size
         latent_size: Size of 'c' variable
@@ -51,10 +52,11 @@ class VAE(nn.Module):
         self.posterior_latent_size = posterior_latent_size
         self.posterior_goal_size = posterior_goal_size
         self.use_goal_in_policy = use_goal_in_policy
+        self.use_separate_goal_policy = use_separate_goal_policy
 
         self.policy_latent_size = policy_latent_size
         if use_goal_in_policy:
-          self.policy_latent_size += posterior_goal_size
+            self.policy_latent_size += posterior_goal_size
 
         self.policy = Policy(state_size=policy_state_size*self.history_size,
                              action_size=policy_action_size,
@@ -62,6 +64,14 @@ class VAE(nn.Module):
                              output_size=policy_output_size,
                              hidden_size=hidden_size,
                              output_activation='sigmoid')
+
+        if use_separate_goal_policy:
+            self.policy_goal = Policy(state_size=policy_state_size*self.history_size,
+                                     action_size=policy_action_size,
+                                     latent_size=posterior_goal_size,
+                                     output_size=policy_output_size,
+                                     hidden_size=hidden_size,
+                                     output_activation='sigmoid')
 
         self.posterior = Posterior(
                 state_size=posterior_state_size*self.history_size,
@@ -82,18 +92,38 @@ class VAE(nn.Module):
         else:
             return mu
 
+
+    def decode_goal_policy(self, x, g):
+        action_mean, action_log_std, action_std = self.policy_goal(
+                torch.cat((x, g), 1))
+
+        return action_mean
+
+
     def decode(self, x, c):
         action_mean, action_log_std, action_std = self.policy(
                 torch.cat((x, c), 1))
+
         return action_mean
 
-    def forward(self, x, c):
+    def forward(self, x, c, g):
         mu, logvar = self.encode(x, c)
         c[:,-self.posterior_latent_size:] = self.reparameterize(mu, logvar)
+
+        decoder_output_1 = None
+        decoder_output_2 = None
+
         if self.use_goal_in_policy:
-          return self.decode(x, c), mu, logvar
+            decoder_output_1 = self.decode(x, c)
         else:
-          return self.decode(x, c[:,-self.posterior_latent_size:]), mu, logvar
+            decoder_output_1 = self.decode(x, c[:,-self.posterior_latent_size:])
+
+        if self.use_separate_goal_policy:
+            decoder_output_2 = self.decode_goal_policy(x, g)
+
+
+        return decoder_output_1, decoder_output_2, mu, logvar
+            
 
 class VAETrain(object):
     def __init__(self, args,
@@ -106,6 +136,7 @@ class VAETrain(object):
                  history_size=1,
                  use_rnn_goal_predictor=False,
                  dtype=torch.FloatTensor):
+        
         self.args = args
         self.logger = logger
         self.width, self.height = width, height
@@ -139,7 +170,8 @@ class VAETrain(object):
                              policy_output_size=action_size,
                              history_size=history_size,
                              hidden_size=64,
-                             use_goal_in_policy=args.use_goal_in_policy)
+                             use_goal_in_policy=args.use_goal_in_policy,
+                             use_separate_goal_policy=args.use_separate_goal_policy)
 
         self.obstacles, self.transition_func = None, None
 
@@ -187,8 +219,14 @@ class VAETrain(object):
           self.Q_model_linear = self.Q_model_linear.type(dtype)
 
     # Reconstruction + KL divergence losses summed over all elements and batch
-    def loss_function(self, recon_x, x, mu, logvar):
-        BCE = F.binary_cross_entropy(recon_x, x, size_average=False)
+    def loss_function(self, recon_x1, recon_x2, x, mu, logvar):
+
+        lambda_bce = 10.0
+        lambda_kld = 1.0
+
+        BCE1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
+        if self.args.use_separate_goal_policy:
+            BCE2 = F.binary_cross_entropy(recon_x2, x, size_average=False)
         #MSE = F.mse_loss(recon_x, x)
 
         # see Appendix B from VAE paper:
@@ -198,8 +236,13 @@ class VAETrain(object):
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
         #KLD = 0.5 * torch.sum(mu.pow(2))
 
+        
         #return MSE + KLD
-        return BCE + KLD, BCE, KLD
+        if self.args.use_separate_goal_policy:
+            return lambda_bce*BCE1 + lambda_bce*BCE2 + lambda_kld*KLD, BCE1, BCE2, KLD
+        else:
+            return lambda_bce*BCE1 + lambda_kld*KLD, BCE1, None, KLD
+
 
     def set_models_to_train(self):
         if self.use_rnn_goal_predictor:
@@ -355,13 +398,14 @@ class VAETrain(object):
         '''
         self.vae_model.eval()
         if self.use_rnn_goal_predictor:
-          self.Q_model.eval()
-          self.Q_model_linear.eval()
+            self.Q_model.eval()
+            self.Q_model_linear.eval()
 
         history_size, batch_size = self.vae_model.history_size, 1
 
         results = {'true_goal': [], 'pred_goal': [],
-                   'true_traj': [], 'pred_traj': []}
+                   'true_traj': [], 'pred_traj': [],
+                    'pred_traj_goal': []}
 
         # We need to sample expert trajectories to get (s, a) pairs which
         # are required for goal prediction.
@@ -376,14 +420,14 @@ class VAETrain(object):
 
             episode_len = len(ep_state)
             if self.use_rnn_goal_predictor:
-              final_goal, pred_goal = self.predict_goal(ep_state,
-                                                        ep_action,
-                                                        ep_c,
-                                                        ep_mask,
-                                                        self.num_goals)
+                final_goal, pred_goal = self.predict_goal(ep_state,
+                                                          ep_action,
+                                                          ep_c,
+                                                          ep_mask,
+                                                          self.num_goals)
 
-              final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
-              results['pred_goal'].append(final_goal_numpy)
+                final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
+                results['pred_goal'].append(final_goal_numpy)
 
             true_goal_numpy = np.zeros((self.num_goals))
             true_goal_numpy[int(ep_c[0])] = 1
@@ -410,7 +454,7 @@ class VAETrain(object):
                                  dtype=np.float32)
                 x[:, history_size - 1, :] = x_feat
 
-            true_traj, pred_traj = [], []
+            true_traj, pred_traj, pred_traj_goal = [], [], []
             curr_state_arr = ep_state[0]
 
             # Store list of losses to backprop later.
@@ -418,24 +462,27 @@ class VAETrain(object):
                 x_var = Variable(torch.from_numpy(
                     x.reshape((1, -1))).type(self.dtype))
                 if self.use_rnn_goal_predictor:
-                  c_var = torch.cat([
-                      final_goal,
-                      Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
+                    c_var = torch.cat([
+                        final_goal,
+                        Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
                 else:
-                  true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(0).type(self.dtype))
-                  c_var = torch.cat([
-                      true_goal,
-                      Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
+                    true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(0).type(self.dtype))
+                    c_var = torch.cat([
+                        true_goal,
+                        Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
+                print(c_var)
 
-                pred_actions_tensor, mu, logvar = self.vae_model(x_var, c_var)
+                pred_actions_tensor, pred_actions_tensor2, mu, logvar = self.vae_model(x_var, c_var, final_goal)
                 pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
+                pred_actions_2_numpy = pred_actions_tensor2.data.cpu().numpy()
 
                 # Store the "true" state
                 true_traj.append((ep_state[t], ep_action[t]))
                 pred_traj.append((curr_state_arr,
                                   pred_actions_numpy.reshape((-1))))
-
+                pred_traj_goal.append((curr_state_arr,
+                                  pred_actions_2_numpy.reshape((-1))))
                 if history_size > 1:
                     x[:, :(history_size-1), :] = x[:,1:, :]
 
@@ -464,6 +511,8 @@ class VAETrain(object):
 
             results['true_traj'].append(np.array(true_traj))
             results['pred_traj'].append(np.array(pred_traj))
+            results['pred_traj_goal'].append(np.array(pred_traj_goal))
+
         return results
 
     def train_variable_length_epoch(self, epoch, expert, batch_size=1):
@@ -483,12 +532,12 @@ class VAETrain(object):
 
         for batch_idx in range(num_batches):
             # Train loss for this batch
-            train_loss, train_BCE_loss, train_KLD_loss = 0.0, 0.0, 0.0
+            train_loss, train_BCE_loss, train_KLD_loss, train_BCE2_loss = 0.0, 0.0, 0.0, 0.0
             batch = expert.sample(batch_size)
 
             self.vae_opt.zero_grad()
             if self.use_rnn_goal_predictor:
-              self.Q_model_opt.zero_grad()
+                self.Q_model_opt.zero_grad()
 
             ep_state, ep_action, ep_c, ep_mask = batch
             episode_len = len(ep_state[0])
@@ -506,11 +555,11 @@ class VAETrain(object):
 
 
             if self.use_rnn_goal_predictor:
-              final_goal, pred_goal = self.predict_goal(ep_state,
-                                                        ep_action,
-                                                        ep_c,
-                                                        ep_mask,
-                                                        self.num_goals)
+                final_goal, pred_goal = self.predict_goal(ep_state,
+                                                          ep_action,
+                                                          ep_c,
+                                                          ep_mask,
+                                                          self.num_goals)
 
             # Predict actions i.e. forward prop through q (posterior) and
             # policy network.
@@ -539,30 +588,36 @@ class VAETrain(object):
                     x.reshape((1, -1))).type(self.dtype))
                 # Append 'c' at the end.
                 if args.use_rnn_goal:
-                  c_var = torch.cat(
-                          [final_goal,
-                           Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
+                    c_var = torch.cat(
+                            [final_goal,
+                             Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
                 else:
-                  c_var = torch.cat(
-                          [true_goal,
-                           Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
+                    c_var = torch.cat(
+                            [true_goal,
+                             Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
-                pred_actions_tensor, mu, logvar = self.vae_model(x_var, c_var)
+                pred_actions_tensor, pred_actions_2_tensor, mu, logvar = self.vae_model(x_var, c_var, final_goal)
 
                 expert_action_var = action_var[t].clone().unsqueeze(0)
 
-                loss, BCE_loss, KLD_loss = self.loss_function(
+                loss, BCE_loss, BCE2_loss, KLD_loss = self.loss_function(
                         pred_actions_tensor,
+                        pred_actions_2_tensor,
                         expert_action_var,
                         mu,
                         logvar)
     
                 ep_loss.append(loss)
+                #loss.backward()
                 train_loss += loss.data[0]
                 train_BCE_loss += BCE_loss.data[0]
+                if self.args.use_separate_goal_policy:
+                    train_BCE2_loss += BCE2_loss.data[0]
                 train_KLD_loss += KLD_loss.data[0]
 
                 pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
+                if self.args.use_separate_goal_policy:
+                    pred_actions_2_numpy = pred_actions_2_tensor.data.cpu().numpy()
 
                 if history_size > 1:
                     x[:,:(history_size-1),:] = x[:,1:,:]
@@ -595,7 +650,7 @@ class VAETrain(object):
             total_loss.backward()
 
             # Get the gradients and network weights
-            # TODO: ADd gradients
+            # TODO: Add gradients
             if self.args.log_gradients_tensorboard:
                 vae_model_l2_norm, vae_model_grad_l2_norm = \
                         get_weight_norm_for_network(self.vae_model)
@@ -609,21 +664,21 @@ class VAETrain(object):
                          self.train_step_count)
 
                 if self.use_rnn_goal_predictor:
-                  Q_model_l2_norm, Q_model_l2_grad_norm = \
-                          get_weight_norm_for_network(self.Q_model_linear)
-                  self.logger.summary_writer.add_scalar(
-                          'weight/Q_model_l2',
-                           Q_model_l2_norm,
-                           self.train_step_count)
-                  self.logger.summary_writer.add_scalar(
-                          'grad/Q_model_l2',
-                           Q_model_l2_grad_norm,
-                           self.train_step_count)
+                    Q_model_l2_norm, Q_model_l2_grad_norm = \
+                            get_weight_norm_for_network(self.Q_model_linear)
+                    self.logger.summary_writer.add_scalar(
+                            'weight/Q_model_l2',
+                             Q_model_l2_norm,
+                             self.train_step_count)
+                    self.logger.summary_writer.add_scalar(
+                            'grad/Q_model_l2',
+                             Q_model_l2_grad_norm,
+                             self.train_step_count)
 
 
             self.vae_opt.step()
             if self.use_rnn_goal_predictor:
-              self.Q_model_opt.step()
+                self.Q_model_opt.step()
 
 
             # Update stats
@@ -639,13 +694,23 @@ class VAETrain(object):
             self.logger.summary_writer.add_scalar('loss/KLD_per_sample',
                                                    train_KLD_loss,
                                                    self.train_step_count)
+            if self.args.use_separate_goal_policy:
+                self.logger.summary_writer.add_scalar('loss/BCE2_per_sample',
+                                                   train_BCE2_loss,
+                                                   self.train_step_count)
 
 
             if batch_idx % self.args.log_interval == 0:
-                print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
-                        'BCE Loss: {:.2f},    KLD: {:.2f}'.format(
-                    epoch, batch_idx, num_batches, train_loss,
-                    train_BCE_loss, train_KLD_loss))
+                if self.args.use_separate_goal_policy:
+                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
+                            'BCE Loss: {:.2f}, \t BCE Loss 2: {:.2f}, \t  KLD: {:.2f}'.format(
+                        epoch, batch_idx, num_batches, train_loss,
+                        train_BCE_loss, train_BCE2_loss, train_KLD_loss))
+                else:
+                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
+                            'BCE Loss: {:.2f},    KLD: {:.2f}'.format(
+                        epoch, batch_idx, num_batches, train_loss,
+                        train_BCE_loss, train_KLD_loss))
 
             self.train_step_count += 1
 
@@ -747,8 +812,8 @@ class VAETrain(object):
         goal correctly.
         '''
         if self.use_rnn_goal_predictor:
-          self.Q_model.eval()
-          self.Q_model_linear.eval()
+            self.Q_model.eval()
+            self.Q_model_linear.eval()
         history_size, batch_size = self.vae_model.history_size, 1
 
         results = {'true_goal': [], 'pred_goal': []}
@@ -764,13 +829,13 @@ class VAETrain(object):
             ep_c, ep_mask = ep_c[0], ep_mask[0]
 
             if self.use_rnn_goal_predictor:
-              final_goal, pred_goal = self.predict_goal(ep_state,
-                                                        ep_action,
-                                                        ep_c,
-                                                        ep_mask,
-                                                        self.num_goals)
+                final_goal, pred_goal = self.predict_goal(ep_state,
+                                                          ep_action,
+                                                          ep_c,
+                                                          ep_mask,
+                                                          self.num_goals)
               
-              results['pred_goal'].append(final_goal_numpy)
+                results['pred_goal'].append(final_goal_numpy)
 
             true_goal_numpy = ep_c[0]
             final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
@@ -786,15 +851,15 @@ class VAETrain(object):
                 expert, num_test_samples=num_test_samples)
 
         if self.use_rnn_goal_predictor:
-          goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
-          for i in range(len(results['true_goal'])):
-              row = np.argmax(results['true_goal'][i])
-              col = np.argmax(results['pred_goal'][i])
-              goal_pred_conf_arr[row, col] += 1
-          results['goal_pred_conf_arr'] = goal_pred_conf_arr
+            goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
+            for i in range(len(results['true_goal'])):
+                row = np.argmax(results['true_goal'][i])
+                col = np.argmax(results['pred_goal'][i])
+                goal_pred_conf_arr[row, col] += 1
+            results['goal_pred_conf_arr'] = goal_pred_conf_arr
 
-          print("Goal prediction confusion matrix:")
-          print(np.array_str(goal_pred_conf_arr, precision=0))
+            print("Goal prediction confusion matrix:")
+            print(np.array_str(goal_pred_conf_arr, precision=0))
 
         if other_results_dict is not None:
             # Copy other results dict into the main results
@@ -956,6 +1021,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--use_goal_in_policy', type=int, default=1, choices=[0, 1],
                         help='Give goal to policy network.')
+
+    parser.add_argument('--use_separate_goal_policy', type=int, default=0, choices=[0, 1],
+                        help='Use another decoder with goal input.')
 
     # Arguments for VAE training
     parser.add_argument('--vae_state_size', type=int, default=2,
