@@ -219,10 +219,12 @@ class VAETrain(object):
           self.Q_model_linear = self.Q_model_linear.type(dtype)
 
     # Reconstruction + KL divergence losses summed over all elements and batch
-    def loss_function(self, recon_x1, recon_x2, x, mu, logvar):
+    def loss_function(self, recon_x1, recon_x2, x, mu, logvar, epoch):
 
-        lambda_bce = 10.0
-        lambda_kld = 1.0
+        lambda_bce1 = 1.0
+        th_epochs = 0.5*args.num_epochs
+        lambda_kld = max(0.1, 0.1 + (lambda_bce1 - 0.1) * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
+        lambda_bce2 = 10.0
 
         BCE1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
         if self.args.use_separate_goal_policy:
@@ -239,9 +241,9 @@ class VAETrain(object):
         
         #return MSE + KLD
         if self.args.use_separate_goal_policy:
-            return lambda_bce*BCE1 + lambda_bce*BCE2 + lambda_kld*KLD, BCE1, BCE2, KLD
+            return lambda_bce1*BCE1 + lambda_bce2*BCE2 + lambda_kld*KLD, BCE1, BCE2, KLD
         else:
-            return lambda_bce*BCE1 + lambda_kld*KLD, BCE1, None, KLD
+            return lambda_bce1*BCE1 + lambda_kld*KLD, BCE1, None, KLD
 
 
     def set_models_to_train(self):
@@ -605,7 +607,8 @@ class VAETrain(object):
                         pred_actions_2_tensor,
                         expert_action_var,
                         mu,
-                        logvar)
+                        logvar,
+                        epoch)
     
                 ep_loss.append(loss)
                 #loss.backward()
