@@ -50,4 +50,7 @@ Thumbs.db
 *.swp
 
 # Add ipynb_checkpoints
-plots/.ipynb_checkpoints/
+IL/plots/.ipynb_checkpoints/
+
+# rl-weights
+RL/assets/learned_weights/*
