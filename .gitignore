@@ -53,4 +53,4 @@ Thumbs.db
 IL/plots/.ipynb_checkpoints/
 
 # rl-weights
-RL/assets/learned_weights/*
+RL/assets/learned_models/
