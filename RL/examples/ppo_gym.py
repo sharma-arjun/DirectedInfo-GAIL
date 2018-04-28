@@ -96,8 +96,8 @@ else:
         if is_disc_action:
             policy_net = DiscretePolicy(state_dim, env_dummy.action_space.n)
         else:
-            policy_net = Policy(state_dim, env_dummy.action_space.shape[0], log_std=args.log_std)
-        value_net = Value(state_dim)
+            policy_net = Policy(state_dim+1, env_dummy.action_space.shape[0], log_std=args.log_std)
+        value_net = Value(state_dim+1)
     else:
         policy_net, value_net, running_state = pickle.load(open(args.model_path, "rb"))
     if use_gpu:
