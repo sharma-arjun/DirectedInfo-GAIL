@@ -75,7 +75,7 @@ state_dim = env_dummy.observation_space.shape[0]
 is_disc_action = len(env_dummy.action_space.shape) == 0
 ActionTensor = LongTensor if is_disc_action else DoubleTensor
 
-running_state = ZFilter((state_dim,), clip=5)
+running_state = ZFilter((state_dim+1,), clip=5)
 # running_reward = ZFilter((1,), demean=False, clip=10)
 
 """define actor and critic"""
