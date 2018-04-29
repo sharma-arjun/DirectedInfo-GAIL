@@ -183,7 +183,7 @@ class Agent:
         state = env.reset()
         if self.state_type == 'decayed_context':
             state = np.concatenate((state, np.array([0.0, 1.0])), axis=0) 
-        elif self.state_tupe == 'context'
+        elif self.state_type == 'context':
             state = np.concatenate((state, np.array([0.0])), axis=0) 
         if self.running_state is not None:
             state = self.running_state(state, update=False)
