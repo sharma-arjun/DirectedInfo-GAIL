@@ -53,6 +53,8 @@ parser.add_argument('--save-model-interval', type=int, default=0, metavar='N',
                     help="interval between saving model (default: 0, means don't save)")
 parser.add_argument('--policy-list', nargs='*',
                     help="policies to use with mixed expert trajectory generation")
+parser.add_argument('--state-type', default="no_context", metavar='G',
+                    help='Type of state - no context, context, decayed context')
 args = parser.parse_args()
 
 
@@ -75,7 +77,15 @@ state_dim = env_dummy.observation_space.shape[0]
 is_disc_action = len(env_dummy.action_space.shape) == 0
 ActionTensor = LongTensor if is_disc_action else DoubleTensor
 
-running_state = ZFilter((state_dim+1,), clip=5)
+
+if args.state_type == 'decayed_context':
+    extra_dim = 2
+elif args.state_type == 'context':
+    extra_dim = 1
+else:
+    extra_dim = 0
+
+running_state = ZFilter((state_dim+extra_dim,), clip=5)
 # running_reward = ZFilter((1,), demean=False, clip=10)
 
 """define actor and critic"""
@@ -94,10 +104,10 @@ if args.policy_list is not None:
 else:
     if args.model_path is None:
         if is_disc_action:
-            policy_net = DiscretePolicy(state_dim, env_dummy.action_space.n)
+            policy_net = DiscretePolicy(state_dim+extra_dim, env_dummy.action_space.n)
         else:
-            policy_net = Policy(state_dim+1, env_dummy.action_space.shape[0], log_std=args.log_std)
-        value_net = Value(state_dim+1)
+            policy_net = Policy(state_dim+extra_dim, env_dummy.action_space.shape[0], log_std=args.log_std)
+        value_net = Value(state_dim+extra_dim)
     else:
         policy_net, value_net, running_state = pickle.load(open(args.model_path, "rb"))
     if use_gpu:
@@ -105,7 +115,8 @@ else:
         value_net = value_net.cuda()
 
     """create agent"""
-    agent = Agent(env_factory, policy_net, running_state=running_state, render=args.render, num_threads=args.num_threads, mode_list=args.mode_list)
+    agent = Agent(env_factory, policy_net, running_state=running_state, render=args.render,
+                 num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type)
 
     optimizer_policy = torch.optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     optimizer_value = torch.optim.Adam(value_net.parameters(), lr=args.learning_rate)

@@ -7,8 +7,8 @@ import time
 from gym import wrappers
 
 
-def collect_samples(pid, queue, env, policy, custom_reward, mean_action,
-                    tensor, render, running_state, update_rs, min_batch_size, mode_list):
+def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
+                    render, running_state, update_rs, min_batch_size, mode_list, state_type):
     torch.randn(pid, )
     log = dict()
     memory = Memory()
@@ -23,7 +23,10 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action,
 
     while num_steps < min_batch_size:
         state = env.reset()
-        state = np.concatenate((state, np.array([0])), axis=0)
+        if state_type == 'decayed_context':
+            state = np.concatenate((state, np.array([0.0, 1.0])), axis=0)
+        elif state_type == 'context':
+            state = np.concatenate((state, np.array([0.0])), axis=0)
         if running_state is not None:
             state = running_state(state, update=update_rs)
         reward_episode = 0
@@ -40,7 +43,10 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action,
             action = int(action) if policy.is_disc_action else action.astype(np.float64)
             next_state, reward, done, _ = env.step(action)
             reward_episode += reward
-            next_state = np.concatenate((next_state, np.array([t // 333])), axis=0)
+            if state_type == 'decayed_context':
+                next_state = np.concatenate((next_state, np.array([t // 333, 1/((t % 333) + 1)])), axis=0)
+            elif state_type == 'context':
+                next_state = np.concatenate((next_state, np.array([t // 333])), axis=0)
             if running_state is not None:
                 next_state = running_state(next_state, update=update_rs)
 
@@ -109,7 +115,7 @@ def merge_log(log_list):
 class Agent:
 
     def __init__(self, env_factory, policy, custom_reward=None, mean_action=False, render=False,
-                 tensor_type=torch.DoubleTensor, running_state=None, num_threads=1, mode_list=None):
+                 tensor_type=torch.DoubleTensor, running_state=None, num_threads=1, mode_list=None, state_type=None):
         self.env_factory = env_factory
         self.policy = policy
         self.custom_reward = custom_reward
@@ -119,6 +125,7 @@ class Agent:
         self.tensor = tensor_type
         self.num_threads = num_threads
         self.mode_list = mode_list
+        self.state_type = state_type
         self.env_list = []
         for i in range(num_threads):
             if mode_list:
@@ -135,14 +142,14 @@ class Agent:
         workers = []
 
         for i in range(self.num_threads-1):
-            worker_args = (i+1, queue, self.env_list[i + 1], self.policy, self.custom_reward, self.mean_action,
-                           self.tensor, False, self.running_state, False, thread_batch_size, self.mode_list)
+            worker_args = (i+1, queue, self.env_list[i + 1], self.policy, self.custom_reward, self.mean_action, self.tensor,
+                           False, self.running_state, False, thread_batch_size, self.mode_list, self.state_type)
             workers.append(multiprocessing.Process(target=collect_samples, args=worker_args))
         for worker in workers:
             worker.start()
 
-        memory, log = collect_samples(0, None, self.env_list[0], self.policy, self.custom_reward, self.mean_action,
-                                      self.tensor, self.render, self.running_state, True, thread_batch_size, self.mode_list)
+        memory, log = collect_samples(0, None, self.env_list[0], self.policy, self.custom_reward, self.mean_action, self.tensor,
+                                      self.render, self.running_state, True, thread_batch_size, self.mode_list, self.state_type)
 
         worker_logs = [None] * len(workers)
         worker_memories = [None] * len(workers)
@@ -166,21 +173,24 @@ class Agent:
         return batch, log
 
 
-    def generate_mixed_expert_trajs(self, num_steps_per_policy, policy_list, running_state_list, mode_seq=['walk','walkback','jump']):
+    def generate_mixed_expert_trajs(self, num_steps_per_policy, policy_list, running_state_list, vid_folder=None):
 
-        assert(len(policy_list) == len(mode_seq))
+        assert(len(policy_list) == len(self.mode_list))
         # currently not using multiprocessing for this part
         env = self.env_list[0]
-        env = wrappers.Monitor(env, 'videos/')
+        env = wrappers.Monitor(env, '../videos/' + vid_folder, force=True)
 
         state = env.reset()
-        state = np.concatenate((state, np.array([0])), axis=0) 
+        if self.state_type == 'decayed_context':
+            state = np.concatenate((state, np.array([0.0, 1.0])), axis=0) 
+        elif self.state_tupe == 'context'
+            state = np.concatenate((state, np.array([0.0])), axis=0) 
         if self.running_state is not None:
             state = self.running_state(state, update=False)
     
         for i in range(len(policy_list)):
             self.policy = policy_list[i]
-            mode = mode_seq[i]
+            mode = self.mode_list[i]
             if use_gpu:
                 self.policy.cuda()
             if hasattr(env.env.env, 'mode'):
@@ -197,7 +207,10 @@ class Agent:
                 else:
                     action = action.data[0].numpy()
                 next_state, reward, done, _ = env.step(action)
-                next_state = np.concatenate((next_state, np.array([i])), axis=0)
+                if self.state_type == 'decayed_context':
+                    next_state = np.concatenate((next_state, np.array([i, 1/(n+1)])), axis=0)
+                elif self.state_type == 'context':
+                    next_state = np.concatenate((next_state, np.array([i])), axis=0)
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
                 if self.render:
