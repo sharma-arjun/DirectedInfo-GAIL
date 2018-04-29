@@ -174,6 +174,7 @@ class Agent:
         env = wrappers.Monitor(env, 'videos/')
 
         state = env.reset()
+        state = np.concatenate((state, np.array([0])), axis=0) 
         if self.running_state is not None:
             state = self.running_state(state, update=False)
     
@@ -187,8 +188,7 @@ class Agent:
 
             for n in range(num_steps_per_policy):
                 print(n)
-                state_var = Variable(torch.cat((self.tensor(state).unsqueeze(0), 
-                                 self.tensor(np.array([[i]]))), 1), volatile=True)
+                state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 if use_gpu:
                     state_var = state_var.cuda()
                 action  = self.policy(state_var)[0]
@@ -197,6 +197,7 @@ class Agent:
                 else:
                     action = action.data[0].numpy()
                 next_state, reward, done, _ = env.step(action)
+                next_state = np.concatenate((next_state, np.array([i])), axis=0)
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
                 if self.render:
