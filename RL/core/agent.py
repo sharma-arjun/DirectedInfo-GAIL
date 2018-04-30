@@ -5,6 +5,7 @@ from torch.autograd import Variable
 import math
 import time
 from gym import wrappers
+from gen_expert_trajectories import save_expert_traj_dict_to_h5
 
 
 def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
@@ -179,6 +180,7 @@ class Agent:
         # currently not using multiprocessing for this part
         env = self.env_list[0]
         env = wrappers.Monitor(env, '../videos/' + vid_folder, force=True)
+        expert_dict = {'state': [], 'action:' [], 'goal': []}
 
         state = env.reset()
         if self.state_type == 'decayed_context':
@@ -190,7 +192,7 @@ class Agent:
 
         done_flag = False
     
-        for i in range(len(policy_list)):
+        for i in range(len(self.mode_list)):
             if done_flag == True:
                 break
             self.policy = policy_list[i]
@@ -222,4 +224,11 @@ class Agent:
                 if done:
                     done_flag = True
                     break
+
+                expert_dict['state'].append(state)
+                expert_dict['action'].append(action)
+                expert_dict['goal'].append(0)
+
                 state = next_state
+
+        return expert_dict

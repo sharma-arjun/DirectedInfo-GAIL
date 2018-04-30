@@ -4,6 +4,7 @@ import os
 import sys
 import pickle
 import time
+from utils.tools import save_expert_traj_dict_to_h5, recursively_save_dict_contents_to_group
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import *
@@ -55,6 +56,8 @@ parser.add_argument('--policy-list', nargs='*',
                     help="policies to use with mixed expert trajectory generation")
 parser.add_argument('--state-type', default="no_context", metavar='G',
                     help='Type of state - no context, context, decayed context')
+parser.add_argument('--traj-save-dir', metavar='G',
+                    help='save directory for expert h5')
 args = parser.parse_args()
 
 
@@ -186,9 +189,18 @@ def gen_traj_loop():
     n = 20
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type)
+    
+    env_data_dict = {'num_goals': 3}
+    expert_data_dict = {}
+
     for i_iter in range(n):
         vid_folder = str(i_iter)
-        agent.generate_mixed_expert_trajs(333, policy_list, running_state_list, vid_folder=vid_folder)
+        path_key = str(i_iter) + '_0'
+        expert_data_dict[path_key] = agent.generate_mixed_expert_trajs(333, policy_list, running_state_list, vid_folder=vid_folder)
+
+    save_expert_traj_dict_to_h5(expert_data_dict, args.traj_save_dir)
+
+    
     
 
 if args.policy_list is None:
