@@ -184,10 +184,11 @@ def train_loop():
 
 def gen_traj_loop():
     n = 20
-    print(policy_list[0])
-    agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render, num_threads=args.num_threads)
+    agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
+                  num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type)
     for i_iter in range(n):
-        agent.generate_mixed_expert_trajs(250, policy_list, running_state_list)
+        vid_folder = str(i_iter)
+        agent.generate_mixed_expert_trajs(333, policy_list, running_state_list, vid_folder=vid_folder)
     
 
 if args.policy_list is None:

@@ -184,11 +184,15 @@ class Agent:
         if self.state_type == 'decayed_context':
             state = np.concatenate((state, np.array([0.0, 1.0])), axis=0) 
         elif self.state_type == 'context':
-            state = np.concatenate((state, np.array([0.0])), axis=0) 
+            state = np.concatenate((state, np.array([0.0])), axis=0)
         if self.running_state is not None:
             state = self.running_state(state, update=False)
+
+        done_flag = False
     
         for i in range(len(policy_list)):
+            if done_flag == True:
+                break
             self.policy = policy_list[i]
             mode = self.mode_list[i]
             if use_gpu:
@@ -216,5 +220,6 @@ class Agent:
                 if self.render:
                     env.render()
                 if done:
+                    done_flag = True
                     break
                 state = next_state
