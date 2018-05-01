@@ -59,6 +59,8 @@ parser.add_argument('--state-type', default="no_context", metavar='G',
                     help='Type of state - no context, context, decayed context')
 parser.add_argument('--traj-save-dir', metavar='G',
                     help='save directory for expert h5')
+parser.add_argument('--jump-thresh', type=float, default=1.3, metavar='N',
+                    help='threshold for jump reward')
 args = parser.parse_args()
 
 
@@ -68,6 +70,8 @@ def env_factory(thread_id, mode=None):
     if hasattr(env.env, 'mode'):
         print('Setting mode to', mode)
         env.env.mode = mode
+    if hasattr(env.env, 'jump_thresh'):
+        env.env.jump_thresh = args.jump_thresh
     return env
 
 
@@ -186,12 +190,13 @@ def train_loop():
             if use_gpu:
                 policy_net.cpu(), value_net.cpu()
             pickle.dump((policy_net, value_net, running_state),
-                        open(os.path.join(assets_dir(), 'learned_models/{}_{}_{}_{}_ppo.p'.format(args.env_name, '_'.join(args.mode_list), str(i_iter), str(log['avg_reward']))), 'wb'))
+                        open(os.path.join(assets_dir(), 'learned_models/{}_{}_{}_{}_{}_ppo.p'.format(args.env_name, '_'.join(args.mode_list),
+                             str(args.jump_thresh), str(i_iter), str(log['avg_reward']))), 'wb'))
             if use_gpu:
                 policy_net.cuda(), value_net.cuda()
 
 def gen_traj_loop():
-    n = 300
+    n = 1
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type,
                   num_steps_per_mode=args.num_steps_per_mode)
@@ -213,7 +218,6 @@ def gen_traj_loop():
 
     save_expert_traj_dict_to_h5(expert_data_dict, args.traj_save_dir)
 
-    
     
 
 if args.policy_list is None:

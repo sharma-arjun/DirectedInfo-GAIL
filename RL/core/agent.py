@@ -212,6 +212,7 @@ class Agent:
                 env_base.mode = mode
 
             for n in range(num_steps_per_policy):
+                print(n)
                 state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 if use_gpu:
                     state_var = state_var.cuda()
