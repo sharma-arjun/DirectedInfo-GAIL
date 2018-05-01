@@ -70,9 +70,12 @@ class InfoGAIL(BaseGAIL):
                                      hidden_size=64,
                                      output_activation='sigmoid')
 
-        # context_size contains num_goals
-        self.value_net = Value(state_size * history_size + context_size ,
-                               hidden_size=64)
+        # Use value network for calculating GAE. We should use this for
+        # training the policy network.
+        if args.use_value_net:
+            # context_size contains num_goals
+            self.value_net = Value(state_size * history_size + context_size,
+                                   hidden_size=64)
 
         # Reward net is the discriminator network.
         self.reward_net = Reward(state_size * history_size,
@@ -112,6 +115,275 @@ class InfoGAIL(BaseGAIL):
         self.policy_net = checkpoint_data['policy']
         self.value_net = checkpoint_data['value']
         self.reward_net = checkpoint_data['reward']
+
+
+    def update_params_for_batch(self,
+                                states,
+                                actions,
+                                latent_c,
+                                latent_next_c,
+                                targets,
+                                advantages,
+                                expert_states,
+                                expert_actions,
+                                expert_latent_c,
+                                optim_batch_size,
+                                optim_batch_size_exp,
+                                optim_iters):
+        '''Update parameters for one batch of data.
+
+        Update the policy network, discriminator (reward) network and the
+        posterior network here.
+        '''
+        args, dtype = self.args, self.dtype
+        curr_id, curr_id_exp = 0, 0
+        for _ in range(optim_iters):
+            curr_batch_size = min(optim_batch_size, actions.size(0) - curr_id)
+            curr_batch_size_exp = min(optim_batch_size_exp,
+                                      expert_actions.size(0) - curr_id_exp)
+            start_idx, end_idx = curr_id, curr_id + curr_batch_size
+
+            state_var = Variable(states[start_idx:end_idx])
+            action_var = Variable(actions[start_idx:end_idx])
+            latent_c_var = Variable(latent_c[start_idx:end_idx])
+            latent_next_c_var = Variable(latent_next_c[start_idx:end_idx])
+            advantages_var = Variable(advantages[start_idx:end_idx])
+
+            start_idx, end_idx = curr_id_exp, curr_id_exp + curr_batch_size_exp
+            expert_state_var = Variable(expert_states[start_idx:end_idx])
+            expert_action_var = Variable(expert_actions[start_idx:end_idx])
+            expert_latent_c_var = Variable(expert_latent_c[start_idx:end_idx])
+
+            # Update reward net
+            self.opt_reward.zero_grad()
+
+            # Backprop with expert demonstrations
+            expert_output = self.reward_net(torch.cat((expert_state_var,
+                                                       expert_action_var,
+                                                       expert_latent_c_var), 1))
+            expert_disc_loss = self.criterion(
+                    expert_output, 
+                    Variable(torch.zeros(expert_action_var.size(0),
+                        1).type(dtype)))
+            expert_disc_loss.backward()
+
+            # Backprop with generated demonstrations
+            # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
+            gen_output = self.reward_net(torch.cat((state_var,
+                                                    action_var,
+                                                    latent_next_c_var), 1))
+            gen_disc_loss = self.criterion(gen_output, Variable(
+                torch.ones(action_var.size(0), 1)).type(dtype))
+            gen_disc_loss.backward()
+
+            # Add loss scalars.
+            self.logger.summary_writer.add_scalars(
+                'loss/discriminator',
+                {
+                    'total': expert_disc_loss.data[0] + gen_disc_loss.data[0],
+                    'expert': expert_disc_loss.data[0],
+                    'gen': gen_disc_loss.data[0],
+                },
+                self.gail_step_count)
+            self.opt_reward.step()
+
+            reward_l2_norm, reward_grad_l2_norm = \
+                    get_weight_norm_for_network(self.reward_net)
+            self.logger.summary_writer.add_scalar('weight/discriminator/param',
+                                                  reward_l2_norm,
+                                                  self.gail_step_count)
+            self.logger.summary_writer.add_scalar('weight/discriminator/grad',
+                                                  reward_grad_l2_norm,
+                                                  self.gail_step_count)
+
+
+            # Update posterior net. We need to do this by reparameterization
+            # trick instead.  We should not put action_var (a_t) in the
+            # posterior net since we need c_t to predict a_t while till now we
+            # only have c_{t-1}.
+            mu, logvar = self.posterior_net(
+                    torch.cat((state_var, latent_c_var), 1))
+
+            if args.use_reparameterize:
+                std = logvar.mul(0.5).exp_()
+                eps = Variable(std.data.new(std.size()).normal_())
+                predicted_posterior = eps.mul(std).add_(mu)
+            else:
+                predicted_posterior = mu
+
+            # latent_next_c is of shape (N, 5) where the 1-4 columns of each
+            # row represent the goal vector hence we need to extract the last
+            # column for the true posterior.
+            true_posterior = torch.zeros(latent_next_c_var.size(0), 1).type(dtype)
+            true_posterior[:, 0] = latent_next_c_var.data[:, -1]
+            posterior_loss = self.criterion_posterior(predicted_posterior,
+                                                      Variable(true_posterior))
+            posterior_loss.backward()
+            self.logger.summary_writer.add_scalar('loss/posterior',
+                                                  posterior_loss.data[0],
+                                                  self.gail_step_count)
+
+
+            # compute old and new action probabilities
+            action_means, action_log_stds, action_stds = self.policy_net(
+                    torch.cat((state_var, latent_next_c_var), 1))
+            log_prob_cur = normal_log_density(action_var,
+                                              action_means,
+                                              action_log_stds,
+                                              action_stds)
+
+            action_means_old, action_log_stds_old, action_stds_old = \
+                    self.old_policy_net(torch.cat(
+                        (state_var, latent_next_c_var), 1))
+            log_prob_old = normal_log_density(action_var,
+                                              action_means_old,
+                                              action_log_stds_old,
+                                              action_stds_old)
+
+            if args.use_value_net:
+                # update value net
+                self.opt_value.zero_grad()
+                value_var = self.value_net(
+                        torch.cat((state_var, latent_next_c_var), 1))
+                value_loss = (value_var - \
+                        targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
+                value_loss.backward()
+                self.opt_value.step()
+
+            # Update policy net (PPO step)
+            self.opt_policy.zero_grad()
+            ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
+            surr1 = ratio * advantages_var[:, 0]
+            surr2 = torch.clamp(ratio,
+                                1.0 - self.args.clip_epsilon,
+                                1.0 + self.args.clip_epsilon) * advantages_var[:,0]
+            policy_surr = -torch.min(surr1, surr2).mean()
+            policy_surr.backward()
+            # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
+            self.opt_policy.step()
+            self.logger.summary_writer.add_scalar('loss/policy',
+                                                  policy_surr.data[0],
+                                                  self.gail_step_count)
+
+            policy_l2_norm, policy_grad_l2_norm = \
+                    get_weight_norm_for_network(self.policy_net)
+            self.logger.summary_writer.add_scalar('weight/policy/param',
+                                                  policy_l2_norm,
+                                                  self.gail_step_count)
+            self.logger.summary_writer.add_scalar('weight/policy/grad',
+                                                  policy_grad_l2_norm,
+                                                  self.gail_step_count)
+
+            # set new starting point for batch
+            curr_id += curr_batch_size
+            curr_id_exp += curr_batch_size_exp
+
+            self.gail_step_count += 1
+
+
+    def update_params(self, gen_batch, expert_batch, episode_idx,
+                      optim_epochs, optim_batch_size):
+        '''Update params for Policy (G), Reward (D) and Posterior (q) networks.
+        '''
+        args, dtype = self.args, self.dtype
+
+        self.opt_policy.lr = self.args.learning_rate \
+            * max(1.0 - float(episode_idx)/args.num_epochs, 0)
+        clip_epsilon = self.args.clip_epsilon \
+            * max(1.0 - float(episode_idx)/args.num_epochs, 0)
+
+        # generated trajectories
+        states = torch.Tensor(np.array(gen_batch.state)).type(dtype)
+        actions = torch.Tensor(np.array(gen_batch.action)).type(dtype)
+        rewards = torch.Tensor(np.array(gen_batch.reward)).type(dtype)
+        masks = torch.Tensor(np.array(gen_batch.mask)).type(dtype)
+
+        ## Expand states to include history ##
+        # Generated trajectories already have history in them.
+
+        latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
+        latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
+        if args.use_value_net:
+            values = self.value_net(Variable(states))
+        else:
+            values = None
+
+        # expert trajectories
+        list_of_expert_states, list_of_expert_actions = [], []
+        list_of_expert_latent_c, list_of_masks = [], []
+        for i in range(len(expert_batch.state)):
+            # c sampled from expert trajectories is incorrect since we don't
+            # have "true c". Hence, we use the trained VAE to get the "true c".
+            expert_c, _ = self.get_c_for_traj(expert_batch.state[i],
+                                              expert_batch.action[i],
+                                              expert_batch.c[i])
+            # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
+            expert_c = expert_c[1:, :]
+            ## Expand expert states ##
+            expanded_states = self.expand_states_numpy(expert_batch.state[i],
+                                                       self.history_size)
+            list_of_expert_states.append(torch.Tensor(expanded_states))
+            list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
+            list_of_expert_latent_c.append(torch.Tensor(expert_c))
+            list_of_masks.append(torch.Tensor(expert_batch.mask[i]))
+
+        expert_states = torch.cat(list_of_expert_states,0).type(dtype)
+        expert_actions = torch.cat(list_of_expert_actions, 0).type(dtype)
+        expert_latent_c = torch.cat(list_of_expert_latent_c, 0).type(dtype)
+        expert_masks = torch.cat(list_of_masks, 0).type(dtype)
+
+        assert expert_states.size(0) == expert_actions.size(0), \
+                "Expert transition size do not match"
+        assert expert_states.size(0) == expert_latent_c.size(0), \
+                "Expert transition size do not match"
+        assert expert_states.size(0) == expert_masks.size(0), \
+                "Expert transition size do not match"
+
+        # compute advantages
+        returns, advantages = get_advantage_for_rewards(rewards,
+                                                        masks,
+                                                        self.args.gamma,
+                                                        values,
+                                                        dtype=dtype)
+        targets = Variable(returns)
+        advantages = (advantages - advantages.mean()) / advantages.std()
+
+        # Backup params after computing probs but before updating new params
+        for old_policy_param, policy_param in zip(
+                self.old_policy_net.parameters(), self.policy_net.parameters()):
+            old_policy_param.data.copy_(policy_param.data)
+
+        # update value, reward and policy networks
+        optim_iters = self.args.batch_size // optim_batch_size
+        optim_batch_size_exp = expert_actions.size(0) // optim_iters
+
+        # Remove extra 1 array shape from actions, since actions were added as
+        # 1-hot vector of shape (1, A).
+        actions = np.squeeze(actions)
+        expert_actions = np.squeeze(expert_actions)
+
+        for _ in range(optim_epochs):
+            perm = np.random.permutation(np.arange(actions.size(0)))
+            perm_exp = np.random.permutation(np.arange(expert_actions.size(0)))
+            if args.cuda:
+                perm = torch.cuda.LongTensor(perm)
+                perm_exp = torch.cuda.LongTensor(perm_exp)
+            else:
+                perm, perm_exp = torch.LongTensor(perm), torch.LongTensor(perm_exp)
+
+            self.update_params_for_batch(
+                    states[perm],
+                    actions[perm],
+                    latent_c[perm],
+                    latent_next_c[perm],
+                    targets[perm],
+                    advantages[perm],
+                    expert_states[perm_exp],
+                    expert_actions[perm_exp],
+                    expert_latent_c[perm_exp],
+                    optim_batch_size,
+                    optim_batch_size_exp,
+                    optim_iters)
 
 
     def train_gail(self, expert):
