@@ -25,16 +25,12 @@ from grid_world import RewardFunction, RewardFunction_SR2, GridWorldReward
 from grid_world import ActionBasedGridWorldReward
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from load_expert_traj import Expert, ExpertHDF5
-from replay_memory import Memory
-from running_state import ZFilter
+from utils.replay_memory import Memory
+from utils.running_state import ZFilter
 from utils.torch_utils import clip_grads
 
 from vae import VAE, VAETrain
 from utils.logger import Logger, TensorboardXLogger
-from utils.rl_utils import epsilon_greedy_linear_decay, epsilon_greedy
-from utils.rl_utils import greedy, oned_to_onehot, normal_log_density
-from utils.rl_utils import get_advantage_for_rewards
-from utils.torch_utils import get_weight_norm_for_network
 
 class BaseGAIL(object):
     def __init__(self,

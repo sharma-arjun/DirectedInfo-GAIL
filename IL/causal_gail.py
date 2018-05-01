@@ -35,9 +35,10 @@ from base_gail import BaseGAIL
 from vae import VAE, VAETrain
 from utils.logger import Logger, TensorboardXLogger
 from utils.rl_utils import epsilon_greedy_linear_decay, epsilon_greedy
-from utils.rl_utils import greedy, oned_to_onehot, normal_log_density
+from utils.rl_utils import greedy, oned_to_onehot
 from utils.rl_utils import get_advantage_for_rewards
 from utils.torch_utils import get_weight_norm_for_network
+from utils.torch_utils import normal_log_density
 
 class CausalGAILMLP(BaseGAIL):
   def __init__(self,
