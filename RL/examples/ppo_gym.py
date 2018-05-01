@@ -194,6 +194,7 @@ def gen_traj_loop():
     env_data_dict = {'num_goals': 3}
     expert_data_dict = {}
     i_iter = 0
+    print('Writing to h5 file ...')
 
     while i_iter < n:
         #vid_folder = str(i_iter)
@@ -203,6 +204,7 @@ def gen_traj_loop():
         if save_flag:
             expert_data_dict[path_key] = returned_dict
             i_iter += 1
+            print(i_iter)
 
     save_expert_traj_dict_to_h5(expert_data_dict, args.traj_save_dir)
 
