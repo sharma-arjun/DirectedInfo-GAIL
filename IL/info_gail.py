@@ -105,7 +105,8 @@ class InfoGAIL(BaseGAIL):
         return {
             'policy': self.policy_net,
             'value': self.value_net,
-            'reward': self.reward_net
+            'reward': self.reward_net,
+            'posterior': self.posterior_net,
         }
 
     def load_checkpoint_data(self, checkpoint_path):
@@ -115,18 +116,17 @@ class InfoGAIL(BaseGAIL):
         self.policy_net = checkpoint_data['policy']
         self.value_net = checkpoint_data['value']
         self.reward_net = checkpoint_data['reward']
+        self.posterior_net = checkpoint_data['posterior']
 
 
     def update_params_for_batch(self,
                                 states,
                                 actions,
                                 latent_c,
-                                latent_next_c,
                                 targets,
                                 advantages,
                                 expert_states,
                                 expert_actions,
-                                expert_latent_c,
                                 optim_batch_size,
                                 optim_batch_size_exp,
                                 optim_iters):
@@ -146,21 +146,18 @@ class InfoGAIL(BaseGAIL):
             state_var = Variable(states[start_idx:end_idx])
             action_var = Variable(actions[start_idx:end_idx])
             latent_c_var = Variable(latent_c[start_idx:end_idx])
-            latent_next_c_var = Variable(latent_next_c[start_idx:end_idx])
             advantages_var = Variable(advantages[start_idx:end_idx])
 
             start_idx, end_idx = curr_id_exp, curr_id_exp + curr_batch_size_exp
             expert_state_var = Variable(expert_states[start_idx:end_idx])
             expert_action_var = Variable(expert_actions[start_idx:end_idx])
-            expert_latent_c_var = Variable(expert_latent_c[start_idx:end_idx])
 
             # Update reward net
             self.opt_reward.zero_grad()
 
             # Backprop with expert demonstrations
             expert_output = self.reward_net(torch.cat((expert_state_var,
-                                                       expert_action_var,
-                                                       expert_latent_c_var), 1))
+                                                       expert_action_var), 1))
             expert_disc_loss = self.criterion(
                     expert_output, 
                     Variable(torch.zeros(expert_action_var.size(0),
@@ -168,10 +165,8 @@ class InfoGAIL(BaseGAIL):
             expert_disc_loss.backward()
 
             # Backprop with generated demonstrations
-            # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
             gen_output = self.reward_net(torch.cat((state_var,
-                                                    action_var,
-                                                    latent_next_c_var), 1))
+                                                    action_var), 1))
             gen_disc_loss = self.criterion(gen_output, Variable(
                 torch.ones(action_var.size(0), 1)).type(dtype))
             gen_disc_loss.backward()
@@ -198,12 +193,8 @@ class InfoGAIL(BaseGAIL):
 
 
             # Update posterior net. We need to do this by reparameterization
-            # trick instead.  We should not put action_var (a_t) in the
-            # posterior net since we need c_t to predict a_t while till now we
-            # only have c_{t-1}.
-            mu, logvar = self.posterior_net(
-                    torch.cat((state_var, latent_c_var), 1))
-
+            # trick.
+            mu, logvar = self.posterior_net(state_var)
             if args.use_reparameterize:
                 std = logvar.mul(0.5).exp_()
                 eps = Variable(std.data.new(std.size()).normal_())
@@ -211,11 +202,10 @@ class InfoGAIL(BaseGAIL):
             else:
                 predicted_posterior = mu
 
-            # latent_next_c is of shape (N, 5) where the 1-4 columns of each
-            # row represent the goal vector hence we need to extract the last
-            # column for the true posterior.
-            true_posterior = torch.zeros(latent_next_c_var.size(0), 1).type(dtype)
-            true_posterior[:, 0] = latent_next_c_var.data[:, -1]
+            # There is no GOAL info in latent_c_var here.
+            # TODO: This 0 and -1 stuff is not needed here. Confirm?
+            true_posterior = torch.zeros(latent_c_var.size(0), 1).type(dtype)
+            true_posterior[:, 0] = latent_c_var.data[:, -1]
             posterior_loss = self.criterion_posterior(predicted_posterior,
                                                       Variable(true_posterior))
             posterior_loss.backward()
@@ -226,7 +216,7 @@ class InfoGAIL(BaseGAIL):
 
             # compute old and new action probabilities
             action_means, action_log_stds, action_stds = self.policy_net(
-                    torch.cat((state_var, latent_next_c_var), 1))
+                    torch.cat((state_var, latent_c_var), 1))
             log_prob_cur = normal_log_density(action_var,
                                               action_means,
                                               action_log_stds,
@@ -234,7 +224,7 @@ class InfoGAIL(BaseGAIL):
 
             action_means_old, action_log_stds_old, action_stds_old = \
                     self.old_policy_net(torch.cat(
-                        (state_var, latent_next_c_var), 1))
+                        (state_var, latent_c_var), 1))
             log_prob_old = normal_log_density(action_var,
                                               action_means_old,
                                               action_log_stds_old,
@@ -244,7 +234,7 @@ class InfoGAIL(BaseGAIL):
                 # update value net
                 self.opt_value.zero_grad()
                 value_var = self.value_net(
-                        torch.cat((state_var, latent_next_c_var), 1))
+                        torch.cat((state_var, latent_c_var), 1))
                 value_loss = (value_var - \
                         targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
                 value_loss.backward()
@@ -254,9 +244,10 @@ class InfoGAIL(BaseGAIL):
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
             surr1 = ratio * advantages_var[:, 0]
-            surr2 = torch.clamp(ratio,
-                                1.0 - self.args.clip_epsilon,
-                                1.0 + self.args.clip_epsilon) * advantages_var[:,0]
+            surr2 = torch.clamp(
+                    ratio,
+                    1.0 - self.args.clip_epsilon,
+                    1.0 + self.args.clip_epsilon) * advantages_var[:,0]
             policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
             # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
@@ -302,39 +293,26 @@ class InfoGAIL(BaseGAIL):
         # Generated trajectories already have history in them.
 
         latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
-        latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
+        values = None
         if args.use_value_net:
-            values = self.value_net(Variable(states))
-        else:
-            values = None
+            values = self.value_net(Variable(torch.cat((states, latent_c), 1)))
 
         # expert trajectories
-        list_of_expert_states, list_of_expert_actions = [], []
-        list_of_expert_latent_c, list_of_masks = [], []
+        list_of_expert_states, list_of_expert_action = [], []
+        list_of_masks = []
         for i in range(len(expert_batch.state)):
-            # c sampled from expert trajectories is incorrect since we don't
-            # have "true c". Hence, we use the trained VAE to get the "true c".
-            expert_c, _ = self.get_c_for_traj(expert_batch.state[i],
-                                              expert_batch.action[i],
-                                              expert_batch.c[i])
-            # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
-            expert_c = expert_c[1:, :]
             ## Expand expert states ##
             expanded_states = self.expand_states_numpy(expert_batch.state[i],
                                                        self.history_size)
             list_of_expert_states.append(torch.Tensor(expanded_states))
             list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
-            list_of_expert_latent_c.append(torch.Tensor(expert_c))
             list_of_masks.append(torch.Tensor(expert_batch.mask[i]))
 
         expert_states = torch.cat(list_of_expert_states,0).type(dtype)
         expert_actions = torch.cat(list_of_expert_actions, 0).type(dtype)
-        expert_latent_c = torch.cat(list_of_expert_latent_c, 0).type(dtype)
         expert_masks = torch.cat(list_of_masks, 0).type(dtype)
 
         assert expert_states.size(0) == expert_actions.size(0), \
-                "Expert transition size do not match"
-        assert expert_states.size(0) == expert_latent_c.size(0), \
                 "Expert transition size do not match"
         assert expert_states.size(0) == expert_masks.size(0), \
                 "Expert transition size do not match"
@@ -375,12 +353,10 @@ class InfoGAIL(BaseGAIL):
                     states[perm],
                     actions[perm],
                     latent_c[perm],
-                    latent_next_c[perm],
                     targets[perm],
                     advantages[perm],
                     expert_states[perm_exp],
                     expert_actions[perm_exp],
-                    expert_latent_c[perm_exp],
                     optim_batch_size,
                     optim_batch_size_exp,
                     optim_iters)
