@@ -113,11 +113,12 @@ class InfoGAIL(BaseGAIL):
         self.value_net = checkpoint_data['value']
         self.reward_net = checkpoint_data['reward']
 
+
     def train_gail(self, expert):
-        '''Train GAIL.'''
+        '''Train Info-GAIL.'''
         args, dtype = self.args, self.dtype
         self.train_step_count, self.gail_step_count = 0, 0
-    
+
         for ep_idx in range(args.num_epochs):
             memory = Memory()
 
@@ -128,12 +129,11 @@ class InfoGAIL(BaseGAIL):
 
             while num_steps < args.batch_size:
                 traj_expert = expert.sample(size=1)
-                state_expert, action_expert, c_expert, _ = traj_expert
+                state_expert, action_expert, _, _ = traj_expert
 
                 # Expert state and actions
                 state_expert = state_expert[0]
                 action_expert = action_expert[0]
-                c_expert = c_expert[0]
                 expert_episode_len = len(state_expert)
 
                 # Sample start state or should we just choose the start state
@@ -163,10 +163,13 @@ class InfoGAIL(BaseGAIL):
                 # Use a hard-coded list for memory to gather experience since we
                 # need to mutate it before finally creating a memory object.
 
+                c_sampled = np.zeros((self.num_goals), dtype=np.float32)
+                c_sampled[np.random.randint(0, self.num_goals)] = 1.0
+
                 memory_list = []
                 for t in range(expert_episode_len):
                     action = self.select_action(
-                            np.concatenate((curr_state, c_expert)))
+                            np.concatenate((curr_state, c_sampled)))
                     action_numpy = action.data.cpu().numpy()
 
                     # Save generated and true trajectories
@@ -175,7 +178,7 @@ class InfoGAIL(BaseGAIL):
                     gen_traj_dict['features'].append(self.get_state_features(
                         curr_state_obj, self.args.use_state_features))
                     gen_traj_dict['actions'].append(action_numpy)
-                    gen_traj_dict['c'].append(ct)
+                    gen_traj_dict['c'].append(c_sampled)
 
                     action = epsilon_greedy_linear_decay(
                             action_numpy,
@@ -191,28 +194,34 @@ class InfoGAIL(BaseGAIL):
                             curr_state).unsqueeze(0)).type(dtype),
                         Variable(torch.from_numpy(
                             oned_to_onehot(
-                                action, self.action_size)).unsqueeze(0)).type(dtype),
+                                action, self.action_size)).unsqueeze(0)).type(
+                                    dtype),
                         Variable(torch.from_numpy(
-                            next_ct_array).unsqueeze(0)).type(
+                            c_sampled).unsqueeze(0)).type(
                                 dtype)), 1)).data.cpu().numpy()[0,0])
 
                     if disc_reward_t < 1e-6:
                         disc_reward_t += 1e-6
 
-                    if args.use_log_rewards:
-                        disc_reward_t = -math.log(disc_reward_t)
-                    else:
-                        disc_reward_t = -disc_reward_t
-
+                    disc_reward_t = -math.log(disc_reward_t) \
+                            if args.use_log_rewards else -disc_reward_t
                     disc_reward += disc_reward_t
 
-                    # use norm.logpdf if flag else use norm.pdf
-                    if args.use_log_rewards:
-                        reward_func = norm.logpdf
-                    else:
-                        reward_func = norm.pdf
+                    # Use norm.logpdf if flag else use norm.pdf
+                    reward_func = norm.logpdf if args.use_log_rewards else \
+                            norm.pdf
 
-                    posterior_reward += posterior_reward_t
+                    # Use fixed std if not using reparameterize otherwise use
+                    # sigma.
+                    if args.use_reparameterize:
+                        posterior_reward_t = reward_func(next_ct, loc=mu,
+                                                         scale=sigma)
+                    else:
+                        posterior_reward_t = reward_func(next_ct, loc=mu,
+                                                         scale=0.1)
+
+                    posterior_reward += (self.args.lambda_posterior *
+                            posterior_reward_t)
 
                     # Update Rewards
                     ep_reward += (disc_reward_t + posterior_reward_t)
@@ -245,8 +254,8 @@ class InfoGAIL(BaseGAIL):
                         mask,
                         next_state_feat,
                         disc_reward_t + posterior_reward_t,
-                        ct,
-                        next_ct_array])
+                        c_sampled,
+                        c_sampled])
 
                     if args.render:
                         env.render()
@@ -268,83 +277,88 @@ class InfoGAIL(BaseGAIL):
 
 
 
-            assert memory_list[-1][2] == 0, "Mask for final end state is not 0."
-            for memory_t in memory_list:
-              memory.push(*memory_t)
+                assert memory_list[-1][2] == 0, \
+                        "Mask for final end state is not 0."
+                for memory_t in memory_list:
+                    memory.push(*memory_t)
 
+                self.logger.summary_writer.add_scalars(
+                    'gen_traj/gen_reward',
+                    {
+                      'discriminator': disc_reward,
+                      'posterior': posterior_reward,
+                    },
+                    self.train_step_count
+                )
+
+                num_steps += (t-1)
+                reward_batch.append(ep_reward)
+                true_reward_batch.append(ep_true_reward)
+                expert_true_reward_batch.append(expert_true_reward)
+                results['episode_reward'].append(ep_reward)
+
+                # Append trajectories
+                true_traj_curr_episode.append(true_traj)
+                gen_traj_curr_episode.append(gen_traj)
+
+            results['average_reward'].append(np.mean(reward_batch))
+
+            # Add to tensorboard
             self.logger.summary_writer.add_scalars(
-                'gen_traj/gen_reward',
-                {
-                  'discriminator': disc_reward,
-                  'posterior': posterior_reward,
-                },
-                self.train_step_count
-            )
+                    'gen_traj/reward',
+                    {
+                        'average': np.mean(reward_batch),
+                        'max': np.max(reward_batch),
+                        'min': np.min(reward_batch)
+                    },
+                    self.train_step_count)
+            self.logger.summary_writer.add_scalars(
+                    'gen_traj/true_reward',
+                    {
+                        'average': np.mean(true_reward_batch),
+                        'max': np.max(true_reward_batch),
+                        'min': np.min(true_reward_batch),
+                        'expert_true': np.mean(expert_true_reward_batch)
+                    },
+                    self.train_step_count)
 
-            num_steps += (t-1)
-            reward_batch.append(ep_reward)
-            true_reward_batch.append(ep_true_reward)
-            expert_true_reward_batch.append(expert_true_reward)
-            results['episode_reward'].append(ep_reward)
+            # Add predicted and generated trajectories to results
+            if ep_idx % self.args.save_interval == 0:
+                results['true_traj'][ep_idx] = copy.deepcopy(
+                        true_traj_curr_episode)
+                results['pred_traj'][ep_idx] = copy.deepcopy(
+                        gen_traj_curr_episode)
 
-            # Append trajectories
-            true_traj_curr_episode.append(true_traj)
-            gen_traj_curr_episode.append(gen_traj)
+            # Update parameters
+            gen_batch = memory.sample()
 
-        results['average_reward'].append(np.mean(reward_batch))
+            # We do not get the context variable from expert trajectories.
+            # Hence we need to fill it in later.
+            expert_batch = expert.sample(size=args.num_expert_trajs)
 
-          # Add to tensorboard
-          self.logger.summary_writer.add_scalars(
-              'gen_traj/reward', {
-                'average': np.mean(reward_batch),
-                'max': np.max(reward_batch),
-                'min': np.min(reward_batch)
-                },
-              self.train_step_count)
-          self.logger.summary_writer.add_scalars(
-              'gen_traj/true_reward',
-              {
-                'average': np.mean(true_reward_batch),
-                'max': np.max(true_reward_batch),
-                'min': np.min(true_reward_batch),
-                'expert_true': np.mean(expert_true_reward_batch)
-              },
-              self.train_step_count)
+            self.update_params(gen_batch, expert_batch, ep_idx,
+                               args.optim_epochs, args.optim_batch_size)
 
-          # Add predicted and generated trajectories to results
-          if ep_idx % self.args.save_interval == 0:
-            results['true_traj'][ep_idx] = copy.deepcopy(true_traj_curr_episode)
-            results['pred_traj'][ep_idx] = copy.deepcopy(gen_traj_curr_episode)
+            self.train_step_count += 1
 
-          # Update parameters
-          gen_batch = memory.sample()
+            if ep_idx > 0 and  ep_idx % args.log_interval == 0:
+                print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
+                      'True Avg {:.2f}   True Max R: {:.2f}   ' \
+                      'Expert (Avg): {:.2f}'.format(
+                          ep_idx, args.num_epochs, np.mean(reward_batch),
+                          np.max(reward_batch), np.mean(true_reward_batch),
+                          np.max(true_reward_batch),
+                          np.mean(expert_true_reward_batch)))
 
-          # We do not get the context variable from expert trajectories. Hence we
-          # need to fill it in later.
-          expert_batch = expert.sample(size=args.num_expert_trajs)
+            results_path = os.path.join(args.results_dir, 'results.pkl')
+            with open(results_path, 'wb') as results_f:
+                pickle.dump((results), results_f, protocol=2)
+                # print("Did save results to {}".format(results_path))
 
-          self.update_params(gen_batch, expert_batch, ep_idx,
-                             args.optim_epochs, args.optim_batch_size)
-
-          self.train_step_count += 1
-
-          if ep_idx > 0 and  ep_idx % args.log_interval == 0:
-            print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
-                  'True Avg {:.2f}   True Max R: {:.2f}   ' \
-                  'Expert (Avg): {:.2f}'.format(
-                  ep_idx, args.num_epochs, np.mean(reward_batch),
-                  np.max(reward_batch), np.mean(true_reward_batch),
-                  np.max(true_reward_batch), np.mean(expert_true_reward_batch)))
-
-          results_path = os.path.join(args.results_dir, 'results.pkl')
-          with open(results_path, 'wb') as results_f:
-            pickle.dump((results), results_f, protocol=2)
-            # print("Did save results to {}".format(results_path))
-
-          if ep_idx % args.save_interval == 0:
-            checkpoint_filepath = self.model_checkpoint_filepath(ep_idx)
-            torch.save(self.checkpoint_data_to_save(), checkpoint_filepath)
-            print("Did save checkpoint: {}".format(checkpoint_filepath))
+            if ep_idx % args.save_interval == 0:
+                checkpoint_filepath = self.model_checkpoint_filepath(ep_idx)
+                torch.save(self.checkpoint_data_to_save(), checkpoint_filepath)
+                print("Did save checkpoint: {}".format(checkpoint_filepath))
 
 def main():
     if not os.path.exists(os.path.join(args.results_dir, 'log')):
@@ -364,7 +378,7 @@ def main():
     if args.cuda:
         dtype = torch.cuda.FloatTensor
 
-    causal_gail_mlp = CausalGAILMLP(
+    info_gail_mlp = InfoGAIL(
             args,
             vae_train,
             logger,
@@ -374,11 +388,9 @@ def main():
             num_goals=4,
             history_size=args.history_size,
             dtype=dtype)
-    causal_gail_mlp.set_expert(expert)
-    causal_gail_mlp.train_gail(expert)
+    info_gail_mlp.set_expert(expert)
+    info_gail_mlp.train_gail(expert)
 
-    if args.init_from_vae:
-        causal_gail_mlp.load_weights_from_vae()
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Info-GAIL using MLP.')
