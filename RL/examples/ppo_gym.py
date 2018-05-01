@@ -79,8 +79,9 @@ state_dim = env_dummy.observation_space.shape[0]
 is_disc_action = len(env_dummy.action_space.shape) == 0
 ActionTensor = LongTensor if is_disc_action else DoubleTensor
 
-if not os.path.exists(args.traj_save_dir):
-    os.makedirs(args.traj_save_dir)
+if args.traj_save_dir:
+    if not os.path.exists(args.traj_save_dir):
+        os.makedirs(args.traj_save_dir)
 
 if args.state_type == 'decayed_context':
     extra_dim = 2
@@ -187,7 +188,7 @@ def train_loop():
                 policy_net.cuda(), value_net.cuda()
 
 def gen_traj_loop():
-    n = 20
+    n = 300
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type)
     
