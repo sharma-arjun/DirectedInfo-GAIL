@@ -221,14 +221,19 @@ class VAETrain(object):
     # Reconstruction + KL divergence losses summed over all elements and batch
     def loss_function(self, recon_x1, recon_x2, x, mu, logvar, epoch):
 
-        lambda_bce1 = 1.0
+        lambda_loss1 = 1.0
         th_epochs = 0.5*args.num_epochs
         lambda_kld = max(0.1, 0.1 + (lambda_bce1 - 0.1) * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
-        lambda_bce2 = 10.0
+        lambda_loss2 = 10.0
 
-        BCE1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
-        if self.args.use_separate_goal_policy:
-            BCE2 = F.binary_cross_entropy(recon_x2, x, size_average=False)
+        if args.bce_loss:
+            loss1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
+            if self.args.use_separate_goal_policy:
+                loss2 = F.binary_cross_entropy(recon_x2, x, size_average=False)
+        else:
+            loss1 = F.mse_loss(recon_x1, x)
+            if self.args.use_separate_goal_policy:
+                loss2 = F.mse_loss(recon_x2, x)
         #MSE = F.mse_loss(recon_x, x)
 
         # see Appendix B from VAE paper:
@@ -241,9 +246,9 @@ class VAETrain(object):
         
         #return MSE + KLD
         if self.args.use_separate_goal_policy:
-            return lambda_bce1*BCE1 + lambda_bce2*BCE2 + lambda_kld*KLD, BCE1, BCE2, KLD
+            return lambda_loss1*loss1 + lambda_loss2*loss2 + lambda_kld*KLD, loss1, loss2, KLD
         else:
-            return lambda_bce1*BCE1 + lambda_kld*KLD, BCE1, None, KLD
+            return lambda_loss1*loss1 + lambda_kld*KLD, loss1, None, KLD
 
 
     def set_models_to_train(self):
@@ -545,7 +550,7 @@ class VAETrain(object):
 
         for batch_idx in range(num_batches):
             # Train loss for this batch
-            train_loss, train_BCE_loss, train_KLD_loss, train_BCE2_loss = 0.0, 0.0, 0.0, 0.0
+            train_loss, train_policy_loss, train_KLD_loss, train_policy2_loss = 0.0, 0.0, 0.0, 0.0
             batch = expert.sample(batch_size)
 
             self.vae_opt.zero_grad()
@@ -624,7 +629,7 @@ class VAETrain(object):
 
                 expert_action_var = action_var[t].clone().unsqueeze(0)
 
-                loss, BCE_loss, BCE2_loss, KLD_loss = self.loss_function(
+                loss, policy_loss, policy2_loss, KLD_loss = self.loss_function(
                         pred_actions_tensor,
                         pred_actions_2_tensor,
                         expert_action_var,
@@ -635,9 +640,9 @@ class VAETrain(object):
                 ep_loss.append(loss)
                 #loss.backward()
                 train_loss += loss.data[0]
-                train_BCE_loss += BCE_loss.data[0]
+                train_policy_loss += policy_loss.data[0]
                 if self.args.use_separate_goal_policy:
-                    train_BCE2_loss += BCE2_loss.data[0]
+                    train_policy2_loss += policy2_loss.data[0]
                 train_KLD_loss += KLD_loss.data[0]
 
                 pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
@@ -713,29 +718,29 @@ class VAETrain(object):
             self.logger.summary_writer.add_scalar('loss/per_sample',
                                                    train_loss,
                                                    self.train_step_count)
-            self.logger.summary_writer.add_scalar('loss/BCE_per_sample',
-                                                   train_BCE_loss,
+            self.logger.summary_writer.add_scalar('loss/policy_loss_per_sample',
+                                                   train_policy_loss,
                                                    self.train_step_count)
             self.logger.summary_writer.add_scalar('loss/KLD_per_sample',
                                                    train_KLD_loss,
                                                    self.train_step_count)
             if self.args.use_separate_goal_policy:
-                self.logger.summary_writer.add_scalar('loss/BCE2_per_sample',
-                                                   train_BCE2_loss,
+                self.logger.summary_writer.add_scalar('loss/policy2_loss_per_sample',
+                                                   train_policy2_loss,
                                                    self.train_step_count)
 
 
             if batch_idx % self.args.log_interval == 0:
                 if self.args.use_separate_goal_policy:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
-                            'BCE Loss: {:.2f}, \t BCE Loss 2: {:.2f}, \t  KLD: {:.2f}'.format(
+                            'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t  KLD: {:.2f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_BCE_loss, train_BCE2_loss, train_KLD_loss))
+                        train_policy_loss, train_policy2_loss, train_KLD_loss))
                 else:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
-                            'BCE Loss: {:.2f},    KLD: {:.2f}'.format(
+                            'Policy Loss: {:.2f},    KLD: {:.2f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_BCE_loss, train_KLD_loss))
+                        train_policy_loss, train_KLD_loss))
 
             self.train_step_count += 1
 
@@ -1094,6 +1099,13 @@ if __name__ == '__main__':
     # Model arguments
     parser.add_argument('--stacked_lstm', type=int, choices=[0, 1], default=1,
                         help='Use stacked LSTM for Q network.')
+
+    # Action - discrete or continuous
+    parser.add_argument('--discrete', dest='bce_loss', action='store_true',
+                        help='actions are discrete, use BCE loss')
+    parser.add_argument('--continuous', dest='bce_loss', action='store_false',
+                        help='actions are continuous, use MSE loss')
+    parser.set_defaults(bce_loss=False)
 
     args = parser.parse_args()
     if args.cuda and not torch.cuda.is_available():
