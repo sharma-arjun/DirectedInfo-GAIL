@@ -12,8 +12,13 @@ def square(a):
 
 class Policy(nn.Module):
 
-    def __init__(self, state_size, action_size, latent_size, output_size,
-                 hidden_size, output_activation=None):
+    def __init__(self, 
+                 state_size=1,
+                 action_size=1,
+                 latent_size=0,
+                 output_size=1,
+                 hidden_size=1,
+                 output_activation=None):
         super(Policy, self).__init__()
     
         self.input_size = state_size + action_size + latent_size
