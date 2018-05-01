@@ -59,6 +59,8 @@ parser.add_argument('--state-type', default="no_context", metavar='G',
                     help='Type of state - no context, context, decayed context')
 parser.add_argument('--traj-save-dir', metavar='G',
                     help='save directory for expert h5')
+parser.add_argument('--save-model-path', metavar='G', default='learned_models',
+                    help='save directory for expert h5')
 parser.add_argument('--jump-thresh', type=float, default=1.3, metavar='N',
                     help='threshold for jump reward')
 args = parser.parse_args()
@@ -88,6 +90,10 @@ ActionTensor = LongTensor if is_disc_action else DoubleTensor
 if args.traj_save_dir:
     if not os.path.exists(args.traj_save_dir):
         os.makedirs(args.traj_save_dir)
+
+if args.save_model_path:
+    if not os.path.exists(os.path.join(assets_dir(), args.save_model_path)):
+        os.makedirs(os.path.join(assets_dir(), args.save_model_path))
 
 if args.state_type == 'decayed_context':
     extra_dim = 2
@@ -190,7 +196,7 @@ def train_loop():
             if use_gpu:
                 policy_net.cpu(), value_net.cpu()
             pickle.dump((policy_net, value_net, running_state),
-                        open(os.path.join(assets_dir(), 'learned_models/{}_{}_{}_{}_{}_ppo.p'.format(args.env_name, '_'.join(args.mode_list),
+                        open(os.path.join(assets_dir(), args.save_model_path + '/{}_{}_{}_{}_{}_ppo.p'.format(args.env_name, '_'.join(args.mode_list),
                              str(args.jump_thresh), str(i_iter), str(log['avg_reward']))), 'wb'))
             if use_gpu:
                 policy_net.cuda(), value_net.cuda()

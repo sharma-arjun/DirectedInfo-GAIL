@@ -57,7 +57,7 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
                 min_c_reward = min(min_c_reward, reward)
                 max_c_reward = max(max_c_reward, reward)
 
-            if t == num_steps_per_mode * len(mode_list):
+            if t == num_steps_per_mode * len(mode_list) - 1:
                 done = True
 
             mask = 0 if done else 1
