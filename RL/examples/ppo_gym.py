@@ -4,7 +4,6 @@ import os
 import sys
 import pickle
 import time
-from utils.tools import save_expert_traj_dict_to_h5, recursively_save_dict_contents_to_group
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import *
@@ -80,6 +79,8 @@ state_dim = env_dummy.observation_space.shape[0]
 is_disc_action = len(env_dummy.action_space.shape) == 0
 ActionTensor = LongTensor if is_disc_action else DoubleTensor
 
+if not os.path.exists(args.traj_save_dir):
+    os.makedirs(args.traj_save_dir)
 
 if args.state_type == 'decayed_context':
     extra_dim = 2
@@ -192,11 +193,16 @@ def gen_traj_loop():
     
     env_data_dict = {'num_goals': 3}
     expert_data_dict = {}
+    i_iter = 0
 
-    for i_iter in range(n):
-        vid_folder = str(i_iter)
+    while i_iter < n:
+        #vid_folder = str(i_iter)
+        vid_folder = None
         path_key = str(i_iter) + '_0'
-        expert_data_dict[path_key] = agent.generate_mixed_expert_trajs(333, policy_list, running_state_list, vid_folder=vid_folder)
+        returned_dict, save_flag = agent.generate_mixed_expert_trajs(333, policy_list, running_state_list, vid_folder=vid_folder)
+        if save_flag:
+            expert_data_dict[path_key] = returned_dict
+            i_iter += 1
 
     save_expert_traj_dict_to_h5(expert_data_dict, args.traj_save_dir)
 

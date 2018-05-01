@@ -5,7 +5,6 @@ from torch.autograd import Variable
 import math
 import time
 from gym import wrappers
-from gen_expert_trajectories import save_expert_traj_dict_to_h5
 
 
 def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
@@ -179,8 +178,12 @@ class Agent:
         assert(len(policy_list) == len(self.mode_list))
         # currently not using multiprocessing for this part
         env = self.env_list[0]
-        env = wrappers.Monitor(env, '../videos/' + vid_folder, force=True)
-        expert_dict = {'state': [], 'action:' [], 'goal': []}
+        if vid_folder != None:
+            env = wrappers.Monitor(env, '../videos/' + vid_folder, force=True)
+            env_base = env.env.env
+        else:
+            env_base = env.env
+        expert_dict = {'state': [], 'action': [], 'goal': []}
 
         state = env.reset()
         if self.state_type == 'decayed_context':
@@ -190,17 +193,17 @@ class Agent:
         if self.running_state is not None:
             state = self.running_state(state, update=False)
 
-        done_flag = False
+        save_flag = True # is true when the episode does not end early (agent doesn't die)
     
         for i in range(len(self.mode_list)):
-            if done_flag == True:
+            if save_flag == False:
                 break
             self.policy = policy_list[i]
             mode = self.mode_list[i]
             if use_gpu:
                 self.policy.cuda()
-            if hasattr(env.env.env, 'mode'):
-                env.env.env.mode = mode
+            if hasattr(env_base, 'mode'):
+                env_base.mode = mode
 
             for n in range(num_steps_per_policy):
                 print(n)
@@ -222,7 +225,8 @@ class Agent:
                 if self.render:
                     env.render()
                 if done:
-                    done_flag = True
+                    if i != len(self.mode_list) - 1 or n != num_steps_per_policy:
+                        save_flag = False
                     break
 
                 expert_dict['state'].append(state)
@@ -231,4 +235,4 @@ class Agent:
 
                 state = next_state
 
-        return expert_dict
+        return expert_dict, save_flag

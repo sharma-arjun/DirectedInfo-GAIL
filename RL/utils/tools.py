@@ -1,8 +1,10 @@
-from os import path
+import os
+import h5py
+import numpy as np
 
 
 def assets_dir():
-    return path.abspath(path.join(path.dirname(path.abspath(__file__)), '../assets'))
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../assets'))
 
 def save_expert_traj_dict_to_h5(traj_data_dict, save_dir,
                                 h5_filename='expert_traj.h5'):
