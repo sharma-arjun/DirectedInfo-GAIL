@@ -57,18 +57,20 @@ class InfoGAIL(BaseGAIL):
                                        dtype=dtype)
 
         # Create networks
-        self.policy_net = Policy(state_size * history_size,
-                                 0,
-                                 context_size,
-                                 action_size,
-                                 hidden_size=64,
-                                 output_activation='sigmoid')
-        self.old_policy_net = Policy(state_size * history_size,
-                                     0,
-                                     context_size,
-                                     action_size,
-                                     hidden_size=64,
-                                     output_activation='sigmoid')
+        self.policy_net = Policy(
+                state_size=state_size * history_size,
+                action_size=0,
+                latent_size=context_size,
+                output_size=action_size,
+                hidden_size=64,
+                output_activation='sigmoid')
+        self.old_policy_net = Policy(
+                state_size=state_size * history_size,
+                action_size=0,
+                latent_size=context_size,
+                output_size=action_size,
+                hidden_size=64,
+                output_activation='sigmoid')
 
         # Use value network for calculating GAE. We should use this for
         # training the policy network.
@@ -77,15 +79,16 @@ class InfoGAIL(BaseGAIL):
             self.value_net = Value(state_size * history_size + context_size,
                                    hidden_size=64)
 
-        # Reward net is the discriminator network.
+        # Reward net is the discriminator network. Discriminator does not
+        # receive the latent vector in InfoGAIL.
         self.reward_net = Reward(state_size * history_size,
-                                 action_size,
-                                 context_size,
+                                 action_size,       # action size
+                                 0,                 # latent size 
                                  hidden_size=64)
 
-        self.posterior_net = Posterior(state_size * history_size,
-                                       0,
-                                       context_size,
+        self.posterior_net = Posterior(state_size * history_size,   # state
+                                       0,                           # action
+                                       0,                           # context
                                        hidden_size=64)
 
         self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
