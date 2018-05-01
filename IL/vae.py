@@ -58,12 +58,17 @@ class VAE(nn.Module):
         if use_goal_in_policy:
             self.policy_latent_size += posterior_goal_size
 
+        if args.discrete:
+            output_activation='sigmoid'
+        else:
+            output_activation=None
+
         self.policy = Policy(state_size=policy_state_size*self.history_size + 1,
                              action_size=policy_action_size,
                              latent_size=self.policy_latent_size,
                              output_size=policy_output_size,
                              hidden_size=hidden_size,
-                             output_activation='sigmoid')
+                             output_activation=output_activation)
 
         if use_separate_goal_policy:
             self.policy_goal = Policy(state_size=policy_state_size*self.history_size + 1,
@@ -71,7 +76,7 @@ class VAE(nn.Module):
                                      latent_size=posterior_goal_size,
                                      output_size=policy_output_size,
                                      hidden_size=hidden_size,
-                                     output_activation='sigmoid')
+                                     output_activation=output_activation)
 
         self.posterior = Posterior(
                 state_size=posterior_state_size*self.history_size + 1,
@@ -226,7 +231,7 @@ class VAETrain(object):
         lambda_kld = max(0.1, 0.1 + (lambda_bce1 - 0.1) * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
         lambda_loss2 = 10.0
 
-        if args.bce_loss:
+        if args.discrete:
             loss1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
             if self.args.use_separate_goal_policy:
                 loss2 = F.binary_cross_entropy(recon_x2, x, size_average=False)
@@ -1101,11 +1106,11 @@ if __name__ == '__main__':
                         help='Use stacked LSTM for Q network.')
 
     # Action - discrete or continuous
-    parser.add_argument('--discrete', dest='bce_loss', action='store_true',
+    parser.add_argument('--discrete', dest='discrete', action='store_true',
                         help='actions are discrete, use BCE loss')
-    parser.add_argument('--continuous', dest='bce_loss', action='store_false',
+    parser.add_argument('--continuous', dest='discrete', action='store_false',
                         help='actions are continuous, use MSE loss')
-    parser.set_defaults(bce_loss=False)
+    parser.set_defaults(discrete=False)
 
     args = parser.parse_args()
     if args.cuda and not torch.cuda.is_available():

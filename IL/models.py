@@ -9,6 +9,7 @@ import torch.nn.functional as F
 def square(a):
     return torch.pow(a, 2.)
 
+
 class Policy(nn.Module):
 
     def __init__(self, state_size, action_size, latent_size, output_size,
