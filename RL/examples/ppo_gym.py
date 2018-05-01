@@ -102,7 +102,11 @@ elif args.state_type == 'context':
 else:
     extra_dim = 0
 
-running_state = ZFilter((state_dim+extra_dim,), clip=5)
+running_state_list = []
+for _ in range(len(args.mode_list)):
+    running_state = ZFilter((state_dim+extra_dim,), clip=5)
+    running_state_list.append(running_state)
+
 # running_reward = ZFilter((1,), demean=False, clip=10)
 
 """define actor and critic"""
@@ -119,20 +123,33 @@ if args.policy_list is not None:
         running_state_list.append(running_state)
 
 else:
+    policy_list = []
+    value_net_list = []
+
     if args.model_path is None:
         if is_disc_action:
-            policy_net = DiscretePolicy(state_dim+extra_dim, env_dummy.action_space.n)
+            for _ in range(len(args.mode_list)):
+                policy_list.append(DiscretePolicy(state_dim+extra_dim, env_dummy.action_space.n))
         else:
-            policy_net = Policy(state_dim+extra_dim, env_dummy.action_space.shape[0], log_std=args.log_std)
-        value_net = Value(state_dim+extra_dim)
+            for _ in range(len(args.mode_list)):
+                policy_net = Policy(state_dim+extra_dim, env_dummy.action_space.shape[0], log_std=args.log_std)
+
+        for _ in range(len(args.mode_list)):
+            value_net_list.append(Value(state_dim+extra_dim))
     else:
-        policy_net, value_net, running_state = pickle.load(open(args.model_path, "rb"))
+        running_state_list = []
+        for model_path in args.model_path_list:
+            policy_net, value_net, running_state = pickle.load(open(model_path, "rb"))
+            policy_list.append(policy_list)
+            value_net_list.append(value_net)
+            running_state_list.append(running_state)
     if use_gpu:
-        policy_net = policy_net.cuda()
-        value_net = value_net.cuda()
+        for policy_net, value_net in zip(policy_list, value_net_list):
+            policy_net = policy_net.cuda()
+            value_net = value_net.cuda()
 
     """create agent"""
-    agent = Agent(env_factory, policy_net, running_state=running_state, render=args.render,
+    agent = Agent(env_factory, policy_list, running_state_list=running_state_list, render=args.render,
                  num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type, 
                  num_steps_per_mode=args.num_steps_per_mode)
 
