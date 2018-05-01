@@ -23,6 +23,8 @@ parser.add_argument('--env-name', default="Reacher-v1", metavar='G',
                     help='name of the environment to run')
 parser.add_argument('--mode-list', nargs='+', required=True,
                     help='mode-list - permutation of walk, walkback, jump')
+parser.add_argument('--num-steps-per-mode', type=int, default=333, metavar='N',
+                    help='number of steps per mode (default: 333)')
 parser.add_argument('--model-path', metavar='G',
                     help='path of pre-trained model')
 parser.add_argument('--render', action='store_true', default=False,
@@ -121,7 +123,8 @@ else:
 
     """create agent"""
     agent = Agent(env_factory, policy_net, running_state=running_state, render=args.render,
-                 num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type)
+                 num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type, 
+                 num_steps_per_mode=args.num_steps_per_mode)
 
     optimizer_policy = torch.optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     optimizer_value = torch.optim.Adam(value_net.parameters(), lr=args.learning_rate)
@@ -190,7 +193,8 @@ def train_loop():
 def gen_traj_loop():
     n = 300
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
-                  num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type)
+                  num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type,
+                  num_steps_per_mode=args.num_steps_per_mode)
     
     env_data_dict = {'num_goals': 3}
     expert_data_dict = {}
@@ -201,7 +205,7 @@ def gen_traj_loop():
         #vid_folder = str(i_iter)
         vid_folder = None
         path_key = str(i_iter) + '_0'
-        returned_dict, save_flag = agent.generate_mixed_expert_trajs(333, policy_list, running_state_list, vid_folder=vid_folder)
+        returned_dict, save_flag = agent.generate_mixed_expert_trajs(policy_list, running_state_list, vid_folder=vid_folder)
         if save_flag:
             expert_data_dict[path_key] = returned_dict
             i_iter += 1
