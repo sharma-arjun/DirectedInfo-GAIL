@@ -242,7 +242,7 @@ def train_loop():
             if use_gpu:
                 for policy_net, value_net in zip(policy_list, value_net_list):
                     policy_net.cpu(), value_net.cpu()
-            pickle.dump((policy_net_list, value_net_list, running_state_list),
+            pickle.dump((policy_list, value_net_list, running_state_list),
                         open(os.path.join(assets_dir(), args.save_model_path + '/{}_{}_{}_{}_{}_ppo.p'.format(args.env_name, '_'.join(args.mode_list),
                              str(args.jump_thresh), str(i_iter), str(log['avg_reward']))), 'wb'))
             if use_gpu:
