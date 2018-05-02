@@ -622,10 +622,6 @@ def main():
     expert.push(only_coordinates_in_state=True, one_hot_action=True)
     print('Expert trajectories loaded.')
 
-    # Load pre-trained VAE model
-    vae_train = load_VAE_model(args.vae_checkpoint_path, args)
-    vae_train.set_expert(expert)
-
     dtype = torch.FloatTensor
     if args.cuda:
         dtype = torch.cuda.FloatTensor
@@ -701,9 +697,6 @@ if __name__ == '__main__':
   parser.add_argument('--clip_epsilon', type=float, default=0.2,
                       help='Clipping for PPO grad')
 
-  # Path to pre-trained VAE model
-  parser.add_argument('--vae_checkpoint_path', type=str, required=True,
-                      help='Path to pre-trained VAE model.')
   # Path to store training results in
   parser.add_argument('--results_dir', type=str, required=True,
                       help='Path to store results in.')
