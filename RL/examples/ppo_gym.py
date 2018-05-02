@@ -173,7 +173,7 @@ def update_params(batch, i_iter):
     actions = torch.from_numpy(np.stack(batch.action))
     rewards = torch.from_numpy(np.stack(batch.reward))
     masks = torch.from_numpy(np.stack(batch.mask).astype(np.float64))
-    modes = torch.from_numpy(np.stack(batch.mode))
+    modes = torch.from_numpy(np.stack(batch.mode)).int()
 
     values = torch.zeros((states.size(0),1))
     fixed_log_probs = torch.zeros((states.size(0), 1))
@@ -186,10 +186,10 @@ def update_params(batch, i_iter):
     for i in range(len(args.mode_list)):
         policy_net = policy_list[i]
         value_net = value_net_list[i]
-        ind = (modes[:,0] == activity_map(args.mode_list[i]))
+        ind = (modes[:,0] == int(activity_map(args.mode_list[i])))
         ind = ind.type(LongTensor).cuda() if use_gpu else ind.type(LongTensor)
-        values[ind] = value_net(Variable(states, volatile=True)).data
-        fixed_log_probs[ind] = policy_net.get_log_prob(Variable(states, volatile=True), Variable(actions)).data
+        values[ind] = value_net(Variable(states[ind], volatile=True)).data
+        fixed_log_probs[ind] = policy_net.get_log_prob(Variable(states[ind], volatile=True), Variable(actions[ind])).data
 
     """get advantage estimation from the trajectories"""
     advantages, returns = estimate_advantages(rewards, masks, values, args.gamma, args.tau, use_gpu)
@@ -198,6 +198,7 @@ def update_params(batch, i_iter):
 
     """perform mini-batch PPO update"""
     optim_iter_num = int(math.ceil(states.shape[0] / optim_batch_size))
+
     for _ in range(optim_epochs):
         perm = np.arange(states.shape[0])
         np.random.shuffle(perm)
@@ -212,7 +213,7 @@ def update_params(batch, i_iter):
                 states[ind], actions[ind], advantages[ind], returns[ind], fixed_log_probs[ind], modes[ind]
 
             for j in range(len(args.mode_list)):
-                ind_j = (modes_b[:,0] == activity_map(args.mode_list[j]))
+                ind_j = (modes_b[:,0] == int(activity_map(args.mode_list[j])))
                 ind_j = ind_j.type(LongTensor).cuda() if use_gpu else ind_j.type(LongTensor)
 
                 policy_net, value_net, optimizer_policy, optimizer_value = \

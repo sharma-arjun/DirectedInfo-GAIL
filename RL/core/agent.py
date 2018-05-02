@@ -255,11 +255,11 @@ class Agent:
                 if self.state_type == 'decayed_context':
                     next_state = np.concatenate((next_state,
                                      np.array([1/(n+1),
-                                               activity_map(self.mode_list[min(n+1, num_steps_per_policy-1) // num_steps_per_policy]),
+                                               activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
                                                activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
                 elif self.state_type == 'context':
                     next_state = np.concatenate((next_state,
-                                     np.array([activity_map(self.mode_list[min(n+1, num_steps_per_policy-1) // num_steps_per_policy]),
+                                     np.array([activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
                                                activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
