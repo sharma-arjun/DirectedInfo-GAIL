@@ -4,6 +4,7 @@ import os
 import sys
 import pickle
 import time
+import pdb
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import *
@@ -187,7 +188,10 @@ def update_params(batch, i_iter):
         policy_net = policy_list[i]
         value_net = value_net_list[i]
         ind = (modes[:,0] == int(activity_map(args.mode_list[i])))
-        ind = ind.type(LongTensor).cuda() if use_gpu else ind.type(LongTensor)
+        ind = torch.nonzero(ind).cuda() if use_gpu else torch.nonzero(ind)
+        if torch.numel(ind) == 0:
+            continue
+        ind = ind.squeeze(1)
         values[ind] = value_net(Variable(states[ind], volatile=True)).data
         fixed_log_probs[ind] = policy_net.get_log_prob(Variable(states[ind], volatile=True), Variable(actions[ind])).data
 
@@ -214,14 +218,18 @@ def update_params(batch, i_iter):
 
             for j in range(len(args.mode_list)):
                 ind_j = (modes_b[:,0] == int(activity_map(args.mode_list[j])))
-                ind_j = ind_j.type(LongTensor).cuda() if use_gpu else ind_j.type(LongTensor)
+                ind_j = torch.nonzero(ind_j).cuda() if use_gpu else torch.nonzero(ind_j)
+                if torch.numel(ind_j) == 0:
+                    continue
+                ind_j = ind_j.squeeze(1)
 
                 policy_net, value_net, optimizer_policy, optimizer_value = \
                     policy_list[j], value_net_list[j], optimizer_policy_list[j], optimizer_value_list[j]
  
                 states_j, actions_j, returns_j, advantages_j, fixed_log_probs_j = \
                     states_b[ind_j], actions_b[ind_j], returns_b[ind_j], advantages_b[ind_j], fixed_log_probs_b[ind_j]
-                
+
+
                 ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, 1, states_j, actions_j, returns_j,
                          advantages_j, fixed_log_probs_j, lr_mult, args.learning_rate, args.clip_epsilon, args.l2_reg)
 
