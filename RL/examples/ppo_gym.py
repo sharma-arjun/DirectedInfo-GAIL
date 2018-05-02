@@ -14,6 +14,7 @@ from torch.autograd import Variable
 from core.ppo import ppo_step
 from core.common import estimate_advantages
 from core.agent import Agent
+from core.agent import activity_map
 
 Tensor = DoubleTensor
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -96,9 +97,9 @@ if args.save_model_path:
         os.makedirs(os.path.join(assets_dir(), args.save_model_path))
 
 if args.state_type == 'decayed_context':
-    extra_dim = 2
+    extra_dim = 3
 elif args.state_type == 'context':
-    extra_dim = 1
+    extra_dim = 2
 else:
     extra_dim = 0
 
@@ -115,7 +116,7 @@ if args.policy_list_path is not None:
     policy_list = []
     running_state_list = []
     
-    with open(path_name, "rb") as f_weight_file:
+    with open(args.policy_list_path, "rb") as f_weight_file:
         policy_list, value_net_list, running_state_list = pickle.load(f_weight_file)
     if use_gpu:
         for policy_net in policy_list:
@@ -139,7 +140,7 @@ else:
         running_state_list = []
         for model_path in args.model_path_list:
             policy_net, value_net, running_state = pickle.load(open(model_path, "rb"))
-            policy_list.append(policy_list)
+            policy_list.append(policy_net)
             value_net_list.append(value_net)
             running_state_list.append(running_state)
     if use_gpu:
@@ -172,17 +173,23 @@ def update_params(batch, i_iter):
     actions = torch.from_numpy(np.stack(batch.action))
     rewards = torch.from_numpy(np.stack(batch.reward))
     masks = torch.from_numpy(np.stack(batch.mask).astype(np.float64))
-    if use_gpu:
-        states, actions, rewards, masks = states.cuda(), actions.cuda(), rewards.cuda(), masks.cuda()
+    modes = torch.from_numpy(np.stack(batch.mode))
 
     values = torch.zeros((states.size(0),1))
     fixed_log_probs = torch.zeros((states.size(0), 1))
+
+    if use_gpu:
+        states, actions, rewards, masks, values, fixed_log_probs, modes = \
+            states.cuda(), actions.cuda(), rewards.cuda(), masks.cuda(), values.cuda(), fixed_log_probs.cuda(), modes.cuda()
+
+
     for i in range(len(args.mode_list)):
         policy_net = policy_list[i]
         value_net = value_net_list[i]
-        ind = (states[:,-2] == activity_map(args.mode_list[i]))
-        values[ind,0] = value_net(Variable(states, volatile=True)).data
-        fixed_log_probs[ind,0] = policy_net.get_log_prob(Variable(states, volatile=True), Variable(actions)).data
+        ind = (modes[:,0] == activity_map(args.mode_list[i]))
+        ind = ind.type(LongTensor).cuda() if use_gpu else ind.type(LongTensor)
+        values[ind] = value_net(Variable(states, volatile=True)).data
+        fixed_log_probs[ind] = policy_net.get_log_prob(Variable(states, volatile=True), Variable(actions)).data
 
     """get advantage estimation from the trajectories"""
     advantages, returns = estimate_advantages(rewards, masks, values, args.gamma, args.tau, use_gpu)
@@ -196,18 +203,19 @@ def update_params(batch, i_iter):
         np.random.shuffle(perm)
         perm = LongTensor(perm).cuda() if use_gpu else LongTensor(perm)
 
-        states, actions, returns, advantages, fixed_log_probs = \
-            states[perm], actions[perm], returns[perm], advantages[perm], fixed_log_probs[perm]
+        states, actions, returns, advantages, fixed_log_probs, modes = \
+            states[perm], actions[perm], returns[perm], advantages[perm], fixed_log_probs[perm], modes[perm]
 
         for i in range(optim_iter_num):
             ind = slice(i * optim_batch_size, min((i + 1) * optim_batch_size, states.shape[0]))
-            states_b, actions_b, advantages_b, returns_b, fixed_log_probs_b = \
-                states[ind], actions[ind], advantages[ind], returns[ind], fixed_log_probs[ind]
+            states_b, actions_b, advantages_b, returns_b, fixed_log_probs_b, modes_b = \
+                states[ind], actions[ind], advantages[ind], returns[ind], fixed_log_probs[ind], modes[ind]
 
             for j in range(len(args.mode_list)):
-                ind_j = (states_b[:,-2] == activity_map(mode_list[j]))
+                ind_j = (modes_b[:,0] == activity_map(args.mode_list[j]))
+                ind_j = ind_j.type(LongTensor).cuda() if use_gpu else ind_j.type(LongTensor)
 
-                policy_net, value_net, optimizer_policy, optimizer_value = \ 
+                policy_net, value_net, optimizer_policy, optimizer_value = \
                     policy_list[j], value_net_list[j], optimizer_policy_list[j], optimizer_value_list[j]
  
                 states_j, actions_j, returns_j, advantages_j, fixed_log_probs_j = \
@@ -264,7 +272,7 @@ def gen_traj_loop():
     save_expert_traj_dict_to_h5(expert_data_dict, args.traj_save_dir)
 
 
-if args.policy_list is None:
+if args.policy_list_path is None:
     train_loop()
 else:
     gen_traj_loop()

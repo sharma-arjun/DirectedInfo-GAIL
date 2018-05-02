@@ -42,12 +42,13 @@ def collect_samples(pid, queue, env, policy_list, custom_reward, mean_action, te
         reward_episode = 0
 
         for t in range(10000):
-            policy = policy_list[t // num_steps_per_mode]
+            curr_mode_id = t // num_steps_per_mode
+            policy = policy_list[curr_mode_id]
             if running_state_list is not None:
-                running_state = running_state_list[t // num_steps_per_mode]
+                running_state = running_state_list[curr_mode_id]
             if t % num_steps_per_mode == 0:
                 if hasattr(env.env, 'mode'):
-                    env.env.mode = mode_list[t // num_steps_per_mode]
+                    env.env.mode = mode_list[curr_mode_id]
             state_var = Variable(tensor(state).unsqueeze(0), volatile=True)
             if mean_action:
                 action = policy(state_var)[0].data[0].numpy()
@@ -56,15 +57,18 @@ def collect_samples(pid, queue, env, policy_list, custom_reward, mean_action, te
             action = int(action) if policy.is_disc_action else action.astype(np.float64)
             next_state, reward, done, _ = env.step(action)
             reward_episode += reward
+            next_mode_id = min(t+1, max_t) // num_steps_per_mode
+
             if state_type == 'decayed_context':
                 next_state = np.concatenate((next_state, 
-                                     np.array([activity_map([mode_list[min(t+1, max_t) // num_steps_per_mode]),
-                                               
-                                     1/((t % num_steps_per_mode) + 1)])), axis=0)
+                                     np.array([1/((t % num_steps_per_mode) + 1),
+                                               activity_map(mode_list[next_mode_id]),
+                                               activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])])), axis=0)
             elif state_type == 'context':
                 next_state = np.concatenate((next_state, 
-                                     np.array([activity_map(mode_list[min(t+1, max_t) // num_steps_per_mode])])),
-                                     axis=0)
+                                     np.array([activity_map(mode_list[next_mode_id]),
+                                              activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])])), axis=0)
+
             if running_state_list is not None:
                 next_state = running_state(next_state, update=update_rs)
 
@@ -79,7 +83,7 @@ def collect_samples(pid, queue, env, policy_list, custom_reward, mean_action, te
 
             mask = 0 if done else 1
 
-            memory.push(state, action, mask, next_state, reward)
+            memory.push(state, action, mask, next_state, reward, np.array([activity_map(mode_list[curr_mode_id])]))
 
             if render:
                 env.render()
@@ -198,8 +202,10 @@ class Agent:
         return batch, log
 
 
-    def generate_mixed_expert_trajs(self, policy_list, running_state_list, vid_folder=None):
+    def generate_mixed_expert_trajs(self, vid_folder=None):
 
+        policy_list = self.policy_list
+        running_state_list = self.running_state_list
         assert(len(policy_list) == len(self.mode_list))
         N = len(self.mode_list)
         num_steps_per_policy = self.num_steps_per_mode
@@ -218,7 +224,7 @@ class Agent:
                                                      activity_map(self.mode_list[0]),
                                                      activity_map(self.mode_list[min(1, N-1)])])), axis=0)
         elif self.state_type == 'context':
-            state = np.concatenate((state, np.array([activity_map(self.mode_list[0])
+            state = np.concatenate((state, np.array([activity_map(self.mode_list[0]),
                                                      activity_map(self.mode_list[min(1, N-1)])])), axis=0)
         if self.running_state is not None:
             state = self.running_state(state, update=False)
@@ -250,11 +256,11 @@ class Agent:
                     next_state = np.concatenate((next_state,
                                      np.array([1/(n+1),
                                                activity_map(self.mode_list[min(n+1, num_steps_per_policy-1) // num_steps_per_policy]),
-                                               activity_map(self.mode_list[min(i+1, N)])])), axis=0)
+                                               activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
                 elif self.state_type == 'context':
                     next_state = np.concatenate((next_state,
                                      np.array([activity_map(self.mode_list[min(n+1, num_steps_per_policy-1) // num_steps_per_policy]),
-                                               activity_map(self.mode_list[min(i+1, N)])])), axis=0)
+                                               activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
                 if self.render:
