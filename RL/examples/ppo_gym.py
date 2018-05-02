@@ -140,10 +140,10 @@ else:
     else:
         running_state_list = []
         for model_path in args.model_path_list:
-            policy_net, value_net, running_state = pickle.load(open(model_path, "rb"))
-            policy_list.append(policy_net)
-            value_net_list.append(value_net)
-            running_state_list.append(running_state)
+            policy_list_i, value_net_list_i, running_state_list_i = pickle.load(open(model_path, "rb"))
+            policy_list += policy_list_i
+            value_net_list += value_net_list_i
+            running_state_list += running_state_list_i
     if use_gpu:
         for policy_net, value_net in zip(policy_list, value_net_list):
             policy_net = policy_net.cuda()
