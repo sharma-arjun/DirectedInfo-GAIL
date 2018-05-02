@@ -51,7 +51,7 @@ class CausalGAILMLP(BaseGAIL):
                num_goals=4,
                history_size=1,
                dtype=torch.FloatTensor):
-    super(self, CausalGAILMLP).__init__(args,
+    super(CausalGAILMLP, self).__init__(args,
                                         logger,
                                         state_size=state_size,
                                         action_size=action_size,
@@ -896,9 +896,9 @@ if __name__ == '__main__':
     # Directory for model checkpoints
     os.makedirs(os.path.join(args.results_dir, 'checkpoint'))
 
-    # Save runtime arguments to pickle file
-    args_pkl_filepath = os.path.join(args.results_dir, 'args.pkl')
-    with open(args_pkl_filepath, 'wb') as args_pkl_f:
-      pickle.dump(args, args_pkl_f, protocol=2)
+  # Save runtime arguments to pickle file
+  args_pkl_filepath = os.path.join(args.results_dir, 'args.pkl')
+  with open(args_pkl_filepath, 'wb') as args_pkl_f:
+    pickle.dump(args, args_pkl_f, protocol=2)
 
   main(args)

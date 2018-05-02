@@ -25,7 +25,7 @@ from grid_world import RewardFunction, RewardFunction_SR2, GridWorldReward
 from grid_world import ActionBasedGridWorldReward
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from load_expert_traj import Expert, ExpertHDF5
-from replay_memory import Memory
+from utils.replay_memory import Memory
 from utils.running_state import ZFilter
 from utils.torch_utils import clip_grads
 
@@ -48,7 +48,7 @@ class InfoGAIL(BaseGAIL):
                  num_goals=4,
                  history_size=1,
                  dtype=torch.FloatTensor):
-        super(self, InfoGAIL).__init__(args,
+        super(InfoGAIL, self).__init__(args,
                                        logger,
                                        state_size=state_size,
                                        action_size=action_size,
@@ -84,7 +84,7 @@ class InfoGAIL(BaseGAIL):
         # receive the latent vector in InfoGAIL.
         self.reward_net = Reward(state_size * history_size,
                                  action_size,       # action size
-                                 0,                 # latent size 
+                                 0,                 # latent size
                                  hidden_size=64)
 
         self.posterior_net = Posterior(state_size * history_size,   # state
@@ -163,7 +163,7 @@ class InfoGAIL(BaseGAIL):
             expert_output = self.reward_net(torch.cat((expert_state_var,
                                                        expert_action_var), 1))
             expert_disc_loss = self.criterion(
-                    expert_output, 
+                    expert_output,
                     Variable(torch.zeros(expert_action_var.size(0),
                         1).type(dtype)))
             expert_disc_loss.backward()
@@ -612,7 +612,7 @@ class InfoGAIL(BaseGAIL):
                 torch.save(self.checkpoint_data_to_save(), checkpoint_filepath)
                 print("Did save checkpoint: {}".format(checkpoint_filepath))
 
-def main():
+def main(args):
     if not os.path.exists(os.path.join(args.results_dir, 'log')):
         os.makedirs(os.path.join(args.results_dir, 'log'))
     logger = TensorboardXLogger(os.path.join(args.results_dir, 'log'))
@@ -628,7 +628,6 @@ def main():
 
     info_gail_mlp = InfoGAIL(
             args,
-            vae_train,
             logger,
             state_size=args.state_size,
             action_size=args.action_size,
@@ -641,132 +640,134 @@ def main():
 
 
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description='Info-GAIL using MLP.')
-  parser.add_argument('--expert_path', default="L_expert_trajectories/",
-                      help='path to the expert trajectory files')
+    parser = argparse.ArgumentParser(description='Info-GAIL using MLP.')
+    parser.add_argument('--expert_path', default="L_expert_trajectories/",
+                        help='path to the expert trajectory files')
 
-  parser.add_argument('--seed', type=int, default=1,
-                      help='random seed (default: 1)')
+    parser.add_argument('--seed', type=int, default=1,
+                        help='random seed (default: 1)')
 
-  # Environment parameters
-  parser.add_argument('--state_size', type=int, default=2,
-                      help='State size for VAE.')
-  parser.add_argument('--action_size', type=int, default=4,
-                      help='Action size for VAE.')
-  parser.add_argument('--history_size', type=int, default=1,
+    # Environment parameters
+    parser.add_argument('--state_size', type=int, default=2,
+                        help='State size for VAE.')
+    parser.add_argument('--action_size', type=int, default=4,
+                        help='Action size for VAE.')
+    parser.add_argument('--history_size', type=int, default=1,
                         help='State history size to use in VAE.')
-  parser.add_argument('--context_size', type=int, default=1,
-                      help='Context size for VAE.')
+    parser.add_argument('--context_size', type=int, default=1,
+                        help='Context size for VAE.')
 
-  # RL parameters
-  parser.add_argument('--gamma', type=float, default=0.99,
-                      help='discount factor (default: 0.99)')
-  parser.add_argument('--tau', type=float, default=0.95,
-                      help='gae (default: 0.95)')
+    # RL parameters
+    parser.add_argument('--gamma', type=float, default=0.99,
+                        help='discount factor (default: 0.99)')
+    parser.add_argument('--tau', type=float, default=0.95,
+                        help='gae (default: 0.95)')
 
-  parser.add_argument('--lambda_posterior', type=float, default=1.0,
-                      help='Parameter to scale MI loss from the posterior.')
-  parser.add_argument('--lambda_goal_pred_reward', type=float, default=1.0,
-                      help='Reward scale for goal prediction reward from RNN.')
+    parser.add_argument('--lambda_posterior', type=float, default=1.0,
+                        help='Parameter to scale MI loss from the posterior.')
+    parser.add_argument('--lambda_goal_pred_reward', type=float, default=1.0,
+                        help='Reward scale for goal prediction reward from RNN.')
 
-  # Training parameters
-  parser.add_argument('--learning_rate', type=float, default=3e-4,
-                      help='gae (default: 3e-4)')
-  parser.add_argument('--batch_size', type=int, default=2048,
-                      help='batch size (default: 2048)')
-  parser.add_argument('--num_epochs', type=int, default=500,
-                      help='number of episodes (default: 500)')
-  parser.add_argument('--max_ep_length', type=int, default=1000,
-                      help='maximum episode length.')
+    # Training parameters
+    parser.add_argument('--learning_rate', type=float, default=3e-4,
+                        help='gae (default: 3e-4)')
+    parser.add_argument('--batch_size', type=int, default=2048,
+                        help='batch size (default: 2048)')
+    parser.add_argument('--num_epochs', type=int, default=500,
+                        help='number of episodes (default: 500)')
+    parser.add_argument('--max_ep_length', type=int, default=1000,
+                        help='maximum episode length.')
 
-  parser.add_argument('--optim_epochs', type=int, default=5,
-                      help='number of epochs over a batch (default: 5)')
-  parser.add_argument('--optim_batch_size', type=int, default=64,
-                      help='batch size for epochs (default: 64)')
-  parser.add_argument('--num_expert_trajs', type=int, default=5,
-                      help='number of expert trajectories in a batch.')
-  parser.add_argument('--render', action='store_true',
-                      help='render the environment')
-  # Log interval
-  parser.add_argument('--log_interval', type=int, default=1,
-                      help='Interval between training status logs')
-  parser.add_argument('--save_interval', type=int, default=100,
-                      help='Interval between saving policy weights')
-  parser.add_argument('--entropy_coeff', type=float, default=0.0,
-                      help='coefficient for entropy cost')
-  parser.add_argument('--clip_epsilon', type=float, default=0.2,
-                      help='Clipping for PPO grad')
+    parser.add_argument('--optim_epochs', type=int, default=5,
+                        help='number of epochs over a batch (default: 5)')
+    parser.add_argument('--optim_batch_size', type=int, default=64,
+                        help='batch size for epochs (default: 64)')
+    parser.add_argument('--num_expert_trajs', type=int, default=5,
+                        help='number of expert trajectories in a batch.')
+    parser.add_argument('--render', action='store_true',
+                        help='render the environment')
+    # Log interval
+    parser.add_argument('--log_interval', type=int, default=1,
+                        help='Interval between training status logs')
+    parser.add_argument('--save_interval', type=int, default=100,
+                        help='Interval between saving policy weights')
+    parser.add_argument('--entropy_coeff', type=float, default=0.0,
+                        help='coefficient for entropy cost')
+    parser.add_argument('--clip_epsilon', type=float, default=0.2,
+                        help='Clipping for PPO grad')
 
-  # Path to store training results in
-  parser.add_argument('--results_dir', type=str, required=True,
-                      help='Path to store results in.')
+    # Path to store training results in
+    parser.add_argument('--results_dir', type=str, required=True,
+                        help='Path to store results in.')
 
-  parser.add_argument('--cuda', dest='cuda', action='store_true',
-                      help='enables CUDA training')
-  parser.add_argument('--no-cuda', dest='cuda', action='store_false',
-                      help='Disable CUDA training')
-  parser.set_defaults(cuda=False)
+    parser.add_argument('--cuda', dest='cuda', action='store_true',
+                        help='enables CUDA training')
+    parser.add_argument('--no-cuda', dest='cuda', action='store_false',
+                        help='Disable CUDA training')
+    parser.set_defaults(cuda=False)
 
-  # Use features
-  parser.add_argument('--use_state_features', dest='use_state_features',
-                      action='store_true',
-                      help='Use features instead of direct (x,y) values in VAE')
-  parser.add_argument('--no-use_state_features', dest='use_state_features',
-                      action='store_false',
-                      help='Do not use features instead of direct (x,y) ' \
+    # Use features
+    parser.add_argument('--use_state_features', dest='use_state_features',
+                        action='store_true',
+                        help='Use features instead of direct (x,y) values in VAE')
+    parser.add_argument('--no-use_state_features', dest='use_state_features',
+                        action='store_false',
+                        help='Do not use features instead of direct (x,y) ' \
                           'values in VAE')
-  parser.set_defaults(use_state_features=False)
+    parser.set_defaults(use_state_features=False)
 
-  # Use reparameterization for posterior training.
-  parser.add_argument('--use_reparameterize', dest='use_reparameterize',
-                      action='store_true',
-                      help='Use reparameterization during posterior training ' \
+    # Use reparameterization for posterior training.
+    parser.add_argument('--use_reparameterize', dest='use_reparameterize',
+                        action='store_true',
+                        help='Use reparameterization during posterior training ' \
                           'values in VAE')
-  parser.add_argument('--no-use_reparameterize', dest='use_reparameterize',
-                      action='store_false',
-                      help='Use reparameterization during posterior training ' \
+    parser.add_argument('--no-use_reparameterize', dest='use_reparameterize',
+                        action='store_false',
+                        help='Use reparameterization during posterior training ' \
                           'values in VAE')
-  parser.set_defaults(use_reparameterize=False)
+    parser.set_defaults(use_reparameterize=False)
 
-  parser.add_argument('--flag_true_reward', type=str, default='grid_reward',
-                      choices=['grid_reward', 'action_reward'],
-                      help='True reward type to use.')
+    parser.add_argument('--flag_true_reward', type=str, default='grid_reward',
+                        choices=['grid_reward', 'action_reward'],
+                        help='True reward type to use.')
 
-  parser.add_argument('--use_log_rewards', dest='use_log_rewards',
-                      action='store_true',
-                      help='Use log with rewards.')
-  parser.add_argument('--no-use_log_rewards', dest='use_log_rewards',
-                      action='store_false',
-                      help='Don\'t Use log with rewards.')
-  parser.set_defaults(use_log_rewards=True)
+    parser.add_argument('--use_log_rewards', dest='use_log_rewards',
+                        action='store_true',
+                        help='Use log with rewards.')
+    parser.add_argument('--no-use_log_rewards', dest='use_log_rewards',
+                        action='store_false',
+                        help='Don\'t Use log with rewards.')
+    parser.set_defaults(use_log_rewards=True)
 
-  parser.add_argument('--use_value_net', dest='use_value_net',
-                      action='store_true',
-                      help='Use value network.')
-  parser.add_argument('--no-use_value_net', dest='use_value_net',
-                      action='store_false',
-                      help='Don\'t use value network.')
-  parser.set_defaults(use_value_net=True)
+    parser.add_argument('--use_value_net', dest='use_value_net',
+                        action='store_true',
+                        help='Use value network.')
+    parser.add_argument('--no-use_value_net', dest='use_value_net',
+                        action='store_false',
+                        help='Don\'t use value network.')
+    parser.set_defaults(use_value_net=True)
 
-  parser.add_argument('--init_from_vae', dest='init_from_vae',
-                      action='store_true',
-                      help='Init policy and posterior from vae.')
-  parser.add_argument('--no-init_from_vae', dest='init_from_vae',
-                      action='store_false',
-                      help='Don\'t init policy and posterior from vae.')
-  parser.set_defaults(init_from_vae=True)
+    parser.add_argument('--init_from_vae', dest='init_from_vae',
+                        action='store_true',
+                        help='Init policy and posterior from vae.')
+    parser.add_argument('--no-init_from_vae', dest='init_from_vae',
+                        action='store_false',
+                        help='Don\'t init policy and posterior from vae.')
+    parser.set_defaults(init_from_vae=True)
 
-  args = parser.parse_args()
-  torch.manual_seed(args.seed)
+    args = parser.parse_args()
+    torch.manual_seed(args.seed)
 
-  if not os.path.exists(args.results_dir):
-    os.makedirs(args.results_dir)
-    # Directory for TF logs
-    os.makedirs(os.path.join(args.results_dir, 'log'))
-    # Directory for model checkpoints
-    os.makedirs(os.path.join(args.results_dir, 'checkpoint'))
+    if not os.path.exists(args.results_dir):
+        os.makedirs(args.results_dir)
+        # Directory for TF logs
+        os.makedirs(os.path.join(args.results_dir, 'log'))
+        # Directory for model checkpoints
+        os.makedirs(os.path.join(args.results_dir, 'checkpoint'))
 
     # Save runtime arguments to pickle file
     args_pkl_filepath = os.path.join(args.results_dir, 'args.pkl')
     with open(args_pkl_filepath, 'wb') as args_pkl_f:
       pickle.dump(args, args_pkl_f, protocol=2)
+
+    main(args)
