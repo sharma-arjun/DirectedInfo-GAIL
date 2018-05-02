@@ -7,8 +7,13 @@ import time
 from gym import wrappers
 
 
-def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
-                    render, running_state, update_rs, min_batch_size, mode_list, state_type,
+def activity_map(mode):
+    activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0}
+
+    return activity_dict[mode]
+
+def collect_samples(pid, queue, env, policy_list, custom_reward, mean_action, tensor,
+                    render, running_state_list, update_rs, min_batch_size, mode_list, state_type,
                     num_steps_per_mode):
     torch.randn(pid, )
     log = dict()
@@ -21,18 +26,25 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
     min_c_reward = 1e6
     max_c_reward = -1e6
     num_episodes = 0
+    max_t = num_steps_per_mode * len(mode_list) - 1
 
     while num_steps < min_batch_size:
         state = env.reset()
         if state_type == 'decayed_context':
-            state = np.concatenate((state, np.array([0.0, 1.0])), axis=0)
+            state = np.concatenate((state, np.array([1.0,
+                                                     activity_map(mode_list[0]),
+                                                     activity_map(mode_list[min(1, len(mode_list)-1)])])), axis=0)
         elif state_type == 'context':
-            state = np.concatenate((state, np.array([0.0])), axis=0)
-        if running_state is not None:
-            state = running_state(state, update=update_rs)
+            state = np.concatenate((state, np.array([activity_map(mode_list[0]),
+                                                     activity_map(mode_list[min(1, len(mode_list)-1)])])), axis=0)
+        if running_state_list is not None:
+            state = running_state_list[0](state, update=update_rs)
         reward_episode = 0
 
         for t in range(10000):
+            policy = policy_list[t // num_steps_per_mode]
+            if running_state_list is not None:
+                running_state = running_state_list[t // num_steps_per_mode]
             if t % num_steps_per_mode == 0:
                 if hasattr(env.env, 'mode'):
                     env.env.mode = mode_list[t // num_steps_per_mode]
@@ -45,10 +57,15 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
             next_state, reward, done, _ = env.step(action)
             reward_episode += reward
             if state_type == 'decayed_context':
-                next_state = np.concatenate((next_state, np.array([t // num_steps_per_mode, 1/((t % num_steps_per_mode) + 1)])), axis=0)
+                next_state = np.concatenate((next_state, 
+                                     np.array([activity_map([mode_list[min(t+1, max_t) // num_steps_per_mode]),
+                                               
+                                     1/((t % num_steps_per_mode) + 1)])), axis=0)
             elif state_type == 'context':
-                next_state = np.concatenate((next_state, np.array([t // num_steps_per_mode])), axis=0)
-            if running_state is not None:
+                next_state = np.concatenate((next_state, 
+                                     np.array([activity_map(mode_list[min(t+1, max_t) // num_steps_per_mode])])),
+                                     axis=0)
+            if running_state_list is not None:
                 next_state = running_state(next_state, update=update_rs)
 
             if custom_reward is not None:
@@ -57,7 +74,7 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
                 min_c_reward = min(min_c_reward, reward)
                 max_c_reward = max(max_c_reward, reward)
 
-            if t == num_steps_per_mode * len(mode_list) - 1:
+            if t == max_t:
                 done = True
 
             mask = 0 if done else 1
@@ -115,14 +132,14 @@ def merge_log(log_list):
 
 class Agent:
 
-    def __init__(self, env_factory, policy, custom_reward=None, mean_action=False, render=False,
-                 tensor_type=torch.DoubleTensor, running_state=None, num_threads=1, mode_list=None,
+    def __init__(self, env_factory, policy_list, custom_reward=None, mean_action=False, render=False,
+                 tensor_type=torch.DoubleTensor, running_state_list=None, num_threads=1, mode_list=None,
                  state_type=None, num_steps_per_mode=333):
         self.env_factory = env_factory
-        self.policy = policy
+        self.policy_list = policy_list
         self.custom_reward = custom_reward
         self.mean_action = mean_action
-        self.running_state = running_state
+        self.running_state_list = running_state_list
         self.render = render
         self.tensor = tensor_type
         self.num_threads = num_threads
@@ -139,21 +156,23 @@ class Agent:
     def collect_samples(self, min_batch_size):
         t_start = time.time()
         if use_gpu:
-            self.policy.cpu()
+            for policy in self.policy_list:
+                policy.cpu()
+
         thread_batch_size = int(math.floor(min_batch_size / self.num_threads))
         queue = multiprocessing.Queue()
         workers = []
 
         for i in range(self.num_threads-1):
-            worker_args = (i+1, queue, self.env_list[i + 1], self.policy, self.custom_reward, self.mean_action, self.tensor,
-                           False, self.running_state, False, thread_batch_size, self.mode_list, self.state_type,
+            worker_args = (i+1, queue, self.env_list[i + 1], self.policy_list, self.custom_reward, self.mean_action, self.tensor,
+                           False, self.running_state_list, False, thread_batch_size, self.mode_list, self.state_type,
                            self.num_steps_per_mode)
             workers.append(multiprocessing.Process(target=collect_samples, args=worker_args))
         for worker in workers:
             worker.start()
 
-        memory, log = collect_samples(0, None, self.env_list[0], self.policy, self.custom_reward, self.mean_action, self.tensor,
-                                      self.render, self.running_state, True, thread_batch_size, self.mode_list, self.state_type,
+        memory, log = collect_samples(0, None, self.env_list[0], self.policy_list, self.custom_reward, self.mean_action, self.tensor,
+                                      self.render, self.running_state_list, True, thread_batch_size, self.mode_list, self.state_type,
                                       self.num_steps_per_mode)
 
         worker_logs = [None] * len(workers)
@@ -169,7 +188,8 @@ class Agent:
             log_list = [log] + worker_logs
             log = merge_log(log_list)
         if use_gpu:
-            self.policy.cuda()
+            for policy in self.policy_list:
+                policy.cuda()
         t_end = time.time()
         log['sample_time'] = t_end - t_start
         log['action_mean'] = np.mean(np.vstack(batch.action), axis=0)
@@ -181,6 +201,7 @@ class Agent:
     def generate_mixed_expert_trajs(self, policy_list, running_state_list, vid_folder=None):
 
         assert(len(policy_list) == len(self.mode_list))
+        N = len(self.mode_list)
         num_steps_per_policy = self.num_steps_per_mode
         # currently not using multiprocessing for this part
         env = self.env_list[0]
@@ -193,15 +214,18 @@ class Agent:
 
         state = env.reset()
         if self.state_type == 'decayed_context':
-            state = np.concatenate((state, np.array([0.0, 1.0])), axis=0) 
+            state = np.concatenate((state, np.array([1.0,
+                                                     activity_map(self.mode_list[0]),
+                                                     activity_map(self.mode_list[min(1, N-1)])])), axis=0)
         elif self.state_type == 'context':
-            state = np.concatenate((state, np.array([0.0])), axis=0)
+            state = np.concatenate((state, np.array([activity_map(self.mode_list[0])
+                                                     activity_map(self.mode_list[min(1, N-1)])])), axis=0)
         if self.running_state is not None:
             state = self.running_state(state, update=False)
 
         save_flag = True # is true when the episode does not end early (agent doesn't die)
     
-        for i in range(len(self.mode_list)):
+        for i in range(N):
             if save_flag == False:
                 break
             self.policy = policy_list[i]
@@ -223,9 +247,14 @@ class Agent:
                     action = action.data[0].numpy()
                 next_state, reward, done, _ = env.step(action)
                 if self.state_type == 'decayed_context':
-                    next_state = np.concatenate((next_state, np.array([i, 1/(n+1)])), axis=0)
+                    next_state = np.concatenate((next_state,
+                                     np.array([1/(n+1),
+                                               activity_map(self.mode_list[min(n+1, num_steps_per_policy-1) // num_steps_per_policy]),
+                                               activity_map(self.mode_list[min(i+1, N)])])), axis=0)
                 elif self.state_type == 'context':
-                    next_state = np.concatenate((next_state, np.array([i])), axis=0)
+                    next_state = np.concatenate((next_state,
+                                     np.array([activity_map(self.mode_list[min(n+1, num_steps_per_policy-1) // num_steps_per_policy]),
+                                               activity_map(self.mode_list[min(i+1, N)])])), axis=0)
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
                 if self.render:
