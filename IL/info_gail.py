@@ -202,10 +202,9 @@ class InfoGAIL(BaseGAIL):
             predicted_posterior = self.posterior_net(state_var)
             # There is no GOAL info in latent_c_var here.
             # TODO: This 0 and -1 stuff is not needed here. Confirm?
-            true_posterior = torch.zeros(latent_c_var.size(0), 1).type(dtype)
-            true_posterior[:, 0] = latent_c_var.data[:, -1]
-            posterior_loss = self.criterion_posterior(predicted_posterior,
-                                                      Variable(true_posterior))
+            _, true_posterior = torch.max(latent_c_var.data, dim=1)
+            posterior_loss = self.criterion_posterior(
+                    predicted_posterior, Variable(true_posterior))
             posterior_loss.backward()
             self.logger.summary_writer.add_scalar('loss/posterior',
                                                   posterior_loss.data[0],
@@ -296,7 +295,7 @@ class InfoGAIL(BaseGAIL):
             values = self.value_net(Variable(torch.cat((states, latent_c), 1)))
 
         # expert trajectories
-        list_of_expert_states, list_of_expert_action = [], []
+        list_of_expert_states, list_of_expert_actions = [], []
         list_of_masks = []
         for i in range(len(expert_batch.state)):
             ## Expand expert states ##
@@ -363,6 +362,8 @@ class InfoGAIL(BaseGAIL):
     def train_gail(self, expert):
         '''Train Info-GAIL.'''
         args, dtype = self.args, self.dtype
+        results = {'average_reward': [], 'episode_reward': [],
+                   'true_traj': {}, 'pred_traj': {}}
         self.train_step_count, self.gail_step_count = 0, 0
 
         for ep_idx in range(args.num_epochs):
@@ -447,25 +448,24 @@ class InfoGAIL(BaseGAIL):
                                 action, self.action_size)).unsqueeze(0)).type(
                                     dtype)), 1)).data.cpu().numpy()[0,0])
 
-                    if disc_reward_t < 1e-6:
+                    if args.use_log_rewards and disc_reward_t < 1e-6:
                         disc_reward_t += 1e-6
 
                     disc_reward_t = -math.log(disc_reward_t) \
                             if args.use_log_rewards else -disc_reward_t
                     disc_reward += disc_reward_t
 
-        
+
                     # Predict c given (x_t)
                     predicted_posterior = self.posterior_net(
                             Variable(torch.from_numpy(curr_state).unsqueeze(
                                 0)).type(dtype))
                     posterior_reward_t = self.criterion_posterior(
-                            predicted_posterior, c_sampled_tensor)
-                    pdb.set_trace()
+                            predicted_posterior,
+                            Variable(c_sampled_tensor)).data.cpu().numpy()[0]
 
                     posterior_reward += (self.args.lambda_posterior *
                             posterior_reward_t)
-                    pdb.set_trace()
 
                     # Update Rewards
                     ep_reward += (disc_reward_t + posterior_reward_t)
