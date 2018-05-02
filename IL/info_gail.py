@@ -19,7 +19,7 @@ import torch.optim as optim
 import torchvision.transforms as T
 from torch.autograd import Variable
 
-from models import Policy, Posterior, Reward, Value
+from models import DiscretePosterior, Policy, Posterior, Reward, Value
 from grid_world import State, Action, TransitionFunction
 from grid_world import RewardFunction, RewardFunction_SR2, GridWorldReward
 from grid_world import ActionBasedGridWorldReward
@@ -87,10 +87,12 @@ class InfoGAIL(BaseGAIL):
                                  0,                 # latent size
                                  hidden_size=64)
 
-        self.posterior_net = Posterior(state_size * history_size,   # state
-                                       0,                           # action
-                                       0,                           # context
-                                       hidden_size=64)
+        self.posterior_net = DiscretePosterior(
+                state_size=state_size * history_size,   # state
+                action_size=0,                          # action
+                latent_size=0,                          # context
+                hidden_size=64,
+                output_size=num_goals)
 
         self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
         self.opt_reward = optim.Adam(self.reward_net.parameters(), lr=0.0003)
@@ -100,8 +102,7 @@ class InfoGAIL(BaseGAIL):
 
         # Create loss functions
         self.criterion = nn.BCELoss()
-        #criterion_posterior = nn.NLLLoss()
-        self.criterion_posterior = nn.MSELoss()
+        self.criterion_posterior = nn.CrossEntropyLoss()
 
         self.create_environment()
 
@@ -198,14 +199,7 @@ class InfoGAIL(BaseGAIL):
 
             # Update posterior net. We need to do this by reparameterization
             # trick.
-            mu, logvar = self.posterior_net(state_var)
-            if args.use_reparameterize:
-                std = logvar.mul(0.5).exp_()
-                eps = Variable(std.data.new(std.size()).normal_())
-                predicted_posterior = eps.mul(std).add_(mu)
-            else:
-                predicted_posterior = mu
-
+            predicted_posterior = self.posterior_net(state_var)
             # There is no GOAL info in latent_c_var here.
             # TODO: This 0 and -1 stuff is not needed here. Confirm?
             true_posterior = torch.zeros(latent_c_var.size(0), 1).type(dtype)
@@ -417,6 +411,10 @@ class InfoGAIL(BaseGAIL):
 
                 c_sampled = np.zeros((self.num_goals), dtype=np.float32)
                 c_sampled[np.random.randint(0, self.num_goals)] = 1.0
+                c_sampled_tensor = torch.zeros((1)).type(torch.LongTensor)
+                c_sampled_tensor[0] = int(np.argmax(c_sampled))
+                if self.args.cuda:
+                    c_sampled_tensor = torch.cuda.LongTensor(c_sampled_tensor)
 
                 memory_list = []
                 for t in range(expert_episode_len):
@@ -447,10 +445,7 @@ class InfoGAIL(BaseGAIL):
                         Variable(torch.from_numpy(
                             oned_to_onehot(
                                 action, self.action_size)).unsqueeze(0)).type(
-                                    dtype),
-                        Variable(torch.from_numpy(
-                            c_sampled).unsqueeze(0)).type(
-                                dtype)), 1)).data.cpu().numpy()[0,0])
+                                    dtype)), 1)).data.cpu().numpy()[0,0])
 
                     if disc_reward_t < 1e-6:
                         disc_reward_t += 1e-6
@@ -459,21 +454,18 @@ class InfoGAIL(BaseGAIL):
                             if args.use_log_rewards else -disc_reward_t
                     disc_reward += disc_reward_t
 
-                    # Use norm.logpdf if flag else use norm.pdf
-                    reward_func = norm.logpdf if args.use_log_rewards else \
-                            norm.pdf
-
-                    # Use fixed std if not using reparameterize otherwise use
-                    # sigma.
-                    if args.use_reparameterize:
-                        posterior_reward_t = reward_func(next_ct, loc=mu,
-                                                         scale=sigma)
-                    else:
-                        posterior_reward_t = reward_func(next_ct, loc=mu,
-                                                         scale=0.1)
+        
+                    # Predict c given (x_t)
+                    predicted_posterior = self.posterior_net(
+                            Variable(torch.from_numpy(curr_state).unsqueeze(
+                                0)).type(dtype))
+                    posterior_reward_t = self.criterion_posterior(
+                            predicted_posterior, c_sampled_tensor)
+                    pdb.set_trace()
 
                     posterior_reward += (self.args.lambda_posterior *
                             posterior_reward_t)
+                    pdb.set_trace()
 
                     # Update Rewards
                     ep_reward += (disc_reward_t + posterior_reward_t)
@@ -631,7 +623,7 @@ def main(args):
             logger,
             state_size=args.state_size,
             action_size=args.action_size,
-            context_size=4 + args.context_size,  # num_goals + context_size
+            context_size=4, # num_goals
             num_goals=4,
             history_size=args.history_size,
             dtype=dtype)
