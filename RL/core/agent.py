@@ -226,18 +226,20 @@ class Agent:
         elif self.state_type == 'context':
             state = np.concatenate((state, np.array([activity_map(self.mode_list[0]),
                                                      activity_map(self.mode_list[min(1, N-1)])])), axis=0)
-        if self.running_state is not None:
-            state = self.running_state(state, update=False)
+        if self.running_state_list is not None:
+            state = self.running_state_list[0](state, update=False)
 
         save_flag = True # is true when the episode does not end early (agent doesn't die)
     
         for i in range(N):
             if save_flag == False:
                 break
-            self.policy = policy_list[i]
+            policy = policy_list[i]
+            if running_state_list is not None:
+                running_state = running_state_list[i]
             mode = self.mode_list[i]
             if use_gpu:
-                self.policy.cuda()
+                policy.cuda()
             if hasattr(env_base, 'mode'):
                 env_base.mode = mode
 
@@ -246,7 +248,7 @@ class Agent:
                 state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 if use_gpu:
                     state_var = state_var.cuda()
-                action  = self.policy(state_var)[0]
+                action  = policy(state_var)[0]
                 if use_gpu:
                     action = action.data[0].cpu().numpy()
                 else:
@@ -261,8 +263,8 @@ class Agent:
                     next_state = np.concatenate((next_state,
                                      np.array([activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
                                                activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
-                if self.running_state is not None:
-                    next_state = self.running_state(next_state, update=False)
+                if running_state_list is not None:
+                    next_state = running_state(next_state, update=False)
                 if self.render:
                     env.render()
                 if done:
