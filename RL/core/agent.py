@@ -8,7 +8,7 @@ from gym import wrappers
 
 
 def activity_map(mode):
-    activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0}
+    activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0, 'rest': 3.0}
 
     return activity_dict[mode]
 
@@ -49,6 +49,9 @@ def collect_samples(pid, queue, env, policy_list, custom_reward, mean_action, te
             if t % num_steps_per_mode == 0:
                 if hasattr(env.env, 'mode'):
                     env.env.mode = mode_list[curr_mode_id]
+            if num_steps_per_mode - (t % num_steps_per_mode) == 100:
+                if hasattr(env.env, 'mode'):
+                    env.env.mode = 'rest'
             state_var = Variable(tensor(state).unsqueeze(0), volatile=True)
             if mean_action:
                 action = policy(state_var)[0].data[0].numpy()
@@ -245,6 +248,10 @@ class Agent:
 
             for n in range(num_steps_per_policy):
                 print(n)
+                if num_steps_per_policy - n == 100:
+                    if hasattr(env_base, 'mode'):
+                        env_base.mode = 'rest'
+
                 state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 if use_gpu:
                     state_var = state_var.cuda()

@@ -63,7 +63,7 @@ parser.add_argument('--traj-save-dir', metavar='G',
                     help='save directory for expert h5')
 parser.add_argument('--save-model-path', metavar='G', default='learned_models',
                     help='save directory for expert h5')
-parser.add_argument('--jump-thresh', type=float, default=1.3, metavar='N',
+parser.add_argument('--jump-thresh', type=float, default=1.1, metavar='N',
                     help='threshold for jump reward')
 args = parser.parse_args()
 
