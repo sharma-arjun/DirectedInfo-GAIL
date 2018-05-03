@@ -71,12 +71,13 @@ class VAE(nn.Module):
                              output_activation=output_activation)
 
         if use_separate_goal_policy:
-            self.policy_goal = Policy(state_size=policy_state_size*self.history_size + 1,
-                                     action_size=policy_action_size,
-                                     latent_size=posterior_goal_size,
-                                     output_size=policy_output_size,
-                                     hidden_size=hidden_size,
-                                     output_activation=output_activation)
+            self.policy_goal = Policy(
+                    state_size=policy_state_size*self.history_size + 1,
+                    action_size=policy_action_size,
+                    latent_size=posterior_goal_size,
+                    output_size=policy_output_size,
+                    hidden_size=hidden_size,
+                    output_activation=output_activation)
 
         self.posterior = Posterior(
                 state_size=posterior_state_size*self.history_size + 1,
@@ -128,6 +129,57 @@ class VAE(nn.Module):
 
 
         return decoder_output_1, decoder_output_2, mu, logvar
+
+class DiscreteVAE(VAE):
+    def __init__(self, temperature=5.0, **kwargs):
+        '''
+        state_size: State size
+        latent_size: Size of 'c' variable
+        goal_size: Number of goals.
+        output_size:
+        '''
+        super(DiscreteVAE, self).__init__(**kwargs)
+        self.posterior = DiscretePosterior(
+                state_size=posterior_state_size*self.history_size + 1,
+                action_size=posterior_action_size,
+                latent_size=posterior_latent_size+posterior_goal_size,
+                output_size=posterior_latent_size,
+                hidden_size=hidden_size,
+        )
+        self.encoder_softmax = nn.Softmax()
+        self.temperature = temperature
+
+    def update_temperature(self):
+        '''Update temperature.'''
+        pass
+
+    def encode(self, x, c):
+        '''Return the probability output for the encoder.'''
+        output = self.posterior(torch.cat((x, c), 1))
+        prob_output = self.encoder_softmax(output)
+        return prob_output
+
+    def sample_gumbel(shape, eps=1e-20): 
+        """Sample from Gumbel(0, 1)"""
+        U = torch.rand(shape)
+        return -torch.log(-torch.log(U + eps) + eps)
+
+    def gumbel_softmax_sample(logits, temperature): 
+        """ Draw a sample from the Gumbel-Softmax distribution"""
+        y = logits + self.sample_gumbel(logits.size())
+        return F.softmax(y / temperature)
+
+    def reparameterize(self, logits, temperature, eps=1e-10):
+        if self.training:
+
+            std = logvar.mul(0.5).exp_()
+            eps = Variable(std.data.new(std.size()).normal_())
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+    def forward(self, x, c, g):
+        pass
             
 
 class VAETrain(object):
