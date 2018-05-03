@@ -7,6 +7,12 @@ import time
 from gym import wrappers
 
 
+def activity_map(mode):
+    activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0, 'rest': 3.0}
+
+    return activity_dict[mode]
+
+
 def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
                     render, running_state, update_rs, min_batch_size, mode_list, state_type,
                     num_steps_per_mode):
@@ -21,21 +27,27 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
     min_c_reward = 1e6
     max_c_reward = -1e6
     num_episodes = 0
+    max_t = num_steps_per_mode * len(mode_list) - 1
 
     while num_steps < min_batch_size:
         state = env.reset()
         if state_type == 'decayed_context':
-            state = np.concatenate((state, np.array([0.0, 1.0])), axis=0)
+            state = np.concatenate((state, np.array([1.0,
+                                                     activity_map(mode_list[0]),
+                                                     activity_map(mode_list[min(1, len(mode_list)-1)])])), axis=0)
         elif state_type == 'context':
-            state = np.concatenate((state, np.array([0.0])), axis=0)
+            state = np.concatenate((state, np.array([activity_map(mode_list[0]),
+                                                     activity_map(mode_list[min(1, len(mode_list)-1)])])), axis=0)
+
         if running_state is not None:
             state = running_state(state, update=update_rs)
         reward_episode = 0
 
         for t in range(10000):
+            curr_mode_id = t // num_steps_per_mode
             if t % num_steps_per_mode == 0:
                 if hasattr(env.env, 'mode'):
-                    env.env.mode = mode_list[t // num_steps_per_mode]
+                    env.env.mode = mode_list[curr_mode_id]
             state_var = Variable(tensor(state).unsqueeze(0), volatile=True)
             if mean_action:
                 action = policy(state_var)[0].data[0].numpy()
@@ -44,10 +56,19 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
             action = int(action) if policy.is_disc_action else action.astype(np.float64)
             next_state, reward, done, _ = env.step(action)
             reward_episode += reward
+
+            next_mode_id = min(t+1, max_t) // num_steps_per_mode
+
             if state_type == 'decayed_context':
-                next_state = np.concatenate((next_state, np.array([t // num_steps_per_mode, 1/((t % num_steps_per_mode) + 1)])), axis=0)
+                next_state = np.concatenate((next_state, 
+                                     np.array([1/((t % num_steps_per_mode) + 1),
+                                               activity_map(mode_list[next_mode_id]),
+                                               activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])])), axis=0)
             elif state_type == 'context':
-                next_state = np.concatenate((next_state, np.array([t // num_steps_per_mode])), axis=0)
+                next_state = np.concatenate((next_state, 
+                                     np.array([activity_map(mode_list[next_mode_id]),
+                                              activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])])), axis=0)
+
             if running_state is not None:
                 next_state = running_state(next_state, update=update_rs)
 
@@ -181,6 +202,7 @@ class Agent:
     def generate_mixed_expert_trajs(self, policy_list, running_state_list, vid_folder=None):
 
         assert(len(policy_list) == len(self.mode_list))
+        N = len(self.mode_list)
         num_steps_per_policy = self.num_steps_per_mode
         # currently not using multiprocessing for this part
         env = self.env_list[0]
@@ -193,9 +215,13 @@ class Agent:
 
         state = env.reset()
         if self.state_type == 'decayed_context':
-            state = np.concatenate((state, np.array([0.0, 1.0])), axis=0) 
+            state = np.concatenate((state, np.array([1.0,
+                                                     activity_map(self.mode_list[0]),
+                                                     activity_map(self.mode_list[min(1, N-1)])])), axis=0)
         elif self.state_type == 'context':
-            state = np.concatenate((state, np.array([0.0])), axis=0)
+            state = np.concatenate((state, np.array([activity_map(self.mode_list[0]),
+                                                     activity_map(self.mode_list[min(1, N-1)])])), axis=0)
+
         if self.running_state is not None:
             state = self.running_state(state, update=False)
 
@@ -222,10 +248,17 @@ class Agent:
                 else:
                     action = action.data[0].numpy()
                 next_state, reward, done, _ = env.step(action)
+
                 if self.state_type == 'decayed_context':
-                    next_state = np.concatenate((next_state, np.array([i, 1/(n+1)])), axis=0)
+                    next_state = np.concatenate((next_state,
+                                     np.array([1/(n+1),
+                                               activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
+                                               activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
                 elif self.state_type == 'context':
-                    next_state = np.concatenate((next_state, np.array([i])), axis=0)
+                    next_state = np.concatenate((next_state,
+                                     np.array([activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
+                                               activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
+
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
                 if self.render:

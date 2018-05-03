@@ -60,8 +60,8 @@ parser.add_argument('--state-type', default="no_context", metavar='G',
 parser.add_argument('--traj-save-dir', metavar='G',
                     help='save directory for expert h5')
 parser.add_argument('--save-model-path', metavar='G', default='learned_models',
-                    help='save directory for expert h5')
-parser.add_argument('--jump-thresh', type=float, default=1.3, metavar='N',
+                    help='save directory for trained model')
+parser.add_argument('--jump-thresh', type=float, default=1.1, metavar='N',
                     help='threshold for jump reward')
 args = parser.parse_args()
 
@@ -96,9 +96,9 @@ if args.save_model_path:
         os.makedirs(os.path.join(assets_dir(), args.save_model_path))
 
 if args.state_type == 'decayed_context':
-    extra_dim = 2
+    extra_dim = 3
 elif args.state_type == 'context':
-    extra_dim = 1
+    extra_dim = 2
 else:
     extra_dim = 0
 
