@@ -247,8 +247,8 @@ class Agent:
                 env_base.mode = mode
 
             for n in range(num_steps_per_policy):
-                print(n)
                 if num_steps_per_policy - n == 100:
+                    print('activated rest mode')
                     if hasattr(env_base, 'mode'):
                         env_base.mode = 'rest'
 
@@ -261,6 +261,7 @@ class Agent:
                 else:
                     action = action.data[0].numpy()
                 next_state, reward, done, _ = env.step(action)
+                print(n, reward)
                 if self.state_type == 'decayed_context':
                     next_state = np.concatenate((next_state,
                                      np.array([1/(n+1),
