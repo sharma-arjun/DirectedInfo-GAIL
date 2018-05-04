@@ -63,7 +63,7 @@ class VAE(nn.Module):
         else:
             output_activation=None
 
-        self.policy = Policy(state_size=policy_state_size*self.history_size + 1,
+        self.policy = Policy(state_size=policy_state_size*self.history_size,
                              action_size=policy_action_size,
                              latent_size=self.policy_latent_size,
                              output_size=policy_output_size,
@@ -72,7 +72,7 @@ class VAE(nn.Module):
 
         if use_separate_goal_policy:
             self.policy_goal = Policy(
-                    state_size=policy_state_size*self.history_size + 1,
+                    state_size=policy_state_size*self.history_size,
                     action_size=policy_action_size,
                     latent_size=posterior_goal_size,
                     output_size=policy_output_size,
@@ -80,7 +80,7 @@ class VAE(nn.Module):
                     output_activation=output_activation)
 
         self.posterior = Posterior(
-                state_size=posterior_state_size*self.history_size + 1,
+                state_size=posterior_state_size*self.history_size,
                 action_size=posterior_action_size,
                 latent_size=posterior_latent_size+posterior_goal_size,
                 output_size=posterior_latent_size,
@@ -308,7 +308,7 @@ class VAETrain(object):
     def loss_function(self, recon_x1, recon_x2, x, vae_posterior_output, epoch):
         lambda_loss1 = 1.0
         th_epochs = 0.5*args.num_epochs
-        lambda_kld = max(0.1, 0.1 + (lambda_bce1 - 0.1) \
+        lambda_kld = max(0.1, 0.1 + (lambda_loss1 - 0.1) \
                 * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
         lambda_loss2 = 10.0
 
@@ -594,14 +594,15 @@ class VAETrain(object):
                     vae_reparam_input = (vae_output[2], vae_output[3])
 
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
-                pred_actions_2_numpy = vae_output[1].data.cpu().numpy()
 
                 # Store the "true" state
                 true_traj.append((ep_state[t], ep_action[t]))
                 pred_traj.append((curr_state_arr,
                                   pred_actions_numpy.reshape((-1))))
-                pred_traj_goal.append((curr_state_arr,
-                                  pred_actions_2_numpy.reshape((-1))))
+                if self.args.use_separate_goal_policy:
+                    pred_actions_2_numpy = vae_output[1].data.cpu().numpy()
+                    pred_traj_goal.append(
+                            (curr_state_arr, pred_actions_2_numpy.reshape((-1))))
                 if history_size > 1:
                     x[:, :(history_size-1), :] = x[:,1:, :]
 
