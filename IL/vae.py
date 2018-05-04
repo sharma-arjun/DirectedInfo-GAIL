@@ -171,15 +171,27 @@ class DiscreteVAE(VAE):
 
     def reparameterize(self, logits, temperature, eps=1e-10):
         if self.training:
-
-            std = logvar.mul(0.5).exp_()
-            eps = Variable(std.data.new(std.size()).normal_())
-            return eps.mul(std).add_(mu)
+            return self.gumbel_softmax_sample(logits, temperature)
         else:
-            return mu
+            return F.softmax(logits / temperature)
 
     def forward(self, x, c, g):
-        pass
+        c_logits = self.encode(x, c)
+        c[:, -self.posterior_latent_size:] = self.reparameterize(c_logits,
+                                                                 self.temperature)
+
+        decoder_output_1 = None
+        decoder_output_2 = None
+
+        if self.use_goal_in_policy:
+            decoder_output_1 = self.decode(x, c)
+        else:
+            decoder_output_1 = self.decode(x, c[:,-self.posterior_latent_size:])
+
+        if self.use_separate_goal_policy:
+            decoder_output_2 = self.decode_goal_policy(x, g)
+
+        return decoder_output_1, decoder_output_2, c_logits
             
 
 class VAETrain(object):
