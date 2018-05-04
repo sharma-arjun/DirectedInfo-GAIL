@@ -16,7 +16,7 @@ from grid_world import State, Action, TransitionFunction
 from grid_world import RewardFunction, RewardFunction_SR2
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from itertools import product
-from models import Policy, Posterior
+from models import Policy, Posterior, DiscretePosterior
 
 from utils.logger import Logger, TensorboardXLogger
 from utils.torch_utils import get_weight_norm_for_network
@@ -140,11 +140,11 @@ class DiscreteVAE(VAE):
         '''
         super(DiscreteVAE, self).__init__(**kwargs)
         self.posterior = DiscretePosterior(
-                state_size=posterior_state_size*self.history_size + 1,
-                action_size=posterior_action_size,
-                latent_size=posterior_latent_size+posterior_goal_size,
-                output_size=posterior_latent_size,
-                hidden_size=hidden_size,
+                state_size=kwargs['posterior_state_size']*self.history_size,
+                action_size=kwargs['posterior_action_size'],
+                latent_size=kwargs['posterior_latent_size']+kwargs['posterior_goal_size'],
+                output_size=kwargs['posterior_latent_size'],
+                hidden_size=kwargs['hidden_size'],
         )
         self.encoder_softmax = nn.Softmax()
         self.temperature = temperature
@@ -159,12 +159,12 @@ class DiscreteVAE(VAE):
         prob_output = self.encoder_softmax(output)
         return prob_output
 
-    def sample_gumbel(shape, eps=1e-20): 
+    def sample_gumbel(shape, eps=1e-20):
         """Sample from Gumbel(0, 1)"""
         U = torch.rand(shape)
         return -torch.log(-torch.log(U + eps) + eps)
 
-    def gumbel_softmax_sample(logits, temperature): 
+    def gumbel_softmax_sample(logits, temperature):
         """ Draw a sample from the Gumbel-Softmax distribution"""
         y = logits + self.sample_gumbel(logits.size())
         return F.softmax(y / temperature)
@@ -192,7 +192,7 @@ class DiscreteVAE(VAE):
             decoder_output_2 = self.decode_goal_policy(x, g)
 
         return decoder_output_1, decoder_output_2, c_logits
-            
+
 
 class VAETrain(object):
     def __init__(self, args,
@@ -205,7 +205,7 @@ class VAETrain(object):
                  history_size=1,
                  use_rnn_goal_predictor=False,
                  dtype=torch.FloatTensor):
-        
+
         self.args = args
         self.logger = logger
         self.width, self.height = width, height
@@ -215,7 +215,7 @@ class VAETrain(object):
         self.num_goals = num_goals
         self.dtype = dtype
         self.use_rnn_goal_predictor = use_rnn_goal_predictor
-        
+
 
         self.train_step_count = 0
 
@@ -339,7 +339,7 @@ class VAETrain(object):
             KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
             #KLD = 0.5 * torch.sum(mu.pow(2))
 
-        
+
         #return MSE + KLD
         if self.args.use_separate_goal_policy:
             return lambda_loss1*loss1 + lambda_loss2*loss2 + lambda_kld*KLD, \
@@ -736,7 +736,7 @@ class VAETrain(object):
                         expert_action_var,
                         vae_output[2:],
                         epoch)
-    
+
                 ep_loss.append(loss)
                 #loss.backward()
                 train_loss += loss.data[0]
@@ -891,7 +891,7 @@ class VAETrain(object):
                                                           ep_c,
                                                           ep_mask,
                                                           self.num_goals)
-              
+
                 results['pred_goal'].append(final_goal_numpy)
 
             true_goal_numpy = ep_c[0]
@@ -1007,9 +1007,9 @@ if __name__ == '__main__':
                         help='Use another decoder with goal input.')
 
     # Arguments for VAE training
-    parser.add_argument('--use-discrete_vae', dest='use_discrete_vae',
+    parser.add_argument('--use_discrete_vae', dest='use_discrete_vae',
                         action='store_true', help='Use Discrete VAE.')
-    parser.add_argument('--no-use-discrete_vae', dest='use_discrete_vae',
+    parser.add_argument('--no-use_discrete_vae', dest='use_discrete_vae',
                         action='store_false', help='Do not Use Discrete VAE.')
     parser.set_defaults(use_discrete_vae=False)
 
