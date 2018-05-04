@@ -229,18 +229,35 @@ class VAETrain(object):
 
         # action_size is 0
         # Hack -- VAE input dim (s + a + latent).
-        self.vae_model = VAE(policy_state_size=state_size,
-                             posterior_state_size=state_size,
-                             policy_action_size=0,
-                             posterior_action_size=0,
-                             policy_latent_size=args.vae_context_size,
-                             posterior_latent_size=args.vae_context_size,
-                             posterior_goal_size=num_goals,
-                             policy_output_size=action_size,
-                             history_size=history_size,
-                             hidden_size=64,
-                             use_goal_in_policy=args.use_goal_in_policy,
-                             use_separate_goal_policy=args.use_separate_goal_policy)
+        if args.use_discrete_vae:
+            self.vae_model = DiscreteVAE(
+                    temperature=5.0,
+                    policy_state_size=state_size,
+                    posterior_state_size=state_size,
+                    policy_action_size=0,
+                    posterior_action_size=0,
+                    policy_latent_size=args.vae_context_size,
+                    posterior_latent_size=args.vae_context_size,
+                    posterior_goal_size=num_goals,
+                    policy_output_size=action_size,
+                    history_size=history_size,
+                    hidden_size=64,
+                    use_goal_in_policy=args.use_goal_in_policy,
+                    use_separate_goal_policy=args.use_separate_goal_policy)
+        else:
+            self.vae_model = VAE(
+                    policy_state_size=state_size,
+                    posterior_state_size=state_size,
+                    policy_action_size=0,
+                    posterior_action_size=0,
+                    policy_latent_size=args.vae_context_size,
+                    posterior_latent_size=args.vae_context_size,
+                    posterior_goal_size=num_goals,
+                    policy_output_size=action_size,
+                    history_size=history_size,
+                    hidden_size=64,
+                    use_goal_in_policy=args.use_goal_in_policy,
+                    use_separate_goal_policy=args.use_separate_goal_policy)
 
         self.obstacles, self.transition_func = None, None
 
@@ -288,11 +305,11 @@ class VAETrain(object):
           self.Q_model_linear = self.Q_model_linear.type(dtype)
 
     # Reconstruction + KL divergence losses summed over all elements and batch
-    def loss_function(self, recon_x1, recon_x2, x, mu, logvar, epoch):
-
+    def loss_function(self, recon_x1, recon_x2, x, vae_posterior_output, epoch):
         lambda_loss1 = 1.0
         th_epochs = 0.5*args.num_epochs
-        lambda_kld = max(0.1, 0.1 + (lambda_bce1 - 0.1) * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
+        lambda_kld = max(0.1, 0.1 + (lambda_bce1 - 0.1) \
+                * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
         lambda_loss2 = 10.0
 
         if args.discrete:
@@ -305,17 +322,28 @@ class VAETrain(object):
                 loss2 = F.mse_loss(recon_x2, x)
         #MSE = F.mse_loss(recon_x, x)
 
-        # see Appendix B from VAE paper:
-        # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-        # https://arxiv.org/abs/1312.6114
-        # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-        KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        #KLD = 0.5 * torch.sum(mu.pow(2))
+        if self.args.use_discrete_vae:
+            # logits is the un-normalized log probability for belonging to a class
+            logits = vae_posterior_output[0]
+            num_q_classes = self.vae_model.posterior_latent_size
+            q_prob = F.softmax(logits)  # q_prob
+            log_q_prob = torch.log(q_prob + 1e-10)  # log q_prob
+            KLD = q_prob * (log_q_prob - torch.log(1.0/num_q_classes))
+            pdb.set_trace()
+        else:
+            mu, logvar = vae_posterior_output
+            # see Appendix B from VAE paper:
+            # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
+            # https://arxiv.org/abs/1312.6114
+            # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+            KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+            #KLD = 0.5 * torch.sum(mu.pow(2))
 
         
         #return MSE + KLD
         if self.args.use_separate_goal_policy:
-            return lambda_loss1*loss1 + lambda_loss2*loss2 + lambda_kld*KLD, loss1, loss2, KLD
+            return lambda_loss1*loss1 + lambda_loss2*loss2 + lambda_kld*KLD, \
+                    loss1, loss2, KLD
         else:
             return lambda_loss1*loss1 + lambda_kld*KLD, loss1, None, KLD
 
@@ -350,8 +378,13 @@ class VAETrain(object):
         x: State at time t. (x_t)
         c: Context at time t-1. (c_{t-1})
         '''
-        mu, logvar = self.vae_model.encode(x, c)
-        return self.vae_model.reparameterize(mu, logvar)
+        if self.args.use_discrete_vae:
+            logits = self.vae_model.encode(x, c)
+            return self.vae_model.reparameterize(logits,
+                                                 self.vae_model.temperature)
+        else:
+            mu, logvar = self.vae_model.encode(x, c)
+            return self.vae_model.reparameterize(mu, logvar)
 
     def train(self, expert, num_epochs, batch_size):
         final_train_stats = {
@@ -518,7 +551,8 @@ class VAETrain(object):
                     torch.from_numpy(np.array(ep_action)).type(self.dtype))
 
             # Get the initial state
-            c = -1 * np.ones((1, self.vae_model.posterior_latent_size), dtype=np.float32)
+            c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
+                             dtype=np.float32)
             x_state_obj = State(ep_state[0].tolist(), self.obstacles)
             x_feat = self.get_state_features(x_state_obj,
                                              self.args.use_state_features)
@@ -538,31 +572,29 @@ class VAETrain(object):
                 x_var = Variable(torch.from_numpy(
                     x.reshape((1, -1))).type(self.dtype))
 
-                if t < 3:
-                    x_t = Variable(torch.from_numpy(
-                         np.array([[2-t]]))).type(self.dtype)
-
-                elif t >= 3:
-                    x_t = Variable(torch.from_numpy(
-                         np.array([[5-t]]))).type(self.dtype)
-
-                x_var = torch.cat([x_var, x_t], dim=1)
-
                 if self.use_rnn_goal_predictor:
                     c_var = torch.cat([
                         final_goal,
                         Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
                 else:
-                    true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(0).type(self.dtype))
+                    true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(
+                        0).type(self.dtype))
                     c_var = torch.cat([
                         true_goal,
                         Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
                 print(c_var)
 
-                pred_actions_tensor, pred_actions_tensor2, mu, logvar = self.vae_model(x_var, c_var, final_goal)
-                pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
-                pred_actions_2_numpy = pred_actions_tensor2.data.cpu().numpy()
+                vae_output = self.vae_model(x_var, c_var, final_goal)
+                if self.args.use_discrete_vae:
+                    # logits
+                    vae_reparam_input = (vae_output[2], self.vae_model.temperature)
+                else:
+                    # mu, logvar
+                    vae_reparam_input = (vae_output[2], vae_output[3])
+
+                pred_actions_numpy = vae_output[0].data.cpu().numpy()
+                pred_actions_2_numpy = vae_output[1].data.cpu().numpy()
 
                 # Store the "true" state
                 true_traj.append((ep_state[t], ep_action[t]))
@@ -590,7 +622,7 @@ class VAETrain(object):
 
                 # update c
                 c[:, -self.vae_model.posterior_latent_size:] = \
-                    self.vae_model.reparameterize(mu, logvar).data.cpu()
+                    self.vae_model.reparameterize(*vae_reparam_input).data.cpu()
 
                 # Update current state
                 curr_state_arr = np.array(next_state.coordinates,
@@ -619,7 +651,8 @@ class VAETrain(object):
 
         for batch_idx in range(num_batches):
             # Train loss for this batch
-            train_loss, train_policy_loss, train_KLD_loss, train_policy2_loss = 0.0, 0.0, 0.0, 0.0
+            train_loss, train_policy_loss = 0.0, 0.0
+            train_KLD_loss, train_policy2_loss = 0.0, 0.0
             batch = expert.sample(batch_size)
 
             self.vae_opt.zero_grad()
@@ -638,7 +671,8 @@ class VAETrain(object):
 
             true_goal_numpy = np.zeros((self.num_goals))
             true_goal_numpy[int(ep_c[0][0])] = 1
-            true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(0).type(self.dtype))
+            true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(
+                0).type(self.dtype))
 
 
             if self.use_rnn_goal_predictor:
@@ -656,7 +690,8 @@ class VAETrain(object):
                     torch.from_numpy(np.array(ep_action)).type(self.dtype))
 
             # Get the initial state
-            c = -1 * np.ones((1, self.vae_model.posterior_latent_size), dtype=np.float32)
+            c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
+                             dtype=np.float32)
             x_state_obj = State(ep_state[0].tolist(), self.obstacles)
             x_feat = self.get_state_features(x_state_obj,
                                              self.args.use_state_features)
@@ -674,36 +709,31 @@ class VAETrain(object):
                 x_var = Variable(torch.from_numpy(
                     x.reshape((1, -1))).type(self.dtype))
 
-                if t < 3:
-                    x_t = Variable(torch.from_numpy(
-                         np.array([[2-t]]))).type(self.dtype)
-
-                elif t >= 3:
-                    x_t = Variable(torch.from_numpy(
-                         np.array([[5-t]]))).type(self.dtype)
-
-                x_var = torch.cat([x_var, x_t], dim=1)
-
                 # Append 'c' at the end.
                 if args.use_rnn_goal:
                     c_var = torch.cat(
                             [final_goal,
-                             Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
+                                Variable(torch.from_numpy(c).type(self.dtype))],
+                            dim=1)
                 else:
                     c_var = torch.cat(
                             [true_goal,
-                             Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
+                                Variable(torch.from_numpy(c).type(self.dtype))],
+                            dim=1)
 
-                pred_actions_tensor, pred_actions_2_tensor, mu, logvar = self.vae_model(x_var, c_var, final_goal)
-
+                vae_output = self.vae_model(x_var, c_var, final_goal)
                 expert_action_var = action_var[t].clone().unsqueeze(0)
+                if self.args.use_discrete_vae:
+                    vae_reparam_input = (vae_output[2],
+                                         self.vae_model.temperature)
+                else:
+                    vae_reparam_input = (vae_output[2], vae_output[3])
 
                 loss, policy_loss, policy2_loss, KLD_loss = self.loss_function(
-                        pred_actions_tensor,
-                        pred_actions_2_tensor,
+                        vae_output[0],
+                        vae_output[1],
                         expert_action_var,
-                        mu,
-                        logvar,
+                        vae_output[2:],
                         epoch)
     
                 ep_loss.append(loss)
@@ -714,9 +744,9 @@ class VAETrain(object):
                     train_policy2_loss += policy2_loss.data[0]
                 train_KLD_loss += KLD_loss.data[0]
 
-                pred_actions_numpy = pred_actions_tensor.data.cpu().numpy()
+                pred_actions_numpy = vae_output[0].data.cpu().numpy()
                 if self.args.use_separate_goal_policy:
-                    pred_actions_2_numpy = pred_actions_2_tensor.data.cpu().numpy()
+                    pred_actions_2_numpy = vae_output[1].data.cpu().numpy()
 
                 if history_size > 1:
                     x[:,:(history_size-1),:] = x[:,1:,:]
@@ -740,7 +770,7 @@ class VAETrain(object):
 
                 # update c
                 c[:, -self.vae_model.posterior_latent_size:] = \
-                    self.vae_model.reparameterize(mu, logvar).data.cpu()
+                    self.vae_model.reparameterize(*vae_reparam_input).data.cpu()
 
             # Calculate the total loss.
             total_loss = ep_loss[0]
@@ -794,15 +824,17 @@ class VAETrain(object):
                                                    train_KLD_loss,
                                                    self.train_step_count)
             if self.args.use_separate_goal_policy:
-                self.logger.summary_writer.add_scalar('loss/policy2_loss_per_sample',
-                                                   train_policy2_loss,
-                                                   self.train_step_count)
+                self.logger.summary_writer.add_scalar(
+                        'loss/policy2_loss_per_sample',
+                        train_policy2_loss,
+                        self.train_step_count)
 
 
             if batch_idx % self.args.log_interval == 0:
                 if self.args.use_separate_goal_policy:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
-                            'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t  KLD: {:.2f}'.format(
+                          'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t'\
+                          'KLD: {:.2f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
                         train_policy_loss, train_policy2_loss, train_KLD_loss))
                 else:
@@ -824,81 +856,6 @@ class VAETrain(object):
 
         return train_stats
 
-
-    def train_batch_epoch(self, epoch, batch_size=10):
-        self.vae_model.train()
-        history_size = model.history_size
-        train_loss = 0
-        for batch_idx in range(10): # 10 batches per epoch
-            batch = self.expert.sample(batch_size)
-            print("Batch len: {}".format(len(batch.state[0])))
-            print("Batch len: {}".format(len(batch.state[1])))
-            x_data = torch.Tensor(np.array(batch.state))
-            N = x_data.size(1)
-            x = -1*torch.ones(x_data.size(0), history_size, x_data.size(2))
-            x[:, (history_size-1), :] = x_data[:, 0, :]
-
-            a = Variable(torch.Tensor(np.array(batch.action)))
-
-            # Context variable is in one-hot, convert it to integer
-            _, c2 = torch.Tensor(np.array(batch.c)).max(2) # , (N, T)
-            c2 = c2.float()[:,0].unsqueeze(1)
-            c1 = -1*torch.ones(c2.size())
-            c = torch.cat((c1, c2), 1)
-
-            #c_t0 = Variable(c[:,0].clone().view(c.size(0), 1))
-
-            if self.args.cuda:
-                a = a.cuda()
-                #c_t0 = c_t0.cuda()
-
-            self.vae_opt.zero_grad()
-            for t in range(N):
-                #x_t0 = Variable(x[:,0,:].clone().view(x.size(0), x.size(2)))
-                #x_t1 = Variable(x[:,1,:].clone().view(x.size(0), x.size(2)))
-                #x_t2 = Variable(x[:,2,:].clone().view(x.size(0), x.size(2)))
-                #x_t3 = Variable(x[:,3,:].clone().view(x.size(0), x.size(2)))
-                input_x = Variable(x[:,:,:].view(x.size(0),
-                                   history_size*x.size(2)).clone())
-                c_t0 = Variable(c)
-
-                if self.args.cuda:
-                    input_x = input_x.cuda()
-                    #x_t0 = x_t0.cuda()
-                    #x_t1 = x_t1.cuda()
-                    #x_t2 = x_t2.cuda()
-                    #x_t3 = x_t3.cuda()
-                    c_t0 = c_t0.cuda()
-
-
-                recon_batch, mu, logvar = self.vae_model(input_x, c_t0)
-                loss, BCE_loss, KLD_loss = self.loss_function(
-                        recon_batch, a[:,t,:], mu, logvar)
-                loss.backward()
-                train_loss += loss.data[0]
-
-                pred_actions = recon_batch.data.cpu().numpy()
-
-                x[:,:3,:] = x[:,1:,:]
-                # get next state and update x
-                for b_id in range(pred_actions.shape[0]):
-                    action = Action(np.argmax(pred_actions[b_id,:]))
-                    state = State(x[b_id,3,:].cpu().numpy(), self.obstacles)
-                    next_state = self.transition_func(state, action, 0)
-                    x[b_id,3,:] = torch.Tensor(next_state.state)
-
-                # update c
-                c[:,0] = self.vae_model.reparameterize(mu, logvar).data.cpu()
-
-            self.vae_opt.step()
-            if batch_idx % self.args.log_interval == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch, batch_idx * self.args.batch_size, 200.0,
-                    100. * batch_idx / 20.0,
-                    loss.data[0] / self.args.batch_size))
-
-        print('====> Epoch: {} Average loss: {:.4f}'.format(
-              epoch, train_loss / 200.0))
 
     def sample_start_location(self):
         set_diff = list(set(product(tuple(range(7, 13)),
@@ -970,83 +927,6 @@ class VAETrain(object):
             with open(results_pkl_path, 'wb') as results_f:
                 pickle.dump(results, results_f, protocol=2)
                 print('Did save results to {}'.format(results_pkl_path))
-
-    # I'm pretty sure this doesn't work.
-    def test(self, expert):
-        self.vae_model.eval()
-        history_size = self.vae_model.history_size
-        #test_loss = 0
-
-        for _ in range(20):
-            c = expert.sample_c()
-            N = c.shape[0]
-            c = np.argmax(c[0,:])
-
-            #if args.expert_path == 'SR_expert_trajectories/':
-            #    if c == 1:
-            #        half = 0
-            #    elif c == 3:
-            #        half = 1
-            #elif args.expert_path == 'SR2_expert_trajectories/':
-            #    half = c
-            #if args.expert_path == 'SR_expert_trajectories/' or \
-            #        args.expert_path == 'SR2_expert_trajectories/':
-            #    if half == 0: # left half
-            #        set_diff = list(set(product(tuple(range(0, (width/2)-3)),
-            #                           tuple(range(1, height)))) - set(obstacles))
-            #    elif half == 1: # right half
-            #        set_diff = list(set(product(
-            #           tuple(range(width/2, width-2)),
-            #           tuple(range(2, height)))) - set(obstacles))
-            #else:
-            #    set_diff = list(set(product(tuple(range(3, width-3)), repeat=2)) \
-            #           - set(obstacles))
-            start_loc = self.sample_start_location()
-            s = State(start_loc, self.obstacles)
-            R.reset()
-            c = torch.from_numpy(np.array([-1.0,c])).unsqueeze(0).float()
-
-            print('c is '.format(c[0,1]))
-            c = Variable(c)
-
-            x = -1*torch.ones(1, history_size, 2)
-
-            if args.cuda:
-                x = x.cuda()
-                c = c.cuda()
-
-            for t in range(N):
-
-                x[:,:(history_size-1),:] = x[:,1:,:]
-                curr_x = torch.from_numpy(s.state).unsqueeze(0)
-                if args.cuda:
-                    curr_x = curr_x.cuda()
-
-                x[:,(history_size-1),:] = curr_x
-
-                #x_t0 = Variable(x[:,0,:])
-                #x_t1 = Variable(x[:,1,:])
-                #x_t2 = Variable(x[:,2,:])
-                #x_t3 = Variable(x[:,3,:])
-
-                input_x = Variable(x[:,:,:].view(x.size(0),
-                                                 history_size*x.size(2)).clone())
-
-                mu, logvar = model.encode(input_x, c)
-                c[:,0] = model.reparameterize(mu, logvar)
-                pred_a = model.decode(input_x, c).data.cpu().numpy()
-                pred_a = np.argmax(pred_a)
-                print("Pred a {}".format(pred_a))
-                next_s = Transition(s, Action(pred_a), R.t)
-
-                s = next_s
-
-                #test_loss += loss_function(recon_batch, data, mu, logvar).data[0]
-
-
-        #test_loss /= len(test_loader.dataset)
-        #print('====> Test set loss: {:.4f}'.format(test_loss))
-
 
 def main(args):
 
@@ -1121,10 +1001,17 @@ if __name__ == '__main__':
     parser.add_argument('--use_goal_in_policy', type=int, default=1, choices=[0, 1],
                         help='Give goal to policy network.')
 
-    parser.add_argument('--use_separate_goal_policy', type=int, default=0, choices=[0, 1],
+    parser.add_argument('--use_separate_goal_policy', type=int, default=0,
+                        choices=[0, 1],
                         help='Use another decoder with goal input.')
 
     # Arguments for VAE training
+    parser.add_argument('--use-discrete_vae', dest='use_discrete_vae',
+                        action='store_true', help='Use Discrete VAE.')
+    parser.add_argument('--no-use-discrete_vae', dest='use_discrete_vae',
+                        action='store_false', help='Do not Use Discrete VAE.')
+    parser.set_defaults(use_discrete_vae=False)
+
     parser.add_argument('--vae_state_size', type=int, default=2,
                         help='State size for VAE.')
     parser.add_argument('--vae_action_size', type=int, default=4,
