@@ -8,9 +8,14 @@ from gym import wrappers
 
 
 def activity_map(mode):
-    activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0, 'rest': 3.0}
+    activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0}
+    #activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0, 'rest': 3.0}
+    #activity_dict = {'forward': 0.0, 'backward': 1.0}
+    one_hot = np.zeros((len(activity_dict),))
+    one_hot[activity_dict[mode]] = 1.0
 
-    return activity_dict[mode]
+    #return activity_dict[mode]
+    return one_hot
 
 
 def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
@@ -32,12 +37,12 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
     while num_steps < min_batch_size:
         state = env.reset()
         if state_type == 'decayed_context':
-            state = np.concatenate((state, np.array([1.0,
-                                                     activity_map(mode_list[0]),
-                                                     activity_map(mode_list[min(1, len(mode_list)-1)])])), axis=0)
+            state = np.concatenate((state, np.array([1.0]),
+                                    activity_map(mode_list[0]),
+                                    activity_map(mode_list[min(1, len(mode_list)-1)])), axis=0)
         elif state_type == 'context':
-            state = np.concatenate((state, np.array([activity_map(mode_list[0]),
-                                                     activity_map(mode_list[min(1, len(mode_list)-1)])])), axis=0)
+            state = np.concatenate((state, activity_map(mode_list[0]),
+                                    activity_map(mode_list[min(1, len(mode_list)-1)])), axis=0)
 
         if running_state is not None:
             state = running_state(state, update=update_rs)
@@ -61,13 +66,13 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
 
             if state_type == 'decayed_context':
                 next_state = np.concatenate((next_state, 
-                                     np.array([1/((t % num_steps_per_mode) + 1),
-                                               activity_map(mode_list[next_mode_id]),
-                                               activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])])), axis=0)
+                                             np.array([1/((t % num_steps_per_mode) + 1)),
+                                             activity_map(mode_list[next_mode_id]),
+                                             activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])), axis=0)
             elif state_type == 'context':
-                next_state = np.concatenate((next_state, 
-                                     np.array([activity_map(mode_list[next_mode_id]),
-                                              activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])])), axis=0)
+                next_state = np.concatenate((next_state,
+                                             activity_map(mode_list[next_mode_id]),
+                                             activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])), axis=0)
 
             if running_state is not None:
                 next_state = running_state(next_state, update=update_rs)
@@ -215,12 +220,12 @@ class Agent:
 
         state = env.reset()
         if self.state_type == 'decayed_context':
-            state = np.concatenate((state, np.array([1.0,
-                                                     activity_map(self.mode_list[0]),
-                                                     activity_map(self.mode_list[min(1, N-1)])])), axis=0)
+            state = np.concatenate((state, np.array([1.0]),
+                                    activity_map(self.mode_list[0]),
+                                    activity_map(self.mode_list[min(1, N-1)])), axis=0)
         elif self.state_type == 'context':
-            state = np.concatenate((state, np.array([activity_map(self.mode_list[0]),
-                                                     activity_map(self.mode_list[min(1, N-1)])])), axis=0)
+            state = np.concatenate((state, activity_map(self.mode_list[0]),
+                                    activity_map(self.mode_list[min(1, N-1)])), axis=0)
 
         if self.running_state is not None:
             state = self.running_state(state, update=False)
@@ -251,13 +256,13 @@ class Agent:
 
                 if self.state_type == 'decayed_context':
                     next_state = np.concatenate((next_state,
-                                     np.array([1/(n+1),
-                                               activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
-                                               activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
+                                                 np.array([1/(n+1)]),
+                                                 activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
+                                                 activity_map(self.mode_list[min(i+1, N-1)])), axis=0)
                 elif self.state_type == 'context':
                     next_state = np.concatenate((next_state,
-                                     np.array([activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
-                                               activity_map(self.mode_list[min(i+1, N-1)])])), axis=0)
+                                                 activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
+                                                 activity_map(self.mode_list[min(i+1, N-1)])), axis=0)
 
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
