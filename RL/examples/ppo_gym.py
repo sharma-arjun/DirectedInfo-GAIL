@@ -96,9 +96,9 @@ if args.save_model_path:
         os.makedirs(os.path.join(assets_dir(), args.save_model_path))
 
 if args.state_type == 'decayed_context':
-    extra_dim = 3
+    extra_dim = 7
 elif args.state_type == 'context':
-    extra_dim = 2
+    extra_dim = 6
 else:
     extra_dim = 0
 

@@ -12,7 +12,7 @@ def activity_map(mode):
     #activity_dict = {'walk': 0.0, 'walkback': 1.0, 'jump': 2.0, 'rest': 3.0}
     #activity_dict = {'forward': 0.0, 'backward': 1.0}
     one_hot = np.zeros((len(activity_dict),))
-    one_hot[activity_dict[mode]] = 1.0
+    one_hot[int(activity_dict[mode])] = 1.0
 
     #return activity_dict[mode]
     return one_hot
@@ -66,7 +66,7 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
 
             if state_type == 'decayed_context':
                 next_state = np.concatenate((next_state, 
-                                             np.array([1/((t % num_steps_per_mode) + 1)),
+                                             np.array([1/((t % num_steps_per_mode) + 1)]),
                                              activity_map(mode_list[next_mode_id]),
                                              activity_map(mode_list[min(next_mode_id+1, len(mode_list)-1)])), axis=0)
             elif state_type == 'context':
