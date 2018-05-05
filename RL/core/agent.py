@@ -267,9 +267,12 @@ class Agent:
                 phase = (i * num_steps_per_policy +  n) / (N * num_steps_per_policy - 1)
                 state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 phase_var = Variable(self.tensor(np.array([phase])), volatile=True)
-                state_var = state_var.cuda()
 
-                if use_phase:
+                if use_gpu:
+                    state_var = state_var.cuda()
+                    phase_var = phase_var.cuda()
+
+                if self.use_phase:
                     action  = self.policy(state_var, phase_var)[0]
                 else:
                     action  = self.policy(state_var)[0]
