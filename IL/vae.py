@@ -151,12 +151,12 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self):
         '''Update temperature.'''
-        pass
+        raise ValueError("To be implemented.")
 
     def encode(self, x, c):
-        '''Return the probability output for the encoder.'''
-        output = self.posterior(torch.cat((x, c), 1))
-        return output
+        '''Return the log probability output for the encoder.'''
+        logits = self.posterior(torch.cat((x, c), 1))
+        return logits 
 
     def sample_gumbel(self, shape, eps=1e-20):
         """Sample from Gumbel(0, 1)"""
@@ -165,19 +165,24 @@ class DiscreteVAE(VAE):
 
     def gumbel_softmax_sample(self, logits, temperature):
         """ Draw a sample from the Gumbel-Softmax distribution"""
-        y = logits + Variable(self.sample_gumbel(logits.size()), requires_grad=False)
+        y = logits + Variable(self.sample_gumbel(logits.size()))
         return F.softmax(y / temperature)
 
     def reparameterize(self, logits, temperature, eps=1e-10):
         if self.training:
-            return self.gumbel_softmax_sample(logits, temperature)
+            probs = self.gumbel_softmax_sample(logits, temperature)
         else:
-            return F.softmax(logits / temperature)
+            probs = F.softmax(logits / temperature)
+        return probs
 
     def forward(self, x, c, g):
         c_logits = self.encode(x, c)
-        c[:, -self.posterior_latent_size:] = self.reparameterize(c_logits,
-                                                                 self.temperature)
+        if not self.training:
+            print('logits: {}'.format(np.array_str(c_logits.data.cpu().numpy(), 
+                precision=4, suppress_small=True, max_line_width=120)))
+
+        c[:, -self.posterior_latent_size:] = self.reparameterize(
+                c_logits, self.temperature)
 
         decoder_output_1 = None
         decoder_output_2 = None
@@ -307,8 +312,9 @@ class VAETrain(object):
     def loss_function(self, recon_x1, recon_x2, x, vae_posterior_output, epoch):
         lambda_loss1 = 1.0
         th_epochs = 0.5*args.num_epochs
-        lambda_kld = max(0.1, 0.1 + (lambda_loss1 - 0.1) \
-                * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
+        #lambda_kld = max(0.1, 0.1 + (lambda_loss1 - 0.1) \
+        #        * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
+        lambda_kld = 0.0001
         lambda_loss2 = 10.0
 
         if args.discrete:
@@ -347,6 +353,53 @@ class VAETrain(object):
         else:
             return lambda_loss1*loss1 + lambda_kld*KLD, loss1, None, KLD
 
+    def log_model_to_tensorboard(self):
+        vae_model_l2_norm, vae_model_grad_l2_norm = \
+            get_weight_norm_for_network(self.vae_model.policy)
+        self.logger.summary_writer.add_scalar(
+                        'weight/policy',
+                         vae_model_l2_norm,
+                         self.train_step_count)
+        self.logger.summary_writer.add_scalar(
+                        'grad/policy',
+                         vae_model_grad_l2_norm,
+                         self.train_step_count)
+
+        if self.vae_model.policy_goal:
+            vae_model_l2_norm, vae_model_grad_l2_norm = \
+                            get_weight_norm_for_network(self.vae_model.policy_goal)
+            self.logger.summary_writer.add_scalar(
+                            'weight/policy_goal',
+                             vae_model_l2_norm,
+                             self.train_step_count)
+            self.logger.summary_writer.add_scalar(
+                            'grad/policy_goal',
+                             vae_model_grad_l2_norm,
+                             self.train_step_count)
+
+        vae_model_l2_norm, vae_model_grad_l2_norm = \
+                        get_weight_norm_for_network(self.vae_model.posterior)
+        self.logger.summary_writer.add_scalar(
+                        'weight/posterior',
+                         vae_model_l2_norm,
+                         self.train_step_count)
+        self.logger.summary_writer.add_scalar(
+                        'grad/posterior',
+                         vae_model_grad_l2_norm,
+                         self.train_step_count)
+
+
+        if self.use_rnn_goal_predictor:
+            Q_model_l2_norm, Q_model_l2_grad_norm = \
+                            get_weight_norm_for_network(self.Q_model_linear)
+            self.logger.summary_writer.add_scalar(
+                            'weight/Q_model_l2',
+                             Q_model_l2_norm,
+                             self.train_step_count)
+            self.logger.summary_writer.add_scalar(
+                            'grad/Q_model_l2',
+                             Q_model_l2_grad_norm,
+                             self.train_step_count)
 
     def set_models_to_train(self):
         if self.use_rnn_goal_predictor:
@@ -782,31 +835,8 @@ class VAETrain(object):
             total_loss.backward()
 
             # Get the gradients and network weights
-            # TODO: Add gradients
             if self.args.log_gradients_tensorboard:
-                vae_model_l2_norm, vae_model_grad_l2_norm = \
-                        get_weight_norm_for_network(self.vae_model)
-                self.logger.summary_writer.add_scalar(
-                        'weight/vae_model_l2',
-                         vae_model_l2_norm,
-                         self.train_step_count)
-                self.logger.summary_writer.add_scalar(
-                        'grad/vae_model_l2',
-                         vae_model_grad_l2_norm,
-                         self.train_step_count)
-
-                if self.use_rnn_goal_predictor:
-                    Q_model_l2_norm, Q_model_l2_grad_norm = \
-                            get_weight_norm_for_network(self.Q_model_linear)
-                    self.logger.summary_writer.add_scalar(
-                            'weight/Q_model_l2',
-                             Q_model_l2_norm,
-                             self.train_step_count)
-                    self.logger.summary_writer.add_scalar(
-                            'grad/Q_model_l2',
-                             Q_model_l2_grad_norm,
-                             self.train_step_count)
-
+                self.log_model_to_tensorboard()
 
             self.vae_opt.step()
             if self.use_rnn_goal_predictor:
