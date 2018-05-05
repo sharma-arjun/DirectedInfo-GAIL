@@ -8,7 +8,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import *
 from models.mlp_policy import Policy
+from models.phase_mlp_policy import PhasePolicy
 from models.mlp_critic import Value
+from models.phase_mlp_critic import PhaseValue
 from models.mlp_policy_disc import DiscretePolicy
 from torch.autograd import Variable
 from core.ppo import ppo_step
@@ -63,6 +65,13 @@ parser.add_argument('--save-model-path', metavar='G', default='learned_models',
                     help='save directory for trained model')
 parser.add_argument('--jump-thresh', type=float, default=1.1, metavar='N',
                     help='threshold for jump reward')
+# phase
+parser.add_argument('--phase', dest='phase', action='store_true',
+                    help='use phase nets')
+parser.add_argument('--no_phase', dest='phase', action='store_false',
+                    help='use normal networks')
+parser.set_defaults(phase=False)
+
 args = parser.parse_args()
 
 
@@ -114,7 +123,10 @@ if args.policy_list is not None:
         with open(path_name, "rb") as f_weight_file:
             policy_net, value_net, running_state = pickle.load(f_weight_file)
         if use_gpu:
-            policy_net = policy_net.cuda()
+            if args.phase:
+                policy_net.convert_to_cuda()
+            else:
+                policy_net = policy_net.cuda()
         policy_list.append(policy_net)
         running_state_list.append(running_state)
 
@@ -123,18 +135,28 @@ else:
         if is_disc_action:
             policy_net = DiscretePolicy(state_dim+extra_dim, env_dummy.action_space.n)
         else:
-            policy_net = Policy(state_dim+extra_dim, env_dummy.action_space.shape[0], log_std=args.log_std)
-        value_net = Value(state_dim+extra_dim)
+            if args.phase:
+                policy_net = PhasePolicy(state_dim+extra_dim, env_dummy.action_space.shape[0], log_std=args.log_std)
+            else:
+                policy_net = Policy(state_dim+extra_dim, env_dummy.action_space.shape[0], log_std=args.log_std)
+        if args.phase:
+            value_net = PhaseValue(state_dim+extra_dim)
+        else:
+            value_net = Value(state_dim+extra_dim)
     else:
         policy_net, value_net, running_state = pickle.load(open(args.model_path, "rb"))
     if use_gpu:
-        policy_net = policy_net.cuda()
-        value_net = value_net.cuda()
+        if args.phase:
+            policy_net.convert_to_cuda()
+            value_net.convert_to_cuda()
+        else:
+            policy_net = policy_net.cuda()
+            value_net = value_net.cuda()
 
     """create agent"""
     agent = Agent(env_factory, policy_net, running_state=running_state, render=args.render,
                  num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type, 
-                 num_steps_per_mode=args.num_steps_per_mode)
+                 num_steps_per_mode=args.num_steps_per_mode, use_phase=args.phase)
 
     optimizer_policy = torch.optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     optimizer_value = torch.optim.Adam(value_net.parameters(), lr=args.learning_rate)
@@ -151,10 +173,19 @@ def update_params(batch, i_iter):
     actions = torch.from_numpy(np.stack(batch.action))
     rewards = torch.from_numpy(np.stack(batch.reward))
     masks = torch.from_numpy(np.stack(batch.mask).astype(np.float64))
+    phases = torch.from_numpy(np.stack(batch.phase))
     if use_gpu:
-        states, actions, rewards, masks = states.cuda(), actions.cuda(), rewards.cuda(), masks.cuda()
-    values = value_net(Variable(states, volatile=True)).data
-    fixed_log_probs = policy_net.get_log_prob(Variable(states, volatile=True), Variable(actions)).data
+        states, actions, rewards, masks, phases = \
+                       states.cuda(), actions.cuda(), rewards.cuda(), masks.cuda(), phases.cuda()
+    if args.phase:
+        values = value_net(Variable(states, volatile=True), Variable(phases)).data
+    else:
+        values = value_net(Variable(states, volatile=True)).data
+
+    if args.phase:
+        fixed_log_probs = policy_net.get_log_prob(Variable(states, volatile=True), Variable(phases), Variable(actions)).data
+    else:
+        fixed_log_probs = policy_net.get_log_prob(Variable(states, volatile=True), Variable(actions)).data
 
     """get advantage estimation from the trajectories"""
     advantages, returns = estimate_advantages(rewards, masks, values, args.gamma, args.tau, use_gpu)
@@ -168,16 +199,16 @@ def update_params(batch, i_iter):
         np.random.shuffle(perm)
         perm = LongTensor(perm).cuda() if use_gpu else LongTensor(perm)
 
-        states, actions, returns, advantages, fixed_log_probs = \
-            states[perm], actions[perm], returns[perm], advantages[perm], fixed_log_probs[perm]
+        states, actions, phases, returns, advantages, fixed_log_probs = \
+            states[perm], actions[perm], phases[perm], returns[perm], advantages[perm], fixed_log_probs[perm]
 
         for i in range(optim_iter_num):
             ind = slice(i * optim_batch_size, min((i + 1) * optim_batch_size, states.shape[0]))
-            states_b, actions_b, advantages_b, returns_b, fixed_log_probs_b = \
-                states[ind], actions[ind], advantages[ind], returns[ind], fixed_log_probs[ind]
+            states_b, actions_b, phases_b, advantages_b, returns_b, fixed_log_probs_b = \
+                states[ind], actions[ind], phases[ind], advantages[ind], returns[ind], fixed_log_probs[ind]
 
-            ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, 1, states_b, actions_b, returns_b,
-                     advantages_b, fixed_log_probs_b, lr_mult, args.learning_rate, args.clip_epsilon, args.l2_reg)
+            ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, 1, states_b, actions_b, phases_b, returns_b,
+                     advantages_b, fixed_log_probs_b, lr_mult, args.learning_rate, args.clip_epsilon, args.l2_reg, use_phase=args.phase)
 
 
 def train_loop():
@@ -194,18 +225,24 @@ def train_loop():
 
         if args.save_model_interval > 0 and (i_iter+1) % args.save_model_interval == 0:
             if use_gpu:
-                policy_net.cpu(), value_net.cpu()
+                if args.phase:
+                    policy_net.convert_to_cpu(), value_net.convert_to_cpu()
+                else:
+                    policy_net.cpu(), value_net.cpu()
             pickle.dump((policy_net, value_net, running_state),
                         open(os.path.join(assets_dir(), args.save_model_path + '/{}_{}_{}_{}_{}_ppo.p'.format(args.env_name, '_'.join(args.mode_list),
                              str(args.jump_thresh), str(i_iter), str(log['avg_reward']))), 'wb'))
             if use_gpu:
-                policy_net.cuda(), value_net.cuda()
+                if args.phase:
+                    policy_net.convert_to_cuda(), value_net.convert_to_cuda()
+                else:
+                    policy_net.cuda(), value_net.cuda()
 
 def gen_traj_loop():
     n = 1
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type,
-                  num_steps_per_mode=args.num_steps_per_mode)
+                  num_steps_per_mode=args.num_steps_per_mode, use_phase=args.phase)
     
     env_data_dict = {'num_goals': 3}
     expert_data_dict = {}
@@ -213,7 +250,6 @@ def gen_traj_loop():
     print('Writing to h5 file ...')
 
     while i_iter < n:
-        #vid_folder = str(i_iter)
         vid_folder = None
         path_key = str(i_iter) + '_0'
         returned_dict, save_flag = agent.generate_mixed_expert_trajs(policy_list, running_state_list, vid_folder=vid_folder)
@@ -223,8 +259,7 @@ def gen_traj_loop():
             print(i_iter)
 
     save_expert_traj_dict_to_h5(expert_data_dict, args.traj_save_dir)
-
-    
+ 
 
 if args.policy_list is None:
     train_loop()

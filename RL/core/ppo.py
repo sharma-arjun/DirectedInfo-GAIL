@@ -1,20 +1,9 @@
 import torch
-#import torch._utils
-#try:
-#    torch._utils._rebuild_tensor_v2
-#except AttributeError:
-#    def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
-#        dummy_tensor = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
-#        dummy_tensor.requires_grad = requires_grad
-#        dummy_tensor._backward_hooks = backward_hooks
-#        return dummy_tensor
-#    torch._utils._rebuild_tensor_v2 = _rebuild_tensor_v2
-
 from torch.autograd import Variable
 
 
 def ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, optim_value_iternum, states, actions,
-             returns, advantages, fixed_log_probs, lr_mult, lr, clip_epsilon, l2_reg):
+             phases, returns, advantages, fixed_log_probs, lr_mult, lr, clip_epsilon, l2_reg, use_phase=False):
 
     optimizer_policy.lr = lr * lr_mult
     optimizer_value.lr = lr * lr_mult
@@ -23,7 +12,10 @@ def ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, optim_val
     """update critic"""
     values_target = Variable(returns)
     for _ in range(optim_value_iternum):
-        values_pred = value_net(Variable(states))
+        if use_phase:
+            values_pred = value_net(Variable(states), Variable(phases))
+        else:
+            values_pred = value_net(Variable(states))
         value_loss = (values_pred - values_target).pow(2).mean()
         # weight decay
         for param in value_net.parameters():
@@ -34,7 +26,10 @@ def ppo_step(policy_net, value_net, optimizer_policy, optimizer_value, optim_val
 
     """update policy"""
     advantages_var = Variable(advantages)
-    log_probs = policy_net.get_log_prob(Variable(states), Variable(actions))
+    if use_phase:
+        log_probs = policy_net.get_log_prob(Variable(states), Variable(phases), Variable(actions))
+    else:
+        log_probs = policy_net.get_log_prob(Variable(states), Variable(actions))
     ratio = torch.exp(log_probs - Variable(fixed_log_probs))
     surr1 = ratio * advantages_var
     surr2 = torch.clamp(ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon) * advantages_var
