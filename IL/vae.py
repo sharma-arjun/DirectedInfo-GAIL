@@ -146,7 +146,7 @@ class DiscreteVAE(VAE):
                 output_size=kwargs['posterior_latent_size'],
                 hidden_size=kwargs['hidden_size'],
         )
-        self.encoder_softmax = nn.Softmax()
+        self.encoder_softmax = nn.Softmax(dim=1)
         self.temperature = temperature
 
     def update_temperature(self):
@@ -159,14 +159,14 @@ class DiscreteVAE(VAE):
         prob_output = self.encoder_softmax(output)
         return prob_output
 
-    def sample_gumbel(shape, eps=1e-20):
+    def sample_gumbel(self, shape, eps=1e-20):
         """Sample from Gumbel(0, 1)"""
         U = torch.rand(shape)
         return -torch.log(-torch.log(U + eps) + eps)
 
-    def gumbel_softmax_sample(logits, temperature):
+    def gumbel_softmax_sample(self, logits, temperature):
         """ Draw a sample from the Gumbel-Softmax distribution"""
-        y = logits + self.sample_gumbel(logits.size())
+        y = logits + Variable(self.sample_gumbel(logits.size()), requires_grad=False)
         return F.softmax(y / temperature)
 
     def reparameterize(self, logits, temperature, eps=1e-10):
@@ -231,7 +231,7 @@ class VAETrain(object):
         # Hack -- VAE input dim (s + a + latent).
         if args.use_discrete_vae:
             self.vae_model = DiscreteVAE(
-                    temperature=5.0,
+                    temperature=1.0,
                     policy_state_size=state_size,
                     posterior_state_size=state_size,
                     policy_action_size=0,
@@ -328,8 +328,9 @@ class VAETrain(object):
             num_q_classes = self.vae_model.posterior_latent_size
             q_prob = F.softmax(logits)  # q_prob
             log_q_prob = torch.log(q_prob + 1e-10)  # log q_prob
-            KLD = q_prob * (log_q_prob - torch.log(1.0/num_q_classes))
-            pdb.set_trace()
+            prior_prob = Variable(torch.Tensor([1.0 / num_q_classes]))
+            KLD = torch.sum(q_prob * (log_q_prob - torch.log(prior_prob)))
+            # print("q_prob: {}".format(q_prob))
         else:
             mu, logvar = vae_posterior_output
             # see Appendix B from VAE paper:
@@ -999,7 +1000,8 @@ if __name__ == '__main__':
     parser.add_argument('--use_rnn_goal', type=int, default=1, choices=[0, 1],
                         help='Use RNN as Q network to predict the goal.')
 
-    parser.add_argument('--use_goal_in_policy', type=int, default=1, choices=[0, 1],
+    parser.add_argument('--use_goal_in_policy', type=int, default=1,
+                        choices=[0, 1],
                         help='Give goal to policy network.')
 
     parser.add_argument('--use_separate_goal_policy', type=int, default=0,
