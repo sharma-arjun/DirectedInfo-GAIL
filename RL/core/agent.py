@@ -20,7 +20,7 @@ def activity_map(mode):
 
 def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
                     render, running_state, update_rs, min_batch_size, mode_list, state_type,
-                    num_steps_per_mode, use_phase):
+                    num_steps_per_mode, use_phase, reverse):
     torch.randn(pid, )
     log = dict()
     memory = Memory()
@@ -33,6 +33,7 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
     max_c_reward = -1e6
     num_episodes = 0
     max_t = num_steps_per_mode * len(mode_list) - 1
+    do_reverse = False
 
     while num_steps < min_batch_size:
         state = env.reset()
@@ -48,8 +49,15 @@ def collect_samples(pid, queue, env, policy, custom_reward, mean_action, tensor,
             state = running_state(state, update=update_rs)
         reward_episode = 0
 
+        if reverse:
+            mode_list = mode_list[::-1]
+            do_reverse = not do_reverse
+
         for t in range(10000):
-            phase = t/max_t
+            if do_reverse:
+                phase = 1 - (t/max_t)
+            else:    
+                phase = t/max_t
             curr_mode_id = t // num_steps_per_mode
             if t % num_steps_per_mode == 0:
                 if hasattr(env.env, 'mode'):
@@ -152,7 +160,7 @@ class Agent:
 
     def __init__(self, env_factory, policy, custom_reward=None, mean_action=False, render=False,
                  tensor_type=torch.DoubleTensor, running_state=None, num_threads=1, mode_list=None,
-                 state_type=None, num_steps_per_mode=333, use_phase=False):
+                 state_type=None, num_steps_per_mode=333, use_phase=False, reverse=False):
         self.env_factory = env_factory
         self.policy = policy
         self.custom_reward = custom_reward
@@ -165,6 +173,7 @@ class Agent:
         self.state_type = state_type
         self.num_steps_per_mode = num_steps_per_mode
         self.use_phase = use_phase
+        self.reverse = reverse
         self.env_list = []
         for i in range(num_threads):
             if mode_list:
@@ -186,14 +195,14 @@ class Agent:
         for i in range(self.num_threads-1):
             worker_args = (i+1, queue, self.env_list[i + 1], self.policy, self.custom_reward, self.mean_action, self.tensor,
                            False, self.running_state, False, thread_batch_size, self.mode_list, self.state_type,
-                           self.num_steps_per_mode, self.use_phase)
+                           self.num_steps_per_mode, self.use_phase, self.reverse)
             workers.append(multiprocessing.Process(target=collect_samples, args=worker_args))
         for worker in workers:
             worker.start()
 
         memory, log = collect_samples(0, None, self.env_list[0], self.policy, self.custom_reward, self.mean_action, self.tensor,
                                       self.render, self.running_state, True, thread_batch_size, self.mode_list, self.state_type,
-                                      self.num_steps_per_mode, self.use_phase)
+                                      self.num_steps_per_mode, self.use_phase, self.reverse)
 
         worker_logs = [None] * len(workers)
         worker_memories = [None] * len(workers)

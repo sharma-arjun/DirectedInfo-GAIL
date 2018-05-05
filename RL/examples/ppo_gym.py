@@ -72,6 +72,13 @@ parser.add_argument('--no_phase', dest='phase', action='store_false',
                     help='use normal networks')
 parser.set_defaults(phase=False)
 
+# reverse
+parser.add_argument('--reverse', dest='reverse', action='store_true',
+                    help='use reverse training')
+parser.add_argument('--no_reverse', dest='reverse', action='store_false',
+                    help='use normal training')
+parser.set_defaults(reverse=False)
+
 args = parser.parse_args()
 
 
@@ -156,7 +163,7 @@ else:
     """create agent"""
     agent = Agent(env_factory, policy_net, running_state=running_state, render=args.render,
                  num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type, 
-                 num_steps_per_mode=args.num_steps_per_mode, use_phase=args.phase)
+                 num_steps_per_mode=args.num_steps_per_mode, use_phase=args.phase, reverse=args.reverse)
 
     optimizer_policy = torch.optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     optimizer_value = torch.optim.Adam(value_net.parameters(), lr=args.learning_rate)
@@ -242,7 +249,7 @@ def gen_traj_loop():
     n = 1
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type,
-                  num_steps_per_mode=args.num_steps_per_mode, use_phase=args.phase)
+                  num_steps_per_mode=args.num_steps_per_mode, use_phase=args.phase, reverse=args.reverse)
     
     env_data_dict = {'num_goals': 3}
     expert_data_dict = {}
