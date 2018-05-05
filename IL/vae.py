@@ -231,7 +231,7 @@ class VAETrain(object):
         # Hack -- VAE input dim (s + a + latent).
         if args.use_discrete_vae:
             self.vae_model = DiscreteVAE(
-                    temperature=1.0,
+                    temperature=0.1,
                     policy_state_size=state_size,
                     posterior_state_size=state_size,
                     policy_action_size=0,
@@ -584,7 +584,9 @@ class VAETrain(object):
                         true_goal,
                         Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
-                print(c_var)
+                print("{}".format(np.array_str(
+                    c_var.data.cpu().numpy(), precision=3, max_line_width=120,
+                    suppress_small=True)))
 
                 vae_output = self.vae_model(x_var, c_var, final_goal)
                 if self.args.use_discrete_vae:
@@ -1000,7 +1002,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_rnn_goal', type=int, default=1, choices=[0, 1],
                         help='Use RNN as Q network to predict the goal.')
 
-    parser.add_argument('--use_goal_in_policy', type=int, default=1,
+    parser.add_argument('--use_goal_in_policy', type=int, default=0,
                         choices=[0, 1],
                         help='Give goal to policy network.')
 
