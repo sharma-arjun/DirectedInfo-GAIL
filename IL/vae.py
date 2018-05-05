@@ -156,8 +156,7 @@ class DiscreteVAE(VAE):
     def encode(self, x, c):
         '''Return the probability output for the encoder.'''
         output = self.posterior(torch.cat((x, c), 1))
-        prob_output = self.encoder_softmax(output)
-        return prob_output
+        return output
 
     def sample_gumbel(self, shape, eps=1e-20):
         """Sample from Gumbel(0, 1)"""
