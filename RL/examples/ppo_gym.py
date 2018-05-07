@@ -265,6 +265,7 @@ def gen_traj_loop():
     
     env_data_dict = {'num_goals': 5, 'num_actions': 6}
     expert_data_dict = {'env_data': env_data_dict, 'expert_traj': {}, 'obstacles': [], 'set_diff': []}
+    #expert_data_dict = {'expert_traj': {}}
     i_iter = 0
     print('Writing to h5 file ...')
 
