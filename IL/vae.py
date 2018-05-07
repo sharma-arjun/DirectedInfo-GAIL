@@ -744,6 +744,7 @@ class VAETrain(object):
             # Train loss for this batch
             train_loss, train_policy_loss = 0.0, 0.0
             train_KLD_loss, train_policy2_loss = 0.0, 0.0
+            ep_timesteps = 0
             batch = expert.sample(batch_size)
 
             self.vae_opt.zero_grad()
@@ -803,6 +804,7 @@ class VAETrain(object):
             # Store list of losses to backprop later.
             ep_loss, curr_state_arr = [], ep_state[0]
             for t in range(episode_len):
+                ep_timesteps += 1
                 x_var = Variable(torch.from_numpy(
                     x.reshape((1, -1))).type(self.dtype))
 
@@ -922,16 +924,17 @@ class VAETrain(object):
 
             if batch_idx % self.args.log_interval == 0:
                 if self.args.use_separate_goal_policy:
-                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
-                          'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t'\
-                          'KLD: {:.2f}'.format(
+                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
+                          'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t '\
+                          'KLD: {:.2f}, \t Timesteps: {}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_policy_loss, train_policy2_loss, train_KLD_loss))
+                        train_policy_loss, train_policy2_loss, train_KLD_loss, ep_timesteps))
                 else:
-                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f}   ' \
-                            'Policy Loss: {:.2f},    KLD: {:.2f}'.format(
+                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
+                            'Policy Loss: {:.2f}, \t KLD: {:.2f}, \t ' \
+                            'Timesteps: {}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_policy_loss, train_KLD_loss))
+                        train_policy_loss, train_KLD_loss, ep_timesteps))
 
             self.train_step_count += 1
 
@@ -1036,7 +1039,7 @@ def main(args):
         state_size=args.vae_state_size,
         action_size=args.vae_action_size,
         history_size=args.vae_history_size,
-        num_goals=7,
+        num_goals=5,
         use_rnn_goal_predictor=args.use_rnn_goal,
         dtype=dtype,
         env_type=args.env_type,
