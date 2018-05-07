@@ -1039,7 +1039,7 @@ def main(args):
         state_size=args.vae_state_size,
         action_size=args.vae_action_size,
         history_size=args.vae_history_size,
-        num_goals=5,
+        num_goals=args.vae_goal_size,
         use_rnn_goal_predictor=args.use_rnn_goal,
         dtype=dtype,
         env_type=args.env_type,
@@ -1115,6 +1115,8 @@ if __name__ == '__main__':
                         help='State size for VAE.')
     parser.add_argument('--vae_action_size', type=int, default=4,
                         help='Action size for VAE.')
+    parser.add_argument('--vae_goal_size', type=int, default=4,
+                        help='Goal size for VAE.')
     parser.add_argument('--vae_history_size', type=int, default=1,
                         help='State history size to use in VAE.')
     parser.add_argument('--vae_context_size', type=int, default=1,
