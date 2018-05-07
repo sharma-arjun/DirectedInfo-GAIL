@@ -520,7 +520,6 @@ class VAETrain(object):
         final_goal = Variable(torch.zeros(1, num_goals).type(self.dtype))
         pred_goal = []
         for t in range(episode_len):
-            pdb.set_trace()
             if self.env_type == 'grid':
                 state_obj = State(ep_state[t].tolist(), self.obstacles)
                 state_tensor = torch.from_numpy(self.get_state_features(
@@ -1045,7 +1044,10 @@ def main(args):
     )
 
     expert = ExpertHDF5(args.expert_path, args.vae_state_size)
-    expert.push(only_coordinates_in_state=True, one_hot_action=True)
+    if args.env_type == 'grid':
+        expert.push(only_coordinates_in_state=True, one_hot_action=True)
+    elif args.env_type == 'mujoco':
+        expert.push(only_coordinates_in_state=False, one_hot_action=False)
     vae_train.set_expert(expert)
 
     # expert = Expert(args.expert_path, 2)
