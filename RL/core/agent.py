@@ -253,6 +253,7 @@ class Agent:
                                     activity_map(self.mode_list[min(1, N-1)])), axis=0)
 
         if self.running_state is not None:
+            raw_state = np.copy(state)
             state = self.running_state(state, update=False)
 
         save_flag = True # is true when the episode does not end early (agent doesn't die)
@@ -303,6 +304,7 @@ class Agent:
                                                  activity_map(self.mode_list[min(i+1, N-1)])), axis=0)
 
                 if self.running_state is not None:
+                    raw_next_state = np.copy(next_state)
                     next_state = self.running_state(next_state, update=False)
                 if self.render:
                     env.render()
@@ -311,11 +313,12 @@ class Agent:
                         save_flag = False
                     break
 
-                expert_dict['state'].append(np.concatenate((state[:17],
+                expert_dict['state'].append(np.concatenate((raw_state[:17],
                                             np.array([(n + i * num_steps_per_policy) / (num_steps_per_policy * len(self.mode_list))])), axis=0))
                 expert_dict['action'].append(action)
                 expert_dict['goal'].append(6)
 
                 state = next_state
+                raw_state = raw_next_state
 
         return expert_dict, save_flag
