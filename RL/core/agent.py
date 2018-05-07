@@ -272,7 +272,7 @@ class Agent:
                 env_base.mode = mode
 
             for n in range(num_steps_per_policy):
-                print(n)
+                #print(n)
                 phase = (i * num_steps_per_policy +  n) / (N * num_steps_per_policy - 1)
                 state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 phase_var = Variable(self.tensor(np.array([phase])), volatile=True)
@@ -307,13 +307,14 @@ class Agent:
                 if self.render:
                     env.render()
                 if done:
-                    if i != len(self.mode_list) - 1 or n != num_steps_per_policy:
+                    if i != len(self.mode_list) - 1 or n != num_steps_per_policy - 1:
                         save_flag = False
                     break
 
-                expert_dict['state'].append(state)
+                expert_dict['state'].append(np.concatenate((state[:17],
+                                            np.array([(n + i * num_steps_per_policy) / (num_steps_per_policy * len(self.mode_list))])), axis=0))
                 expert_dict['action'].append(action)
-                expert_dict['goal'].append(0)
+                expert_dict['goal'].append(6)
 
                 state = next_state
 

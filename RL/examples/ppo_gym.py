@@ -246,19 +246,19 @@ def train_loop():
                     policy_net.cuda(), value_net.cuda()
 
 def gen_traj_loop():
-    n = 1
+    n = 300
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type,
                   num_steps_per_mode=args.num_steps_per_mode, use_phase=args.phase, reverse=args.reverse)
     
-    env_data_dict = {'num_goals': 3}
+    env_data_dict = {'num_goals': 7}
     expert_data_dict = {}
     i_iter = 0
     print('Writing to h5 file ...')
 
     while i_iter < n:
         vid_folder = None
-        path_key = str(i_iter) + '_0'
+        path_key = str(i_iter) + '_6'
         returned_dict, save_flag = agent.generate_mixed_expert_trajs(policy_list, running_state_list, vid_folder=vid_folder)
         if save_flag:
             expert_data_dict[path_key] = returned_dict
