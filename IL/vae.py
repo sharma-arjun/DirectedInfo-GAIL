@@ -5,6 +5,7 @@ import os
 import pdb
 import pickle
 import torch
+import gym
 
 from torch import nn, optim
 from torch.autograd import Variable
@@ -208,7 +209,9 @@ class VAETrain(object):
                  num_goals=4,
                  history_size=1,
                  use_rnn_goal_predictor=False,
-                 dtype=torch.FloatTensor):
+                 dtype=torch.FloatTensor,
+                 env_type='grid',
+                 env_name=None):
 
         self.args = args
         self.logger = logger
@@ -219,6 +222,7 @@ class VAETrain(object):
         self.num_goals = num_goals
         self.dtype = dtype
         self.use_rnn_goal_predictor = use_rnn_goal_predictor
+        self.env_type = env_type
 
 
         self.train_step_count = 0
@@ -276,7 +280,7 @@ class VAETrain(object):
         else:
             self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
 
-        self.create_environment()
+        self.create_environment(env_type, env_name)
         self.expert = None
         self.obstacles, self.set_diff = None, None
 
@@ -288,10 +292,14 @@ class VAETrain(object):
         return os.path.join(self.model_checkpoint_dir(),
                             'cp_{}.pth'.format(epoch))
 
-    def create_environment(self):
-        self.transition_func = TransitionFunction(self.width,
-                                                  self.height,
-                                                  obstacle_movement)
+    def create_environment(self, env_type, env_name=None):
+        if env_type == 'grid':
+            self.transition_func = TransitionFunction(self.width,
+                                                      self.height,
+                                                      obstacle_movement)
+        elif env_type == 'mujoco':
+            assert(env_name is not None)
+            self.env = gym.make(env_name)
 
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
@@ -512,9 +520,14 @@ class VAETrain(object):
         final_goal = Variable(torch.zeros(1, num_goals).type(self.dtype))
         pred_goal = []
         for t in range(episode_len):
-            state_obj = State(ep_state[t].tolist(), self.obstacles)
-            state_tensor = torch.from_numpy(self.get_state_features(
-                state_obj, self.args.use_state_features)).type(self.dtype)
+            pdb.set_trace()
+            if self.env_type == 'grid':
+                state_obj = State(ep_state[t].tolist(), self.obstacles)
+                state_tensor = torch.from_numpy(self.get_state_features(
+                    state_obj, self.args.use_state_features)).type(self.dtype)
+            elif self.env_type == 'mujoco':
+                state_tensor = torch.from_numpy(ep_state[t]).type(self.dtype)
+
             action_tensor = torch.from_numpy(ep_action[t]).type(self.dtype)
 
             # NOTE: Input to LSTM cell needs to be of shape (N, F) where N can
@@ -606,9 +619,15 @@ class VAETrain(object):
             # Get the initial state
             c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
-            x_state_obj = State(ep_state[0].tolist(), self.obstacles)
-            x_feat = self.get_state_features(x_state_obj,
-                                             self.args.use_state_features)
+            if self.env_type == 'grid':
+                x_state_obj = State(ep_state[0].tolist(), self.obstacles)
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
+            elif self.env_type == 'mujoco':
+                x_feat = ep_state[0]
+                self.env.reset()
+                self.env.env.set_state(np.concatenate((np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+
             x = np.reshape(x_feat, (1, -1))
 
             # Add history to state
@@ -661,28 +680,45 @@ class VAETrain(object):
                 if history_size > 1:
                     x[:, :(history_size-1), :] = x[:,1:, :]
 
-                # Get next state from action
-                action = Action(np.argmax(pred_actions_numpy[0, :]))
-                # Get current state object
-                state = State(curr_state_arr.tolist(), self.obstacles)
-                # Get next state
-                next_state = self.transition_func(state, action, 0)
+                if self.env_type == 'grid':
+                    # Get next state from action
+                    action = Action(np.argmax(pred_actions_numpy[0, :]))
+                    # Get current state object
+                    state = State(curr_state_arr.tolist(), self.obstacles)
+                    # Get next state
+                    next_state = self.transition_func(state, action, 0)
 
-                # Update x
-                next_state_features = self.get_state_features(
-                        next_state, self.args.use_state_features)
-                if history_size > 1:
-                    x[:, history_size - 1, :] = next_state_features
-                else:
-                    x[:] = next_state_features
+                    # Update x
+                    next_state_features = self.get_state_features(
+                            next_state, self.args.use_state_features)
+                    if history_size > 1:
+                        x[:, history_size - 1, :] = next_state_features
+                    else:
+                        x[:] = next_state_features
 
-                # update c
-                c[:, -self.vae_model.posterior_latent_size:] = \
-                    self.vae_model.reparameterize(*vae_reparam_input).data.cpu()
+                    # update c
+                    c[:, -self.vae_model.posterior_latent_size:] = \
+                        self.vae_model.reparameterize(*vae_reparam_input).data.cpu()
 
-                # Update current state
-                curr_state_arr = np.array(next_state.coordinates,
-                                          dtype=np.float32)
+                    # Update current state
+                    curr_state_arr = np.array(next_state.coordinates,
+                                              dtype=np.float32)
+
+                elif self.env_type == 'mujoco':
+                    action = pred_actions_numpy[0, :]
+                    next_state, _, done, _ = self.env.step(action)
+                    if done:
+                        break
+
+                    next_state = np.concatenate((next_state, np.array([(t+1)/(episode_len+1)])), axis=0)
+
+                    if history_size > 1:
+                        x[:, history_size - 1, :] = next_state
+                    else:
+                        x[:] = next_state
+
+                    # Update current state
+                    curr_state_arr = next_state
 
             results['true_traj'].append(np.array(true_traj))
             results['pred_traj'].append(np.array(pred_traj))
@@ -748,9 +784,15 @@ class VAETrain(object):
             # Get the initial state
             c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
-            x_state_obj = State(ep_state[0].tolist(), self.obstacles)
-            x_feat = self.get_state_features(x_state_obj,
-                                             self.args.use_state_features)
+            if self.env_type == 'grid':
+                x_state_obj = State(ep_state[0].tolist(), self.obstacles)
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
+            elif self.env_type == 'mujoco':
+                x_feat = ep_state[0]
+                self.env.reset()
+                self.env.env.set_state(np.concatenate((np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+
             x = np.reshape(x_feat, (1, -1))
 
             # Add history to state
@@ -807,22 +849,38 @@ class VAETrain(object):
                 if history_size > 1:
                     x[:,:(history_size-1),:] = x[:,1:,:]
 
-                # Get next state from action
-                action = Action(np.argmax(pred_actions_numpy[0, :]))
-                # Get current state
-                state = State(curr_state_arr.tolist(), self.obstacles)
-                # Get next state
-                next_state = self.transition_func(state, action, 0)
+                if self.env_type == 'grid':
+                    # Get next state from action
+                    action = Action(np.argmax(pred_actions_numpy[0, :]))
+                    # Get current state
+                    state = State(curr_state_arr.tolist(), self.obstacles)
+                    # Get next state
+                    next_state = self.transition_func(state, action, 0)
 
-                if history_size > 1:
-                    x[:, history_size-1] = self.get_state_features(
-                            next_state, self.args.use_state_features)
-                else:
-                    x[:] = self.get_state_features(next_state,
-                                                   self.args.use_state_features)
-                # Update current state
-                curr_state_arr = np.array(next_state.coordinates,
-                                          dtype=np.float32)
+                    if history_size > 1:
+                        x[:, history_size-1] = self.get_state_features(
+                                next_state, self.args.use_state_features)
+                    else:
+                        x[:] = self.get_state_features(next_state,
+                                                       self.args.use_state_features)
+                    # Update current state
+                    curr_state_arr = np.array(next_state.coordinates,
+                                              dtype=np.float32)
+
+                elif self.env_type == 'mujoco':
+                    action = pred_actions_numpy[0, :]
+                    next_state, _, done, _ = self.env.step(action)
+                    if done:
+                        break
+
+                    next_state = np.concatenate((next_state, np.array([(t+1)/(episode_len+1)])), axis=0)
+
+                    if history_size > 1:
+                        x[:, history_size-1] = next_state
+                    else:
+                        x[:] = next_state
+
+                    curr_state_arr = next_state
 
                 # update c
                 c[:, -self.vae_model.posterior_latent_size:] = \
@@ -979,12 +1037,14 @@ def main(args):
         state_size=args.vae_state_size,
         action_size=args.vae_action_size,
         history_size=args.vae_history_size,
-        num_goals=4,
+        num_goals=7,
         use_rnn_goal_predictor=args.use_rnn_goal,
-        dtype=dtype
+        dtype=dtype,
+        env_type=args.env_type,
+        env_name=args.env_name
     )
 
-    expert = ExpertHDF5(args.expert_path, 2)
+    expert = ExpertHDF5(args.expert_path, args.vae_state_size)
     expert.push(only_coordinates_in_state=True, one_hot_action=True)
     vae_train.set_expert(expert)
 
@@ -1096,6 +1156,12 @@ if __name__ == '__main__':
     parser.add_argument('--continuous', dest='discrete', action='store_false',
                         help='actions are continuous, use MSE loss')
     parser.set_defaults(discrete=False)
+
+    # Environment - Grid or Mujoco
+    parser.add_argument('--env-type', default='grid', choices=['grid', 'mujoco'],
+                        help='Environment type Grid or Mujoco.')
+    parser.add_argument('--env-name', default=None,
+                        help='Environment name if Mujoco.')
 
     args = parser.parse_args()
     if args.cuda and not torch.cuda.is_available():
