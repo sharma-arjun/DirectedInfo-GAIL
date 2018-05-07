@@ -49,9 +49,9 @@ def collect_samples(pid, queue, env, policy_list, custom_reward, mean_action, te
             if t % num_steps_per_mode == 0:
                 if hasattr(env.env, 'mode'):
                     env.env.mode = mode_list[curr_mode_id]
-            if num_steps_per_mode - (t % num_steps_per_mode) == 100:
-                if hasattr(env.env, 'mode'):
-                    env.env.mode = 'rest'
+            #if num_steps_per_mode - (t % num_steps_per_mode) == 100:
+            #    if hasattr(env.env, 'mode'):
+            #        env.env.mode = 'rest'
             state_var = Variable(tensor(state).unsqueeze(0), volatile=True)
             if mean_action:
                 action = policy(state_var)[0].data[0].numpy()
@@ -247,10 +247,10 @@ class Agent:
                 env_base.mode = mode
 
             for n in range(num_steps_per_policy):
-                if num_steps_per_policy - n == 100:
-                    print('activated rest mode')
-                    if hasattr(env_base, 'mode'):
-                        env_base.mode = 'rest'
+                #if num_steps_per_policy - n == 100:
+                #    print('activated rest mode')
+                #    if hasattr(env_base, 'mode'):
+                #        env_base.mode = 'rest'
 
                 state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 if use_gpu:
@@ -261,7 +261,7 @@ class Agent:
                 else:
                     action = action.data[0].numpy()
                 next_state, reward, done, _ = env.step(action)
-                print(n, reward)
+                #print(n, reward)
                 if self.state_type == 'decayed_context':
                     next_state = np.concatenate((next_state,
                                      np.array([1/(n+1),
@@ -276,11 +276,12 @@ class Agent:
                 if self.render:
                     env.render()
                 if done:
-                    if i != len(self.mode_list) - 1 or n != num_steps_per_policy:
+                    if i != len(self.mode_list) - 1 or n != num_steps_per_policy - 1:
                         save_flag = False
                     break
 
-                expert_dict['state'].append(state)
+                expert_dict['state'].append(np.concatenate((state[:17], 
+                                     np.array([(n + i * num_steps_per_policy)/(N * num_steps_per_policy)])), axis=0))
                 expert_dict['action'].append(action)
                 expert_dict['goal'].append(0)
 
