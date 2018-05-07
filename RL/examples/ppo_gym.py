@@ -263,18 +263,18 @@ def gen_traj_loop():
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type,
                   num_steps_per_mode=args.num_steps_per_mode)
     
-    env_data_dict = {'num_goals': 5}
-    expert_data_dict = {}
+    env_data_dict = {'num_goals': 5, 'num_actions': 6}
+    expert_data_dict = {'env_data': env_data_dict, 'expert_traj': {}}
     i_iter = 0
     print('Writing to h5 file ...')
 
     while i_iter < n:
         #vid_folder = str(i_iter)
         vid_folder = None
-        path_key = str(i_iter) + '_2'
+        path_key = str(i_iter) + '_0'
         returned_dict, save_flag = agent.generate_mixed_expert_trajs(vid_folder=vid_folder)
         if save_flag:
-            expert_data_dict[path_key] = returned_dict
+            expert_data_dict['expert_traj'][path_key] = returned_dict
             i_iter += 1
             print(i_iter)
 
