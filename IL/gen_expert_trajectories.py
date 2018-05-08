@@ -108,6 +108,78 @@ def gen_L(grid_width, grid_height, path='L_expert_trajectories'):
 
     return env_data_dict, expert_data_dict, obstacles, set_diff
 
+def gen_LR(grid_width, grid_height, path='LR_expert_trajectories'):
+    ''' Generates trajectories of shape L, with right turn '''
+    t = 3
+    n = 2
+    num_traj = 50
+
+    obstacles = create_obstacles(grid_width, grid_height)
+    set_diff = list(set(product(tuple(range(3, grid_width-3)),
+                                tuple(range(3, grid_height-3)))) \
+                                        - set(obstacles))
+
+    T = TransitionFunction(grid_width, grid_height, obstacle_movement)
+    expert_data_dict = {}
+    # Number of goals is the same as number of actions
+    num_actions, num_goals = 4, 8
+    env_data_dict = {'num_actions': num_actions, 'num_goals': num_goals}
+
+    for i in range(num_traj):
+        start_state = State(sample_start(set_diff), obstacles)
+        # Decide wether making 'L' or 'R' traj 
+        for traj_direction in range(2):
+            for action_idx in range(num_actions):
+
+                path_key = str(i) + '_' + str(traj_direction) \
+                        + '_' + str(action_idx)
+                expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+
+                state = start_state
+
+                for j in range(n):
+                    # Set initial direction
+                    if j == 0:
+                        action = Action(action_idx)
+                    else:
+                        if traj_direction == 0:
+                            # Make R traj
+                            if action.delta == 0:
+                                action = Action(3)
+                            elif action.delta == 1:
+                                action = Action(2)
+                            elif action.delta == 2:
+                                action = Action(0)
+                            elif action.delta == 3:
+                                action = Action(1)
+                            else:
+                                raise ValueError("Invalid action delta {}".format(
+                                    action.delta))
+                        elif traj_direction == 1:
+                            # Make L traj
+                            if action.delta == 0:
+                                action = Action(2)
+                            elif action.delta == 1:
+                                action = Action(3)
+                            elif action.delta == 2:
+                                action = Action(1)
+                            elif action.delta == 3:
+                                action = Action(0)
+                            else:
+                                raise ValueError("Invalid action delta {}".format(
+                                    action.delta))
+
+
+                    for k in range(t):
+                        expert_data_dict[path_key]['state'].append(state.state)
+                        expert_data_dict[path_key]['action'].append(action.delta)
+                        expert_data_dict[path_key]['goal'].append(action.delta)
+                        state = T(state, action, j)
+        # print(expert_data_dict[path_key]['goal'])
+
+
+    return env_data_dict, expert_data_dict, obstacles, set_diff
+
 def gen_sq_rec(grid_width, grid_height, path='SR_expert_trajectories'):
     ''' Generates squares if starting in quadrants 1 and 4, and rectangles if
     starting in quadransts 2 and 3 '''
@@ -438,6 +510,9 @@ def main(args):
     if args.data_type == 'gen_L':
         env_data_dict, expert_data_dict, obstacles, set_diff = gen_L(
                 args.width, args.height, path=args.save_dir)
+    elif args.data_type == 'gen_LR':
+        env_data_dict, expert_data_dict, obstacles, set_diff = gen_LR(
+                args.width, args.height, path=args.save_dir)
     elif args.data_type == 'gen_square_rect':
         gen_sq_rec(args.width, args.height, path=args.save_dir)
     elif args.data_type == 'gen_square_rect_2':
@@ -472,6 +547,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser("Generate expert data")
     parser.add_argument('--data_type', type=str, default='gen_L',
                         choices=['gen_L',
+                                 'gen_LR', 
                                  'gen_square_rect',
                                  'gen_square_rect_2',
                                  'gen_diverse_trajs'],
