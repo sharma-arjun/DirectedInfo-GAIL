@@ -624,8 +624,11 @@ class VAETrain(object):
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[0]
-                self.env.reset()
+                dummy_state = self.env.reset()
+                print('reset: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
                 self.env.env.set_state(np.concatenate((np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+                dummy_state = x_feat
+                print('new set: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
 
             x = np.reshape(x_feat, (1, -1))
 
