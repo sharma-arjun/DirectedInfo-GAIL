@@ -59,10 +59,10 @@ class VAE(nn.Module):
         if use_goal_in_policy:
             self.policy_latent_size += posterior_goal_size
 
-        if args.discrete:
-            output_activation='sigmoid'
-        else:
-            output_activation=None
+        #if args.discrete:
+        #    output_activation='sigmoid'
+        #else:
+        output_activation=None
 
         self.policy = Policy(state_size=policy_state_size*self.history_size,
                              action_size=policy_action_size,
@@ -322,13 +322,16 @@ class VAETrain(object):
         th_epochs = 0.5*args.num_epochs
         #lambda_kld = max(0.1, 0.1 + (lambda_loss1 - 0.1) \
         #        * ((epoch - th_epochs)/(args.num_epochs-th_epochs)))
-        lambda_kld = 0.0001
+        lambda_kld = 0.00001
         lambda_loss2 = 10.0
 
         if args.discrete:
-            loss1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
+            #loss1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
+            _, label = torch.max(x, 1)
+            loss1 = F.cross_entropy(recon_x1, label)
             if self.args.use_separate_goal_policy:
-                loss2 = F.binary_cross_entropy(recon_x2, x, size_average=False)
+                #loss2 = F.binary_cross_entropy(recon_x2, x, size_average=False)
+                loss2 = F.cross_entropy(recon_x2, label)
         else:
             loss1 = F.mse_loss(recon_x1, x)
             if self.args.use_separate_goal_policy:
@@ -625,10 +628,11 @@ class VAETrain(object):
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[0]
                 dummy_state = self.env.reset()
-                print('reset: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
-                self.env.env.set_state(np.concatenate((np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+                #print('reset: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
+                self.env.env.set_state(
+                        np.concatenate((np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
                 dummy_state = x_feat
-                print('new set: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
+                #print('new set: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
 
             x = np.reshape(x_feat, (1, -1))
 
@@ -650,6 +654,8 @@ class VAETrain(object):
                     c_var = torch.cat([
                         final_goal,
                         Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
+
+                    vae_output = self.vae_model(x_var, c_var, final_goal)
                 else:
                     true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(
                         0).type(self.dtype))
@@ -657,11 +663,12 @@ class VAETrain(object):
                         true_goal,
                         Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
+                    vae_output = self.vae_model(x_var, c_var, true_goal)
+
                 print("{}".format(np.array_str(
                     c_var.data.cpu().numpy(), precision=3, max_line_width=120,
                     suppress_small=True)))
 
-                vae_output = self.vae_model(x_var, c_var, final_goal)
                 if self.args.use_discrete_vae:
                     # logits
                     vae_reparam_input = (vae_output[2], self.vae_model.temperature)
@@ -675,6 +682,10 @@ class VAETrain(object):
                 true_traj.append((ep_state[t], ep_action[t]))
                 pred_traj.append((curr_state_arr,
                                   pred_actions_numpy.reshape((-1))))
+
+                print("true A: {}".format(np.array_str(ep_action[t], precision=3, suppress_small=True, max_line_width=200)))
+                print("pred A: {}".format(np.array_str(pred_traj[-1][1], precision=3, suppress_small=True, max_line_width=200)))
+
                 if self.args.use_separate_goal_policy:
                     pred_actions_2_numpy = vae_output[1].data.cpu().numpy()
                     pred_traj_goal.append(
@@ -817,13 +828,17 @@ class VAETrain(object):
                             [final_goal,
                                 Variable(torch.from_numpy(c).type(self.dtype))],
                             dim=1)
+
+                    vae_output = self.vae_model(x_var, c_var, final_goal)
                 else:
                     c_var = torch.cat(
                             [true_goal,
                                 Variable(torch.from_numpy(c).type(self.dtype))],
                             dim=1)
 
-                vae_output = self.vae_model(x_var, c_var, final_goal)
+                    vae_output = self.vae_model(x_var, c_var, true_goal)
+
+
                 expert_action_var = action_var[t].clone().unsqueeze(0)
                 if self.args.use_discrete_vae:
                     vae_reparam_input = (vae_output[2],
@@ -1070,6 +1085,11 @@ def main(args):
         vae_train.test_models(expert, results_pkl_path=results_pkl_path,
                               num_test_samples=10)
     else:
+        if len(args.finetune_path) > 0:
+            vae_train.load_checkpoint(args.finetune_path)
+        assert os.path.dirname(os.path.realpath(args.finetune_path)) != \
+                os.path.dirname(os.path.realpath(args.results_dir)), \
+                "Do not save new results in finetune dir."
         vae_train.train(expert, args.num_epochs, args.batch_size)
 
 if __name__ == '__main__':
@@ -1155,6 +1175,8 @@ if __name__ == '__main__':
     # Checkpoint directory to load pre-trained models.
     parser.add_argument('--checkpoint_path', type=str, default='',
                         help='Checkpoint path to load pre-trained models.')
+    parser.add_argument('--finetune_path', type=str, default='',
+                        help='pre-trained models to finetune.')
 
     # Model arguments
     parser.add_argument('--stacked_lstm', type=int, choices=[0, 1], default=1,
