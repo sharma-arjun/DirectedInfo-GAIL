@@ -162,7 +162,7 @@ class DiscreteVAE(VAE):
     def encode(self, x, c):
         '''Return the log probability output for the encoder.'''
         logits = self.posterior(torch.cat((x, c), 1))
-        return logits 
+        return logits
 
     def sample_gumbel(self, shape, eps=1e-20):
         """Sample from Gumbel(0, 1)"""
@@ -184,7 +184,7 @@ class DiscreteVAE(VAE):
     def forward(self, x, c, g):
         c_logits = self.encode(x, c)
         if not self.training:
-            print('logits: {}'.format(np.array_str(c_logits.data.cpu().numpy(), 
+            print('logits: {}'.format(np.array_str(c_logits.data.cpu().numpy(),
                 precision=4, suppress_small=True, max_line_width=120)))
 
         c[:, -self.posterior_latent_size:] = self.reparameterize(
@@ -489,16 +489,15 @@ class VAETrain(object):
 
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
-            train_stats = self.train_variable_length_epoch(epoch,
-                                                           expert,
-                                                           batch_size)
+            train_stats = self.train_goal_policy(epoch, expert, batch_size)
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
             if epoch % 1 == 0:
                 results_pkl_path = os.path.join(self.args.results_dir,
                                                 'results.pkl')
-                self.test_models(expert, results_pkl_path=None)
+                self.test_models(expert, results_pkl_path=None,
+                                 test_goal_policy_only=True)
 
             if epoch % self.args.checkpoint_every_epoch == 0:
                 if self.dtype != torch.FloatTensor:
@@ -520,7 +519,8 @@ class VAETrain(object):
 
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
         self.test_models(expert, results_pkl_path=results_pkl_path,
-                         other_results_dict={'train_stats': final_train_stats})
+                         other_results_dict={'train_stats': final_train_stats},
+                         test_goal_policy_only=True)
 
     def train(self, expert, num_epochs, batch_size):
         final_train_stats = {
@@ -639,11 +639,18 @@ class VAETrain(object):
 
         return final_goal, pred_goal
 
-    def test_generate_trajectory_variable_length(self, expert,
-                                                 num_test_samples=10):
+    def test_generate_trajectory_variable_length(self,
+                                                 expert,
+                                                 num_test_samples=10,
+                                                 test_goal_policy_only=False):
         '''Test trajectory generation from VAE.
 
         Use expert trajectories for trajectory generation.
+
+        expert: Expert object.
+        num_test_samples: Number of trajectories to sample.
+        test_goal_policy_only: True if only testing trajectory reconstruction
+            from goal policy.
         '''
         self.vae_model.eval()
         if self.use_rnn_goal_predictor:
@@ -654,7 +661,7 @@ class VAETrain(object):
 
         results = {'true_goal': [], 'pred_goal': [],
                    'true_traj': [], 'pred_traj': [],
-                    'pred_traj_goal': []}
+                   'pred_traj_goal': []}
 
         # We need to sample expert trajectories to get (s, a) pairs which
         # are required for goal prediction.
@@ -681,10 +688,7 @@ class VAETrain(object):
             true_goal_numpy = np.zeros((self.num_goals))
             true_goal_numpy[int(ep_c[0])] = 1
 
-
             results['true_goal'].append(true_goal_numpy)
-
-            # Generate trajectories using VAE.
 
             # ep_action is tuple of arrays
             action_var = Variable(
@@ -700,11 +704,9 @@ class VAETrain(object):
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[0]
                 dummy_state = self.env.reset()
-                #print('reset: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
-                self.env.env.set_state(
-                        np.concatenate((np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+                self.env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
                 dummy_state = x_feat
-                #print('new set: {}'.format(np.array_str(dummy_state, precision=3, max_line_width=200)))
 
             x = np.reshape(x_feat, (1, -1))
 
@@ -723,27 +725,38 @@ class VAETrain(object):
                     x.reshape((1, -1))).type(self.dtype))
 
                 if self.use_rnn_goal_predictor:
-                    c_var = torch.cat([
-                        final_goal,
-                        Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
-
-                    vae_output = self.vae_model(x_var, c_var, final_goal)
+                    if test_goal_policy_only:
+                        c_var = None
+                    else:
+                        c_var = torch.cat([
+                            final_goal,
+                            Variable(torch.from_numpy(c).type(self.dtype))],
+                            dim=1)
                 else:
-                    true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(
-                        0).type(self.dtype))
+                    true_goal = Variable(torch.from_numpy(
+                        true_goal_numpy).unsqueeze(0).type(self.dtype))
                     c_var = torch.cat([
                         true_goal,
                         Variable(torch.from_numpy(c).type(self.dtype))], dim=1)
 
-                    vae_output = self.vae_model(x_var, c_var, true_goal)
+                if not test_goal_policy_only:
+                    print("c: {}".format(np.array_str(
+                        c_var.data.cpu().numpy(), precision=3, max_line_width=120,
+                        suppress_small=True)))
 
-                print("{}".format(np.array_str(
-                    c_var.data.cpu().numpy(), precision=3, max_line_width=120,
-                    suppress_small=True)))
+                vae_output = self.vae_model(
+                        x_var,
+                        c_var,
+                        final_goal,
+                        only_goal_policy=test_goal_policy_only)
 
-                if self.args.use_discrete_vae:
+                if test_goal_policy_only:
+                    # No reparametization happens when training goal policy only
+                    vae_reparam_input = None
+                elif self.args.use_discrete_vae:
                     # logits
-                    vae_reparam_input = (vae_output[2], self.vae_model.temperature)
+                    vae_reparam_input = (vae_output[2],
+                                         self.vae_model.temperature)
                 else:
                     # mu, logvar
                     vae_reparam_input = (vae_output[2], vae_output[3])
@@ -754,14 +767,13 @@ class VAETrain(object):
                 true_traj.append((ep_state[t], ep_action[t]))
                 pred_traj.append((curr_state_arr,
                                   pred_actions_numpy.reshape((-1))))
-
-                print("true A: {}".format(np.array_str(ep_action[t], precision=3, suppress_small=True, max_line_width=200)))
-                print("pred A: {}".format(np.array_str(pred_traj[-1][1], precision=3, suppress_small=True, max_line_width=200)))
-
-                if self.args.use_separate_goal_policy:
+                if (not test_goal_policy_only and
+                        self.args.use_separate_goal_policy):
                     pred_actions_2_numpy = vae_output[1].data.cpu().numpy()
                     pred_traj_goal.append(
                             (curr_state_arr, pred_actions_2_numpy.reshape((-1))))
+
+                # Add history
                 if history_size > 1:
                     x[:, :(history_size-1), :] = x[:,1:, :]
 
@@ -781,14 +793,9 @@ class VAETrain(object):
                     else:
                         x[:] = next_state_features
 
-                    # update c
-                    c[:, -self.vae_model.posterior_latent_size:] = \
-                        self.vae_model.reparameterize(*vae_reparam_input).data.cpu()
-
                     # Update current state
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
-
                 elif self.env_type == 'mujoco':
                     action = pred_actions_numpy[0, :]
                     next_state, _, done, _ = self.env.step(action)
@@ -806,6 +813,12 @@ class VAETrain(object):
 
                     # Update current state
                     curr_state_arr = next_state
+
+                # update c
+                if not test_goal_policy_only:
+                    c[:, -self.vae_model.posterior_latent_size:] = \
+                            self.vae_model.reparameterize(
+                                    *vae_reparam_input).data.cpu()
 
             results['true_traj'].append(np.array(true_traj))
             results['pred_traj'].append(np.array(pred_traj))
@@ -832,7 +845,7 @@ class VAETrain(object):
             train_loss, train_goal_policy_loss = 0.0, 0.0
             ep_timesteps = 0
             batch = expert.sample(batch_size)
-            
+
             # vae_opt only optimizes goal model here.
             self.vae_opt.zero_grad()
             self.Q_model_opt.zero_grad()
@@ -917,8 +930,8 @@ class VAETrain(object):
                         x[:, history_size-1] = self.get_state_features(
                                 next_state, self.args.use_state_features)
                     else:
-                        x[:] = self.get_state_features(next_state,
-                                                       self.args.use_state_features)
+                        x[:] = self.get_state_features(
+                                next_state, self.args.use_state_features)
                     # Update current state
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
@@ -1060,7 +1073,8 @@ class VAETrain(object):
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[0]
                 self.env.reset()
-                self.env.env.set_state(np.concatenate((np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+                self.env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
 
             x = np.reshape(x_feat, (1, -1))
 
@@ -1133,8 +1147,8 @@ class VAETrain(object):
                         x[:, history_size-1] = self.get_state_features(
                                 next_state, self.args.use_state_features)
                     else:
-                        x[:] = self.get_state_features(next_state,
-                                                       self.args.use_state_features)
+                        x[:] = self.get_state_features(
+                                next_state, self.args.use_state_features)
                     # Update current state
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
@@ -1145,7 +1159,9 @@ class VAETrain(object):
                     if done:
                         break
 
-                    next_state = np.concatenate((next_state, np.array([(t+1)/(episode_len+1)])), axis=0)
+                    next_state = np.concatenate((
+                        next_state,
+                        np.array([(t+1)/(episode_len+1)])), axis=0)
 
                     if history_size > 1:
                         x[:, history_size-1] = next_state
@@ -1199,7 +1215,8 @@ class VAETrain(object):
                           'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t '\
                           'KLD: {:.2f}, \t Timesteps: {}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_policy_loss, train_policy2_loss, train_KLD_loss, ep_timesteps))
+                        train_policy_loss, train_policy2_loss, train_KLD_loss,
+                        ep_timesteps))
                 else:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
                             'Policy Loss: {:.2f}, \t KLD: {:.2f}, \t ' \
@@ -1265,10 +1282,13 @@ class VAETrain(object):
         return results
 
     def test_models(self, expert, results_pkl_path=None,
-                    other_results_dict=None, num_test_samples=100):
+                    other_results_dict=None, num_test_samples=100,
+                    test_goal_policy_only=False):
         '''Test models by generating expert trajectories.'''
         results = self.test_generate_trajectory_variable_length(
-                expert, num_test_samples=num_test_samples)
+                expert,
+                num_test_samples=num_test_samples,
+                test_goal_policy_only=test_goal_policy_only)
 
         if self.use_rnn_goal_predictor:
             goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
@@ -1344,7 +1364,7 @@ def main(args):
                 'use_rnn_goal flag needs to be set for Goal prediction policy'
         assert args.use_separate_goal_policy == 1, \
                 'use_separate_goal_policy flag should be set for goal prediction'
-        vae_train.train_goal_pred(expert, args.num_epochs, args.batch_size)
+        vae_train.train_goal_pred_only(expert, args.num_epochs, args.batch_size)
     elif args.run_mode == 'train':
         if len(args.finetune_path) > 0:
             vae_train.load_checkpoint(args.finetune_path)
