@@ -293,7 +293,7 @@ class VAETrain(object):
                     lr=1e-3)
             else:
                 self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
-        elif args.run_mode == 'train_goal_pred_only':
+        elif args.run_mode == 'train_goal_pred':
             self.vae_opt = optim.Adam(self.vae_model.policy_goal.parameters(),
                                       lr=1e-3)
             self.Q_model_opt = optim.Adam([
@@ -301,7 +301,11 @@ class VAETrain(object):
                 {'params': self.Q_2_model.parameters()},
                 {'params': self.Q_model_linear.parameters()}],
                 lr=1e-3)
-
+        elif args.run_mode == 'test':
+            pass
+        else:
+            raise ValueError('Incorrect value for run_mode {}'.format(
+                args.run_mode))
         self.create_environment(env_type, env_name)
         self.expert = None
         self.obstacles, self.set_diff = None, None
@@ -340,7 +344,7 @@ class VAETrain(object):
 
 
     def loss_function_using_goal(self, recon_using_goal, x, epoch):
-        loss = F.mse_loss(recon_x2, x)
+        loss = F.mse_loss(recon_using_goal, x)
         return loss
 
     # Reconstruction + KL divergence losses summed over all elements and batch
@@ -391,19 +395,33 @@ class VAETrain(object):
         else:
             return lambda_loss1*loss1 + lambda_kld*KLD, loss1, None, KLD
 
-    def log_model_to_tensorboard(self):
-        vae_model_l2_norm, vae_model_grad_l2_norm = \
-            get_weight_norm_for_network(self.vae_model.policy)
-        self.logger.summary_writer.add_scalar(
-                        'weight/policy',
-                         vae_model_l2_norm,
-                         self.train_step_count)
-        self.logger.summary_writer.add_scalar(
-                        'grad/policy',
-                         vae_model_grad_l2_norm,
-                         self.train_step_count)
+    def log_model_to_tensorboard(
+            self, 
+            models_to_log=(
+                'vae_policy',
+                'goal_policy',
+                'vae_posterior',
+                'Q_model_linear',
+                'Q_model',
+                )):
+        '''Log weights and gradients of network to Tensorboard.
 
-        if self.vae_model.policy_goal:
+        models_to_log: Tuple of model names to log to tensorboard.
+        '''
+        if 'vae_policy' in models_to_log:
+            vae_model_l2_norm, vae_model_grad_l2_norm = \
+                get_weight_norm_for_network(self.vae_model.policy)
+            self.logger.summary_writer.add_scalar(
+                            'weight/policy',
+                             vae_model_l2_norm,
+                             self.train_step_count)
+            self.logger.summary_writer.add_scalar(
+                            'grad/policy',
+                             vae_model_grad_l2_norm,
+                             self.train_step_count)
+
+        if self.vae_model.policy_goal is not None and \
+                'goal_policy' in models_to_log:
             vae_model_l2_norm, vae_model_grad_l2_norm = \
                             get_weight_norm_for_network(self.vae_model.policy_goal)
             self.logger.summary_writer.add_scalar(
@@ -415,21 +433,34 @@ class VAETrain(object):
                              vae_model_grad_l2_norm,
                              self.train_step_count)
 
-        vae_model_l2_norm, vae_model_grad_l2_norm = \
-                        get_weight_norm_for_network(self.vae_model.posterior)
-        self.logger.summary_writer.add_scalar(
-                        'weight/posterior',
-                         vae_model_l2_norm,
-                         self.train_step_count)
-        self.logger.summary_writer.add_scalar(
-                        'grad/posterior',
-                         vae_model_grad_l2_norm,
-                         self.train_step_count)
+        if 'vae_posterior' in models_to_log:
+            vae_model_l2_norm, vae_model_grad_l2_norm = \
+                            get_weight_norm_for_network(self.vae_model.posterior)
+            self.logger.summary_writer.add_scalar(
+                            'weight/posterior',
+                             vae_model_l2_norm,
+                             self.train_step_count)
+            self.logger.summary_writer.add_scalar(
+                            'grad/posterior',
+                             vae_model_grad_l2_norm,
+                             self.train_step_count)
 
 
-        if self.use_rnn_goal_predictor:
+        if self.use_rnn_goal_predictor and 'Q_model_linear' in models_to_log:
             Q_model_l2_norm, Q_model_l2_grad_norm = \
                             get_weight_norm_for_network(self.Q_model_linear)
+            self.logger.summary_writer.add_scalar(
+                            'weight/Q_model_linear_l2',
+                             Q_model_l2_norm,
+                             self.train_step_count)
+            self.logger.summary_writer.add_scalar(
+                            'grad/Q_model_linear_l2',
+                             Q_model_l2_grad_norm,
+                             self.train_step_count)
+
+        if self.use_rnn_goal_predictor and 'Q_model' in models_to_log:
+            Q_model_l2_norm, Q_model_l2_grad_norm = \
+                            get_weight_norm_for_network(self.Q_model)
             self.logger.summary_writer.add_scalar(
                             'weight/Q_model_l2',
                              Q_model_l2_norm,
@@ -969,7 +1000,12 @@ class VAETrain(object):
 
             # Get the gradients and network weights
             if self.args.log_gradients_tensorboard:
-                self.log_model_to_tensorboard()
+                self.log_model_to_tensorboard(
+                        models_to_log=(
+                            'goal_policy',
+                            'Q_model_linear',
+                            'Q_model',
+                        ))
 
             self.vae_opt.step()
             self.Q_model_opt.step()
@@ -981,12 +1017,6 @@ class VAETrain(object):
             self.logger.summary_writer.add_scalar('loss/per_sample',
                                                    train_loss,
                                                    self.train_step_count)
-            if self.args.use_separate_goal_policy:
-                self.logger.summary_writer.add_scalar(
-                        'loss/policy2_loss_per_sample',
-                        train_policy2_loss,
-                        self.train_step_count)
-
 
             if batch_idx % self.args.log_interval == 0:
                 if self.args.use_separate_goal_policy:
@@ -1414,7 +1444,7 @@ if __name__ == '__main__':
                         choices=[0, 1],
                         help='Give goal to policy network.')
 
-    parser.add_argument('--use_separate_goal_policy', type=int, default=0,
+    parser.add_argument('--use_separate_goal_policy', type=int, default=1,
                         choices=[0, 1],
                         help='Use another decoder with goal input.')
 
