@@ -1083,7 +1083,7 @@ def main(args):
         # Replace pth file extension with pkl
         results_pkl_path = results_pkl_path[:-4] + '.pkl'
         vae_train.test_models(expert, results_pkl_path=results_pkl_path,
-                              num_test_samples=10)
+                              num_test_samples=30)
     else:
         if len(args.finetune_path) > 0:
             vae_train.load_checkpoint(args.finetune_path)
