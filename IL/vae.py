@@ -500,6 +500,24 @@ class VAETrain(object):
             feat = np.array(state_obj.coordinates, dtype=np.float32)
         return feat
 
+    def get_history_features(self, state, use_velocity):
+        if use_velocity:
+            _, history_size, state_size = state.shape
+            new_state = np.zeros(state.shape)
+
+            for t in range(history_size-1):
+                if state[:, t, 0] == -1.0:
+                    new_state[:, t, :] = 0.0
+                else:
+                    new_state[:, t, :] = state[:, t+1,:] - state[:, t,:]
+
+            new_state[:,history_size-1,:] = state[:, history_size-1,:]
+
+            return new_state
+
+        else:
+            return state
+
     def get_context_at_state(self, x, c):
         '''Get context variable c_t for given x_t, c_{t-1}.
 
@@ -707,7 +725,8 @@ class VAETrain(object):
 
         results = {'true_goal': [], 'pred_goal': [],
                    'true_traj': [], 'pred_traj': [],
-                   'pred_traj_goal': []}
+                    'pred_traj_goal': [],
+                    'pred_context': []}
 
         # We need to sample expert trajectories to get (s, a) pairs which
         # are required for goal prediction.
@@ -758,11 +777,14 @@ class VAETrain(object):
 
             # Add history to state
             if history_size > 1:
-                x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
+                x_hist = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                  dtype=np.float32)
-                x[:, history_size - 1, :] = x_feat
+                x_hist[:, history_size - 1, :] = x_feat
 
-            true_traj, pred_traj, pred_traj_goal = [], [], []
+                x = self.get_history_features(x_hist, self.args.use_velocity_features)
+
+            true_traj, pred_traj = [], []
+            pred_traj_goal, pred_context = [], []
             curr_state_arr = ep_state[0]
 
             # Store list of losses to backprop later.
@@ -814,6 +836,9 @@ class VAETrain(object):
                     # mu, logvar
                     vae_reparam_input = (vae_output[2], vae_output[3])
 
+                # store latent variables (logits or mu)
+                pred_context.append(vae_output[2].data.numpy())
+
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
 
                 # Store the "true" state
@@ -828,7 +853,7 @@ class VAETrain(object):
 
                 # Add history
                 if history_size > 1:
-                    x[:, :(history_size-1), :] = x[:,1:, :]
+                    x_hist[:, :(history_size-1), :] = x_hist[:,1:, :]
 
                 if self.env_type == 'grid':
                     # Get next state from action
@@ -841,8 +866,10 @@ class VAETrain(object):
                     # Update x
                     next_state_features = self.get_state_features(
                             next_state, self.args.use_state_features)
+
                     if history_size > 1:
-                        x[:, history_size - 1, :] = next_state_features
+                        x_hist[:, history_size - 1, :] = next_state_features
+                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
                     else:
                         x[:] = next_state_features
 
@@ -860,7 +887,8 @@ class VAETrain(object):
                                 np.array([(t+1)/(episode_len+1)])), axis=0)
 
                     if history_size > 1:
-                        x[:, history_size - 1, :] = next_state
+                        x_hist[:, history_size - 1, :] = next_state
+                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
                     else:
                         x[:] = next_state
 
@@ -873,7 +901,7 @@ class VAETrain(object):
                             self.vae_model.reparameterize(
                                     *vae_reparam_input).data.cpu()
 
-            '''
+	    '''
             ===== Print predicted trajectories while debugging ====
             def get_traj_from_tuple(x):
                 traj = []
@@ -888,6 +916,7 @@ class VAETrain(object):
             results['true_traj'].append(np.array(true_traj))
             results['pred_traj'].append(np.array(pred_traj))
             results['pred_traj_goal'].append(np.array(pred_traj_goal))
+            results['pred_context'].append(np.array(pred_context))
 
         return results
 
@@ -1147,9 +1176,10 @@ class VAETrain(object):
 
             # Add history to state
             if history_size > 1:
-                x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
+                x_hist = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                  dtype=np.float32)
-                x[:, history_size - 1, :] = x_feat
+                x_hist[:, history_size - 1, :] = x_feat
+                x = self.get_history_features(x_hist, self.args.use_velocity_features)
 
             # Store list of losses to backprop later.
             ep_loss, curr_state_arr = [], ep_state[0]
@@ -1200,7 +1230,7 @@ class VAETrain(object):
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
 
                 if history_size > 1:
-                    x[:,:(history_size-1),:] = x[:,1:,:]
+                    x_hist[:,:(history_size-1),:] = x_hist[:,1:,:]
 
                 if self.env_type == 'grid':
                     # Get next state from action
@@ -1211,8 +1241,9 @@ class VAETrain(object):
                     next_state = self.transition_func(state, action, 0)
 
                     if history_size > 1:
-                        x[:, history_size-1] = self.get_state_features(
+                        x_hist[:, history_size-1] = self.get_state_features(
                                 next_state, self.args.use_state_features)
+                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
                     else:
                         x[:] = self.get_state_features(
                                 next_state, self.args.use_state_features)
@@ -1231,11 +1262,14 @@ class VAETrain(object):
                         np.array([(t+1)/(episode_len+1)])), axis=0)
 
                     if history_size > 1:
-                        x[:, history_size-1] = next_state
+                        x_hist[:, history_size-1] = next_state
+                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
                     else:
                         x[:] = next_state
 
                     curr_state_arr = next_state
+
+
 
                 # update c
                 c[:, -self.vae_model.posterior_latent_size:] = \
@@ -1524,6 +1558,16 @@ if __name__ == '__main__':
                         help='Do not use features instead of direct (x,y) ' \
                               'values in VAE')
     parser.set_defaults(use_state_features=False)
+
+    # Use velocity in history
+    parser.add_argument('--use_velocity_features', dest='use_velocity_features',
+                        action='store_true',
+                        help='Use velocity instead of direct (x,y) history values in VAE')
+    parser.add_argument('--no-use_velocity_features', dest='use_velocity_features',
+                        action='store_false',
+                        help='Do not use velocity instead of direct (x,y) history' \
+                              'values in VAE')
+    parser.set_defaults(use_velocity_features=False)
 
     # Logging flags
     parser.add_argument('--log_gradients_tensorboard',
