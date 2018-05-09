@@ -345,7 +345,8 @@ class VAETrain(object):
 
     def loss_function_using_goal(self, recon_using_goal, x, epoch):
         if self.args.discrete_action:
-            loss = F.cross_entropy(recon_using_goal, x)
+            _, label = torch.max(x, 1)
+            loss = F.cross_entropy(recon_using_goal, label)
         else:
             loss = F.mse_loss(recon_using_goal, x)
         return loss
