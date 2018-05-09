@@ -101,11 +101,8 @@ class VAE(nn.Module):
 
 
     def decode_goal_policy(self, x, g):
-        action_mean, action_log_std, action_std = self.policy_goal(
-                torch.cat((x, g), 1))
-
+        action_mean, _, _ = self.policy_goal(torch.cat((x, g), 1))
         return action_mean
-
 
     def decode(self, x, c):
         action_mean, action_log_std, action_std = self.policy(
@@ -295,7 +292,7 @@ class VAETrain(object):
                 self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
         elif args.run_mode == 'train_goal_pred':
             self.vae_opt = optim.Adam(self.vae_model.policy_goal.parameters(),
-                                      lr=1e-3)
+                                      lr=3e-3)
             self.Q_model_opt = optim.Adam([
                 {'params': self.Q_model.parameters()},
                 {'params': self.Q_2_model.parameters()},
@@ -493,8 +490,7 @@ class VAETrain(object):
         checkpoint_models = torch.load(checkpoint_path)
         self.vae_model.policy_goal = checkpoint_models['goal_mlp']
         self.Q_model = checkpoint_models['Q_model']
-        if checkpoint_models.get('Q_2_model') is not None:
-            self.Q_2_model = checkpoint_models['Q_2_model']
+        self.Q_2_model = checkpoint_models['Q_2_model']
         self.Q_model_linear = checkpoint_models['Q_model_linear']
 
     def get_state_features(self, state_obj, use_state_features):
@@ -556,6 +552,7 @@ class VAETrain(object):
                 model_data = {
                     'goal_mlp': self.vae_model.policy_goal,
                     'Q_model': self.Q_model,
+                    'Q_2_model': self.Q_2_model,
                     'Q_model_linear': self.Q_model_linear,
                 }
 
@@ -1014,6 +1011,7 @@ class VAETrain(object):
 
                     curr_state_arr = next_state
 
+            # print('loss: {}'.format([x.data[0] for x in ep_loss]))
             # Calculate the total loss and backprop.
             total_loss = ep_loss[0]
             for t in range(1, len(ep_loss)):
@@ -1036,6 +1034,10 @@ class VAETrain(object):
             total_epoch_loss += train_loss
             total_epoch_per_step_loss += (train_loss / episode_len)
             train_stats['train_loss'].append(train_loss)
+            if len(train_stats['train_loss']) > 10 and \
+                    np.sum(train_stats['train_loss'][-10:]) < 4.0:
+                pdb.set_trace()
+
             self.logger.summary_writer.add_scalar('loss/per_sample',
                                                    train_loss,
                                                    self.train_step_count)
@@ -1431,13 +1433,18 @@ def main(args):
                 'use_rnn_goal flag needs to be set for Goal prediction policy'
         assert args.use_separate_goal_policy == 1, \
                 'use_separate_goal_policy flag should be set for goal prediction'
+        if len(args.finetune_path) > 0:
+            vae_train.load_checkpoint_goal_policy(args.finetune_path)
+            assert os.path.dirname(os.path.realpath(args.finetune_path)) != \
+                    os.path.dirname(os.path.realpath(args.results_dir)), \
+                    "Do not save new results in finetune dir."
         vae_train.train_goal_pred_only(expert, args.num_epochs, args.batch_size)
     elif args.run_mode == 'train':
         if len(args.finetune_path) > 0:
             vae_train.load_checkpoint(args.finetune_path)
-        assert os.path.dirname(os.path.realpath(args.finetune_path)) != \
-                os.path.dirname(os.path.realpath(args.results_dir)), \
-                "Do not save new results in finetune dir."
+            assert os.path.dirname(os.path.realpath(args.finetune_path)) != \
+                    os.path.dirname(os.path.realpath(args.results_dir)), \
+                    "Do not save new results in finetune dir."
         vae_train.train(expert, args.num_epochs, args.batch_size)
     else:
         raise ValueError('Incorrect mode to run in.')
