@@ -292,7 +292,7 @@ class VAETrain(object):
                 self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
         elif args.run_mode == 'train_goal_pred':
             self.vae_opt = optim.Adam(self.vae_model.policy_goal.parameters(),
-                                      lr=3e-3)
+                                      lr=1e-3)
             self.Q_model_opt = optim.Adam([
                 {'params': self.Q_model.parameters()},
                 {'params': self.Q_2_model.parameters()},
@@ -790,11 +790,18 @@ class VAETrain(object):
                         c_var.data.cpu().numpy(), precision=3, max_line_width=120,
                         suppress_small=True)))
 
-                vae_output = self.vae_model(
-                        x_var,
-                        c_var,
-                        final_goal,
-                        only_goal_policy=test_goal_policy_only)
+                if self.args.use_rnn_goal:
+                    vae_output = self.vae_model(
+                            x_var,
+                            c_var,
+                            final_goal,
+                            only_goal_policy=test_goal_policy_only)
+                else:
+                    vae_output = self.vae_model(
+                            x_var,
+                            c_var,
+                            true_goal,
+                            only_goal_policy=test_goal_policy_only)
 
                 if test_goal_policy_only:
                     # No reparametization happens when training goal policy only
@@ -1429,8 +1436,6 @@ def main(args):
                               num_test_samples=50,
                               test_goal_policy_only=test_goal_policy_only)
     elif args.run_mode == 'train_goal_pred':
-        assert args.use_rnn_goal == 1, \
-                'use_rnn_goal flag needs to be set for Goal prediction policy'
         assert args.use_separate_goal_policy == 1, \
                 'use_separate_goal_policy flag should be set for goal prediction'
         if len(args.finetune_path) > 0:
