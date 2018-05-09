@@ -1021,14 +1021,12 @@ class VAETrain(object):
             if batch_idx % self.args.log_interval == 0:
                 if self.args.use_separate_goal_policy:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
-                          'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t '\
-                          'KLD: {:.2f}, \t Timesteps: {}'.format(
+                          'Timesteps: {}'.format(
                         epoch, batch_idx, num_batches, train_loss,
                         ep_timesteps))
                 else:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
-                            'Policy Loss: {:.2f}, \t KLD: {:.2f}, \t ' \
-                            'Timesteps: {}'.format(
+                          'Timesteps: {}'.format(
                         epoch, batch_idx, num_batches, train_loss,
                         ep_timesteps))
 
