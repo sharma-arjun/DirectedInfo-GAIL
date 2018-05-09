@@ -344,7 +344,10 @@ class VAETrain(object):
 
 
     def loss_function_using_goal(self, recon_using_goal, x, epoch):
-        loss = F.mse_loss(recon_using_goal, x)
+        if self.args.discrete_action:
+            loss = F.cross_entropy(recon_using_goal, x)
+        else:
+            loss = F.mse_loss(recon_using_goal, x)
         return loss
 
     # Reconstruction + KL divergence losses summed over all elements and batch
@@ -356,18 +359,15 @@ class VAETrain(object):
         lambda_kld = 0.00001
         lambda_loss2 = 10.0
 
-        if args.discrete:
-            #loss1 = F.binary_cross_entropy(recon_x1, x, size_average=False)
+        if self.args.discrete_action:
             _, label = torch.max(x, 1)
             loss1 = F.cross_entropy(recon_x1, label)
             if self.args.use_separate_goal_policy:
-                #loss2 = F.binary_cross_entropy(recon_x2, x, size_average=False)
                 loss2 = F.cross_entropy(recon_x2, label)
         else:
             loss1 = F.mse_loss(recon_x1, x)
             if self.args.use_separate_goal_policy:
                 loss2 = F.mse_loss(recon_x2, x)
-        #MSE = F.mse_loss(recon_x, x)
 
         if self.args.use_discrete_vae:
             # logits is the un-normalized log probability for belonging to a class
@@ -1505,11 +1505,13 @@ if __name__ == '__main__':
                         help='Use stacked LSTM for Q network.')
 
     # Action - discrete or continuous
-    parser.add_argument('--discrete', dest='discrete', action='store_true',
+    parser.add_argument('--discrete_action', dest='discrete_action',
+                        action='store_true',
                         help='actions are discrete, use BCE loss')
-    parser.add_argument('--continuous', dest='discrete', action='store_false',
+    parser.add_argument('--continuous_action', dest='discrete_action',
+                        action='store_false',
                         help='actions are continuous, use MSE loss')
-    parser.set_defaults(discrete=False)
+    parser.set_defaults(discrete_action=False)
 
     # Environment - Grid or Mujoco
     parser.add_argument('--env-type', default='grid', choices=['grid', 'mujoco'],
