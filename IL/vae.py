@@ -116,7 +116,9 @@ class VAE(nn.Module):
     def forward(self, x, c, g, only_goal_policy=False):
         if only_goal_policy:
             decoder_output_2 = self.decode_goal_policy(x, g)
-            return decoder_output_2
+            # Return a tuple as the else part below. Caller should expect a 
+            # tuple always.
+            return decoder_output_2,
         else:
             mu, logvar = self.encode(x, c)
             c[:,-self.posterior_latent_size:] = self.reparameterize(mu, logvar)
@@ -182,6 +184,12 @@ class DiscreteVAE(VAE):
         return probs
 
     def forward(self, x, c, g):
+        if only_goal_policy:
+            decoder_output_2 = self.decode_goal_policy(x, g)
+            # Return a tuple as the else part below. Caller should expect a 
+            # tuple always.
+            return decoder_output_2,
+
         c_logits = self.encode(x, c)
         if not self.training:
             print('logits: {}'.format(np.array_str(c_logits.data.cpu().numpy(),
@@ -906,14 +914,14 @@ class VAETrain(object):
                 expert_action_var = action_var[t].clone().unsqueeze(0)
 
                 loss = self.loss_function_using_goal(
-                        vae_output,
+                        vae_output[0],
                         expert_action_var,
                         epoch)
 
                 ep_loss.append(loss)
                 train_loss += loss.data[0]
 
-                pred_actions_numpy = vae_output.data.cpu().numpy()
+                pred_actions_numpy = vae_output[0].data.cpu().numpy()
 
                 if history_size > 1:
                     x[:,:(history_size-1),:] = x[:,1:,:]
