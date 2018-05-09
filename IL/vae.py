@@ -116,7 +116,7 @@ class VAE(nn.Module):
     def forward(self, x, c, g, only_goal_policy=False):
         if only_goal_policy:
             decoder_output_2 = self.decode_goal_policy(x, g)
-            # Return a tuple as the else part below. Caller should expect a 
+            # Return a tuple as the else part below. Caller should expect a
             # tuple always.
             return decoder_output_2,
         else:
@@ -186,7 +186,7 @@ class DiscreteVAE(VAE):
     def forward(self, x, c, g):
         if only_goal_policy:
             decoder_output_2 = self.decode_goal_policy(x, g)
-            # Return a tuple as the else part below. Caller should expect a 
+            # Return a tuple as the else part below. Caller should expect a
             # tuple always.
             return decoder_output_2,
 
@@ -301,7 +301,7 @@ class VAETrain(object):
                 {'params': self.Q_2_model.parameters()},
                 {'params': self.Q_model_linear.parameters()}],
                 lr=1e-3)
-        elif args.run_mode == 'test':
+        elif args.run_mode == 'test' or args.run_mode == 'test_goal_pred':
             pass
         else:
             raise ValueError('Incorrect value for run_mode {}'.format(
@@ -397,7 +397,7 @@ class VAETrain(object):
             return lambda_loss1*loss1 + lambda_kld*KLD, loss1, None, KLD
 
     def log_model_to_tensorboard(
-            self, 
+            self,
             models_to_log=(
                 'vae_policy',
                 'goal_policy',
@@ -483,6 +483,15 @@ class VAETrain(object):
         '''Load models from checkpoint.'''
         checkpoint_models = torch.load(checkpoint_path)
         self.vae_model = checkpoint_models['vae_model']
+        self.Q_model = checkpoint_models['Q_model']
+        if checkpoint_models.get('Q_2_model') is not None:
+            self.Q_2_model = checkpoint_models['Q_2_model']
+        self.Q_model_linear = checkpoint_models['Q_model_linear']
+
+    def load_checkpoint_goal_policy(self, checkpoint_path):
+        '''Load models from checkpoint.'''
+        checkpoint_models = torch.load(checkpoint_path)
+        self.vae_model.policy_goal = checkpoint_models['goal_mlp']
         self.Q_model = checkpoint_models['Q_model']
         if checkpoint_models.get('Q_2_model') is not None:
             self.Q_2_model = checkpoint_models['Q_2_model']
@@ -859,6 +868,18 @@ class VAETrain(object):
                     c[:, -self.vae_model.posterior_latent_size:] = \
                             self.vae_model.reparameterize(
                                     *vae_reparam_input).data.cpu()
+
+            '''
+            ===== Print predicted trajectories while debugging ====
+            def get_traj_from_tuple(x):
+                traj = []
+                for i in x:
+                    traj.append((i[0][0], i[0][1]))
+                return traj
+
+            print('True: {}'.format(get_traj_from_tuple(true_traj)))
+            print('Pred: {}'.format(get_traj_from_tuple(pred_traj)))
+            '''
 
             results['true_traj'].append(np.array(true_traj))
             results['pred_traj'].append(np.array(pred_traj))
@@ -1384,18 +1405,27 @@ def main(args):
     # expert = Expert(args.expert_path, 2)
     # expert.push()
 
-    if args.run_mode == 'test':
+    if args.run_mode == 'test' or args.run_mode == 'test_goal_pred':
         assert len(args.checkpoint_path) > 0, \
                 'No checkpoint provided for testing'
-        vae_train.load_checkpoint(args.checkpoint_path)
+        if args.run_mode == 'test_goal_pred':
+            vae_train.load_checkpoint_goal_policy(args.checkpoint_path)
+        elif args.run_mode == 'test':
+            vae_train.load_checkpoint(args.checkpoint_path)
+        else:
+            raise ValueError('Incorrect run_mode: {}'.format(args.run_mode))
+
         print("Did load models at: {}".format(args.checkpoint_path))
         results_pkl_path = os.path.join(
             args.results_dir,
             'results_' + os.path.basename(args.checkpoint_path))
         # Replace pth file extension with pkl
         results_pkl_path = results_pkl_path[:-4] + '.pkl'
+        test_goal_policy_only = True if args.run_mode == 'test_goal_pred' else \
+                False
         vae_train.test_models(expert, results_pkl_path=results_pkl_path,
-                              num_test_samples=30)
+                              num_test_samples=50,
+                              test_goal_policy_only=test_goal_policy_only)
     elif args.run_mode == 'train_goal_pred':
         assert args.use_rnn_goal == 1, \
                 'use_rnn_goal flag needs to be set for Goal prediction policy'
@@ -1522,7 +1552,8 @@ if __name__ == '__main__':
 
     # Mode to run algorithm
     parser.add_argument('--run_mode', type=str, default='train',
-                        choices=['train', 'test', 'train_goal_pred'],
+                        choices=['train', 'test',
+                                 'train_goal_pred', 'test_goal_pred'],
                         help='Mode to run in.')
 
     args = parser.parse_args()
