@@ -270,7 +270,6 @@ class VAETrain(object):
 
         # Output of linear model num_goals = 4
         self.Q_model_linear = nn.Linear(64, num_goals)
-        self.Q_model_linear_softmax = nn.Softmax(dim=1)
 
         # action_size is 0
         # Hack -- VAE input dim (s + a + latent).
@@ -717,14 +716,12 @@ class VAETrain(object):
                 raise ValueError("Invalid goal pred flag {}".format(
                     self.args.flag_goal_pred))
 
-            # pred_goal.append(Q_model_linear_softmax(output))
             pred_goal.append(output)
 
         if self.args.flag_goal_pred == 'sum_all_hidden':
-            final_goal = self.Q_model_linear_softmax(final_goal / episode_len)
+            final_goal = F.softmax(final_goal / episode_len, dim=1)
         elif self.args.flag_goal_pred == 'last_hidden':
-            final_goal = self.Q_model_linear_softmax(self.Q_model_linear(
-                final_goal))
+            final_goal = F.softmax(self.Q_model_linear(final_goal), dim=1)
         else:
             raise ValueError("Invalid goal pred flag {}".format(
                     self.args.flag_goal_pred))
