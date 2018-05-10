@@ -130,7 +130,7 @@ def gen_LR(grid_width, grid_height, path='LR_expert_trajectories'):
         # Decide wether making 'L' or 'R' traj 
         for traj_direction in range(2):
             for action_idx in range(num_actions):
-
+                goal = (traj_direction * num_actions) + action_idx
                 path_key = str(i) + '_' + str(traj_direction) \
                         + '_' + str(action_idx)
                 expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
@@ -173,10 +173,9 @@ def gen_LR(grid_width, grid_height, path='LR_expert_trajectories'):
                     for k in range(t):
                         expert_data_dict[path_key]['state'].append(state.state)
                         expert_data_dict[path_key]['action'].append(action.delta)
-                        expert_data_dict[path_key]['goal'].append(action.delta)
+                        expert_data_dict[path_key]['goal'].append(goal)
                         state = T(state, action, j)
         # print(expert_data_dict[path_key]['goal'])
-
 
     return env_data_dict, expert_data_dict, obstacles, set_diff
 
