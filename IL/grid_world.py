@@ -43,52 +43,89 @@ def obstacle_movement(t):
 def sample_start(set_diff):
   return random.choice(set_diff)
 
-class State():
-  def __init__(self, coordinates, list_of_obstacles,
-               feat_type='view', view_size=3):
-    #coordinates - tuple, list_of_obstacles - list of tuples
-    assert(len(coordinates) == 2)
-    self.coordinates = coordinates
-    self.n_obs = 0
-    for obs in list_of_obstacles:
-      assert len(obs) == 2, 'Incorrect observation length {}'.format(len(obs))
-      self.n_obs += 1
+class State(object):
+    def __init__(self, coordinates, list_of_obstacles,
+                feat_type='view', view_size=3):
+        #coordinates - tuple, list_of_obstacles - list of tuples
+        assert(len(coordinates) == 2)
+        self.coordinates = coordinates
+        self.n_obs = 0
+        for obs in list_of_obstacles:
+            assert len(obs) == 2, \
+                    'Incorrect observation length {}'.format(len(obs))
+            self.n_obs += 1
 
-    self.list_of_obstacles = list_of_obstacles
-    self.state = None
-    self.set_features(feat_type=feat_type,view_size=view_size)
+        self.list_of_obstacles = list_of_obstacles
+        self.state = self.set_features(coordinates,
+                                       feat_type=feat_type,
+                                       view_size=view_size)
+        self.feat_type = feat_type
+        self.view_size = view_size
 
-  def get_features(self):
-    assert self.state is not None, 'Feature not set'
-    return self.state
+    def get_features(self):
+        assert self.state is not None, 'Feature not set'
+        return self.state
+    
+    def feature_size(self, feat_type, view_size):
+        if feat_type == 'view':
+            return 2 + view_size*view_size - 1
+        elif feat_type == 'all':
+            return 2*(self.n_obs+1)
+        else:
+            raise ValueError("Incorrect feat_type: {}".format(feat_type))
 
-  def set_features(self, feat_type='view', view_size=3):
-    if feat_type == 'view':
-      view_size = int(view_size)
-      self.state = np.zeros(2 + view_size*view_size - 1)
-      self.state[0] = self.coordinates[0]
-      self.state[1] = self.coordinates[1]
-      count = 0
-      for i in range(-(view_size//2), view_size//2):
-        for j in range(-(view_size//2), view_size//2):
-          if i == 0 and j == 0:
-            continue
-          count += 1
-          if (self.state[0]+i, self.state[1]+j) in self.list_of_obstacles:
-            self.state[2+count] = 1
+    def set_features(self, coordinates, feat_type='view', view_size=3):
+        state = np.zeros(self.feature_size(feat_type, view_size))
+        state[0], state[1] = coordinates
+        if feat_type == 'view':
+            view_size, count = int(view_size), 0
+            for i in range(-(view_size//2), view_size//2):
+                for j in range(-(view_size//2), view_size//2):
+                    if i == 0 and j == 0:
+                        continue
+                    count += 1
+                    if (state[0]+i, state[1]+j) in self.list_of_obstacles:
+                        state[2+count] = 1
 
-    elif feat_type == 'all':
-       self.state = np.zeros(2*(self.n_obs+1))
-       self.state[0] = self.coordinates[0]
-       self.state[1] = self.coordinates[1]
-       for i in range(1,len(self.list_of_obstacles)+1):
-        self.state[2*i] = self.list_of_obstacles[i-1][0]
-        self.state[2*i+1] = self.list_of_obstacles[i-1][1]
-    else:
-      raise ValueError('Incorrect feature type {}'.format(feat_type))
+        elif feat_type == 'all':
+            for i in range(1,len(self.list_of_obstacles)+1):
+                state[2*i] = self.list_of_obstacles[i-1][0]
+                state[2*i+1] = self.list_of_obstacles[i-1][1]
+        else:
+            raise ValueError('Incorrect feature type {}'.format(feat_type))
 
+        return state
 
-class Action():
+class StateVector(State):
+    def __init__(self, coordinates_arr, list_of_obstacles, 
+                 feat_type='view', view_size=3):
+        super(StateVector, self).__init__((1, 1),  # Fake coordinates not used
+                                          list_of_obstacles,
+                                          feat_type=feat_type,
+                                          view_size=view_size)
+        self.coordinates_arr = coordinates_arr
+        self.state_arr = self.set_features_array(coordinates_arr,
+                                                 feat_type=feat_type,
+                                                 view_size=view_size)
+        
+
+    def set_features_array(self, coordinates_arr,
+                           feat_type='view', view_size=3):
+        batch_size = coordinates_arr.shape[0]
+        state_arr = np.zeros(batch_size, self.feature_size(feat_type,
+                                                           view_size))
+        for b in range(self.batch_size):
+            state_arr[b, :] = self.set_features(
+                    coordinates_arr[b, :],
+                    feat_type=feat_type,
+                    view_size=view_size)
+        return state_arr
+
+    def get_features(self):
+        assert self.state_arr is not None, 'Feature not set'
+        return self.state_arr
+
+class Action(object):
     def __init__(self, delta):
         #delta - number (integer)
         #assert(delta in (0,1,2,3,4))
@@ -123,71 +160,116 @@ class Action():
         elif delta == 7:
             return (1,-1) # south-east
 
+class ActionVector(Action):
+    def __init__(slf, delta_array):
+        # Pass in a dummy action
+        super(ActionVector, self).__init__(self, delta_array[0, :])
+        self.delta_arr = delta_arr
+
 class TransitionFunction():
-  def __init__(self, width, height, obs_func):
-    # height - number (integer), width - number (integer),
-    # list_of_obstacles - list of tuples
-    #assert(height >= 16)
-    #assert(width >= 16)
-    self.height = height
-    self.width = width
-    self.obs_func = obs_func
+    def __init__(self, width, height, obs_func):
+        '''Transition function for the grid world.
 
-  def __call__(self, state, action, t):
-    delta = Action.oned_to_twod(action.delta)
-    # reward is computed later, t+1 is the correct time to compute
-    # new obstacles
-    t = t+1
-    new_list_of_obstacles = []
-    obs_delta = self.obs_func(t)
-    for obs in state.list_of_obstacles:
-      new_obs = (obs[0] + obs_delta[0], obs[1]+obs_delta[1])
-      if new_obs[0] >= self.width or new_obs[0] < 0 \
-          or new_obs[1] >= self.height or new_obs[1] < 0:
-        raise ValueError('Obstacle moved outside of the grid!!!')
-      new_list_of_obstacles.append(new_obs)
+        height: Integer
+        width: Integer
+        list_of_obstacles: list of tuples
+        '''
+        self.height = height
+        self.width = width
+        self.obs_func = obs_func
 
-    # Compute new coordinates here.
-    # Stay within boundary and don't move over obstacles (new).
-    new_coordinates = (max(
-      min(state.coordinates[0] + delta[0], self.width-1), 0),
-      max(min(state.coordinates[1] + delta[1], self.height-1), 0))
+    def __call__(self, state, action, t):
+        if type(state) is StateVector:
+            assert state.coordinates_arr.shape[0] == action.delta_arr.shape[0], \
+                    "(State, Action) batch sizes do not match"
+            batch_size = state.coordinates_arr.shape[0] 
+            new_coord_arr = np.zeros(state.coordinates.shape)
+            for b in range(batch_size):
+                state_coord = state.coordinates_arr[b, :]
+                action_delta = action.delta_arr[b, :]
+                new_coord, new_list_of_obstacle = self.next_state(
+                        state_coord,
+                        action_delta,
+                        t,
+                        state.list_of_obstacles)
+                new_coord_arr[b, :] = new_coord
 
-    if new_coordinates in new_list_of_obstacles:
-      # do stuff here - option 1. Remain where you are.
-      # This should be sufficient. If not, then try moving right,
-      # left down or up.
-      if state.coordinates not in new_list_of_obstacles:
-        # best case scenario ... stay where you are
-        new_coordinates = state.coordinates
-      else:
-        # right
-        if (max(min(state.coordinates[0]+1, self.width-1), 0),
-            state.coordinates[1]) not in new_list_of_obstacles:
-          new_coordinates = (max(min(state.coordinates[0] + 1,
-                                     self.width-1),
-                                 0), state.coordinates[1])
-          #print 'Warning at transition 1'
-        elif (max(min(state.coordinates[0]-1, self.width-1), 0),
-            state.coordinates[1]) not in new_list_of_obstacles: # left
-          new_coordinates = (max(min(state.coordinates[0] - 1, self.width - 1),
-            0), state.coordinates[1])
-          #print 'Warning at transition 2'
-        elif (state.coordinates[0], max(min(state.coordinates[1]-1,
-          self.height-1),0)) not in new_list_of_obstacles: # down
-          new_coordinates = (state.coordinates[0],
-              max(min(state.coordinates[1] - 1, self.height - 1), 0))
-          #print 'Warning at transition 3'
-        elif (state.coordinates[0], max(min(state.coordinates[1] + 1,
-          self.height - 1), 0)) not in new_list_of_obstacles: # up
-          #print 'Warning at transition 4'
-          new_coordinates = (state.coordinates[0],
-              max(min(state.coordinates[1] + 1, self.height - 1), 0))
+            new_state = StateVector(new_coord_arr,
+                                    new_list_of_obstacle,
+                                    feat_type=state.feat_type,
+                                    view_size=state.view_size)
+                                    )
+        elif type(state) is State:
+            new_coord, new_list_of_obstacle = self.next_state(
+                    state.coordinates,
+                    action.delta,
+                    t,
+                    state.list_of_obstacles)
+            new_state = State(new_coord, new_list_of_obstacles,
+                              feat_type=state.feat_type,
+                              view_size=state.view_size)
         else:
-          raise ValueError('There is an obstacle for every transition')
+            raise ValueError('Incorrect state type: {}'.format(type(state)))
 
-    new_state = State(new_coordinates, new_list_of_obstacles)
-    return new_state
+        return new_state
+
+    def next_state(self, state_coord, action_delta, t, list_of_obstacles):
+        delta = Action.oned_to_twod(action_delta)
+        # reward is computed later, t+1 is the correct time to compute
+        # new obstacles
+        t = t+1
+        new_list_of_obstacles = []
+        obs_delta = self.obs_func(t)
+        for obs in list_of_obstacles:
+            new_obs = (obs[0] + obs_delta[0], obs[1]+obs_delta[1])
+            if new_obs[0] >= self.width or new_obs[0] < 0 \
+                    or new_obs[1] >= self.height or new_obs[1] < 0:
+                raise ValueError('Obstacle moved outside of the grid!!!')
+            new_list_of_obstacles.append(new_obs)
+
+        # Compute new coordinates here.
+        # Stay within boundary and don't move over obstacles (new).
+        new_coordinates = (max(
+            min(state_coord[0] + delta[0], self.width-1), 0),
+            max(min(state_coord[1] + delta[1], self.height-1), 0))
+
+        if new_coordinates in new_list_of_obstacles:
+            # do stuff here - option 1. Remain where you are.
+            # This should be sufficient. If not, then try moving right,
+            # left down or up.
+            if state_coord not in new_list_of_obstacles:
+                # best case scenario ... stay where you are
+                new_coordinates = state_coord
+            else:
+                # right
+                if (max(min(state_coord[0]+1, self.width-1), 0),
+                        state_coord[1]) not in new_list_of_obstacles:
+                    new_coordinates = (max(min(state_coord[0] + 1,
+                        self.width-1), 0), state_coord[1])
+                  #print 'Warning at transition 1'
+                elif (max(min(state_coord[0]-1, self.width-1), 0),
+                        state_coord[1]) not in new_list_of_obstacles: # left
+                    new_coordinates = (max(min(state_coord[0] - 1,
+                        self.width - 1), 0), state_coord[1])
+                  #print 'Warning at transition 2'
+                elif (state_coord[0], max(min(state_coord[1]-1,
+                    self.height-1),0)) not in new_list_of_obstacles: # down
+                    new_coordinates = (
+                            state_coord[0], 
+                            max(min(state_coord[1]-1, self.height-1), 0)
+                            )
+                  #print 'Warning at transition 3'
+                elif (state_coord[0], max(min(state_coord[1] + 1,
+                    self.height - 1), 0)) not in new_list_of_obstacles: # up
+                    #print 'Warning at transition 4'
+                    new_coordinates = (
+                            state_coord[0],
+                            max(min(state_coord[1]+1, self.height-1), 0))
+                else:
+                    raise ValueError('There is an obstacle for every transition')
+
+        return new_state, new_list_of_obstacles
+    
 
 class RewardFunction():
   def __init__(self, penalty, reward):

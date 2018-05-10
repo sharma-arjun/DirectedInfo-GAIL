@@ -14,6 +14,7 @@ from torch.nn import functional as F
 from load_expert_traj import Expert, ExpertHDF5
 from load_expert_traj import recursively_save_dict_contents_to_group
 from grid_world import State, Action, TransitionFunction
+from grid_world import StateVector
 from grid_world import RewardFunction, RewardFunction_SR2
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from itertools import product
@@ -189,13 +190,13 @@ class DiscreteVAE(VAE):
     def gumbel_softmax_sample(self, logits, temperature):
         """ Draw a sample from the Gumbel-Softmax distribution"""
         y = logits + Variable(self.sample_gumbel(logits.size()))
-        return F.softmax(y / temperature)
+        return F.softmax(y / temperature, dim=1)
 
     def reparameterize(self, logits, temperature, eps=1e-10):
         if self.training:
             probs = self.gumbel_softmax_sample(logits, temperature)
         else:
-            probs = F.softmax(logits / temperature)
+            probs = F.softmax(logits / temperature, dim=1)
         return probs
 
     def forward(self, x, c, g, only_goal_policy=False):
@@ -308,13 +309,13 @@ class VAETrain(object):
 
         if args.run_mode == 'train':
             if use_rnn_goal_predictor:
-                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
+                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-4)
                 self.Q_model_opt = optim.Adam([
                         {'params': self.Q_model.parameters()},
                         {'params': self.Q_2_model.parameters()},
                         {'params': self.Q_model_linear.parameters()},
                     ],
-                    lr=1e-3)
+                    lr=1e-4)
             else:
                 self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
         elif args.run_mode == 'train_goal_pred':
@@ -398,19 +399,21 @@ class VAETrain(object):
             # logits is the un-normalized log probability for belonging to a class
             logits = vae_posterior_output[0]
             num_q_classes = self.vae_model.posterior_latent_size
-            q_prob = F.softmax(logits)  # q_prob
+            # q_prob is (N, C)
+            q_prob = F.softmax(logits, dim=1)  # q_prob
             log_q_prob = torch.log(q_prob + 1e-10)  # log q_prob
             prior_prob = Variable(torch.Tensor([1.0 / num_q_classes]))
-            KLD = torch.sum(q_prob * (log_q_prob - torch.log(prior_prob)))
+            batch_size = logits.size(0)
+            KLD = torch.sum(q_prob * (log_q_prob - torch.log(prior_prob))) / batch_size
             # print("q_prob: {}".format(q_prob))
         else:
-            mu, logvar = vae_posterior_output
+            mu, logvar = vae_posterior_output[0], vae_posterior_output[1]
             # see Appendix B from VAE paper:
             # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
             # https://arxiv.org/abs/1312.6114
             # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-            KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-            #KLD = 0.5 * torch.sum(mu.pow(2))
+            batch_size = mu.size(0)
+            KLD =-0.5 * (torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / batch_size)
 
 
         #return MSE + KLD
@@ -527,21 +530,25 @@ class VAETrain(object):
             feat = np.array(state_obj.coordinates, dtype=np.float32)
         return feat
 
-    def get_history_features(self, state, use_velocity):
+    def get_history_features(self, state, use_velocity=False):
+        '''
+        state: Numpy array of shape (N, H, F)
+        '''
         if use_velocity:
             _, history_size, state_size = state.shape
             new_state = np.zeros(state.shape)
 
+            state_int = np.array(state, dtype=np.int32)
             for t in range(history_size-1):
-                if state[:, t, 0] == -1.0:
-                    new_state[:, t, :] = 0.0
-                else:
-                    new_state[:, t, :] = state[:, t+1,:] - state[:, t,:]
+                minus_one_idx = state_int[:, t, 0] == -1
+                new_state[minus_one_idx, t, :] = 0.0
+                one_idx = (state_int[:, t, 0] != -1)
+                new_state[one_idx, t, :] = \
+                        state[one_idx, t+1, :] - state[one_idx, t, :]
 
-            new_state[:,history_size-1,:] = state[:, history_size-1,:]
+            new_state[:, history_size-1, :] = state[:, history_size-1, :]
 
             return new_state
-
         else:
             return state
 
@@ -632,9 +639,9 @@ class VAETrain(object):
 
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
-            train_stats = self.train_variable_length_epoch(epoch,
-                                                           expert,
-                                                           batch_size)
+            train_stats = self.train_fixed_length_epoch(epoch,
+                                                        expert,
+                                                        batch_size)
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
@@ -678,26 +685,29 @@ class VAETrain(object):
             pred_goal: Goal predicted at every step of the RNN.
         '''
         # Predict goal for the entire episode i.e., forward prop through Q
-        episode_len = len(ep_state)
-        ht = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
-        ct = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
-        ht_2 = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
-        ct_2 = Variable(torch.zeros(1, 64).type(self.dtype), requires_grad=True)
-        final_goal = Variable(torch.zeros(1, num_goals).type(self.dtype))
+        batch_size, episode_len = ep_state.shape[0], ep_state.shape[1]
+
+        ht = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
+        ct = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
+        ht_2 = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
+        ct_2 = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
+        final_goal = Variable(torch.zeros(batch_size, num_goals).type(self.dtype))
         pred_goal = []
         for t in range(episode_len):
             if self.env_type == 'grid':
-                state_obj = State(ep_state[t].tolist(), self.obstacles)
+                state_obj = State(ep_state[:, t, :], self.obstacles)
+                # state_tensor is (N, F)
                 state_tensor = torch.from_numpy(self.get_state_features(
                     state_obj, self.args.use_state_features)).type(self.dtype)
             elif self.env_type == 'mujoco':
-                state_tensor = torch.from_numpy(ep_state[t]).type(self.dtype)
+                state_tensor = torch.from_numpy(ep_state[0, t, :]).type(self.dtype)
 
-            action_tensor = torch.from_numpy(ep_action[t]).type(self.dtype)
+            # action_tensor is (N, A)
+            action_tensor = torch.from_numpy(ep_action[:, t, :]).type(self.dtype)
 
             # NOTE: Input to LSTM cell needs to be of shape (N, F) where N can
-            # be 1.
-            inp_tensor = torch.cat((state_tensor, action_tensor), 0).unsqueeze(0)
+            # be 1. inp_tensor is (N, F+A)
+            inp_tensor = torch.cat((state_tensor, action_tensor), 1)
 
             ht, ct = self.Q_model(Variable(inp_tensor), (ht, ct))
             if self.args.stacked_lstm == 1:
@@ -718,6 +728,7 @@ class VAETrain(object):
 
             pred_goal.append(output)
 
+        # final goal should be (N, G)
         if self.args.flag_goal_pred == 'sum_all_hidden':
             final_goal = F.softmax(final_goal / episode_len, dim=1)
         elif self.args.flag_goal_pred == 'last_hidden':
@@ -1137,6 +1148,236 @@ class VAETrain(object):
 
         return train_stats
 
+    def train_fixed_length_epoch(self, epoch, expert, batch_size=1,
+                                 episode_len=6):
+        '''Train VAE with variable length expert samples.
+        '''
+        self.set_models_to_train()
+        history_size = self.vae_model.history_size
+        train_stats = {
+            'train_loss': [],
+        }
+
+        # TODO: The current sampling process can retrain on a single trajectory
+        # multiple times. Will fix it later.
+        num_batches = len(expert) // batch_size
+        total_epoch_loss, total_epoch_per_step_loss = 0.0, 0.0
+
+        for batch_idx in range(num_batches):
+            # Train loss for this batch
+            train_loss, train_policy_loss = 0.0, 0.0
+            train_KLD_loss, train_policy2_loss = 0.0, 0.0
+            ep_timesteps = 0
+            batch = expert.sample(batch_size)
+
+            self.vae_opt.zero_grad()
+            if self.use_rnn_goal_predictor:
+                self.Q_model_opt.zero_grad()
+
+            ep_state, ep_action, ep_c, ep_mask = batch
+            ep_state = np.array(ep_state, dtype=np.float32)
+            ep_action = np.array(ep_action, dtype=np.float32)
+            ep_c = np.array(ep_c, dtype=np.int32)
+
+            true_goal_numpy = np.zeros((ep_c.shape[0], self.num_goals))
+            true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
+            true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
+                    self.dtype)
+
+            if self.use_rnn_goal_predictor:
+                final_goal, pred_goal = self.predict_goal(ep_state,
+                                                          ep_action,
+                                                          ep_c,
+                                                          ep_mask,
+                                                          self.num_goals)
+
+            # Predict actions i.e. forward prop through q (posterior) and
+            # policy network.
+
+            # ep_action will be (N, A)
+            action_var = Variable(
+                    torch.from_numpy(ep_action).type(self.dtype))
+
+            # Get the initial state (N, C)
+            c = -1 * np.ones((batch_size, self.vae_model.posterior_latent_size),
+                             dtype=np.float32)
+            if self.env_type == 'grid':
+                x_state_obj = StateVector(ep_state[:, 0, :], self.obstacles)
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
+            elif self.env_type == 'mujoco':
+                x_feat = ep_state[0]
+                self.env.reset()
+                self.env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+
+            # x is (N, F)
+            x = x_feat
+
+            # Add history to state
+            if history_size > 1:
+                x_hist = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
+                                      dtype=np.float32)
+                x_hist[:, history_size - 1, :] = x_feat
+                x = self.get_history_features(
+                        x_hist, self.args.use_velocity_features)
+
+            # Store list of losses to backprop later.
+            ep_loss, curr_state_arr = [], ep_state[:, 0, :]
+            for t in range(episode_len):
+                ep_timesteps += 1
+                x_var = Variable(torch.from_numpy(x).type(self.dtype))
+
+                # Append 'c' at the end.
+                if args.use_rnn_goal:
+                    c_var = torch.cat(
+                            [final_goal,
+                                Variable(torch.from_numpy(c).type(self.dtype))],
+                            dim=1)
+
+                    vae_output = self.vae_model(x_var, c_var, final_goal)
+                else:
+                    c_var = torch.cat(
+                            [true_goal,
+                                Variable(torch.from_numpy(c).type(self.dtype))],
+                            dim=1)
+
+                    vae_output = self.vae_model(x_var, c_var, true_goal)
+
+
+                expert_action_var = action_var[:, t, :].clone()
+                if self.args.use_discrete_vae:
+                    vae_reparam_input = (vae_output[2],
+                                         self.vae_model.temperature)
+                else:
+                    vae_reparam_input = (vae_output[2], vae_output[3])
+
+                loss, policy_loss, policy2_loss, KLD_loss = self.loss_function(
+                        vae_output[0],
+                        vae_output[1],
+                        expert_action_var,
+                        vae_output[2:],
+                        epoch)
+
+                ep_loss.append(loss)
+                #loss.backward()
+                train_loss += loss.data[0]
+                train_policy_loss += policy_loss.data[0]
+                if self.args.use_separate_goal_policy:
+                    train_policy2_loss += policy2_loss.data[0]
+                train_KLD_loss += KLD_loss.data[0]
+
+                # pred_actions_numpy is (N, A)
+                pred_actions_numpy = vae_output[0].data.cpu().numpy()
+
+                if history_size > 1:
+                    x_hist[:, :(history_size-1), :] = x_hist[:, 1:, :]
+
+                if self.env_type == 'grid':
+                    # Get next state from action (N,)
+                    action = ActionVector(np.argmax(pred_actions_numpy, axis=1))
+                    # Get current state
+                    state = StateVector(curr_state_arr, self.obstacles)
+                    # Get next state
+                    next_state = self.transition_func(state, action, 0)
+
+                    if history_size > 1:
+                        x_hist[:, history_size-1] = self.get_state_features(
+                                next_state, self.args.use_state_features)
+                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
+                    else:
+                        x[:] = self.get_state_features(
+                                next_state, self.args.use_state_features)
+                    # Update current state
+                    curr_state_arr = np.array(next_state.coordinates_arr,
+                                              dtype=np.float32)
+
+                elif self.env_type == 'mujoco':
+                    action = pred_actions_numpy[0, :]
+                    next_state, _, done, _ = self.env.step(action)
+                    if done:
+                        break
+
+                    next_state = np.concatenate((
+                        next_state, np.array([(t+1)/(episode_len+1)])), axis=0)
+
+                    if history_size > 1:
+                        x_hist[:, history_size-1] = next_state
+                        x = self.get_history_features(
+                                x_hist, self.args.use_velocity_features)
+                    else:
+                        x[:] = next_state
+
+                    curr_state_arr = next_state
+
+
+                # update c
+                c[:, -self.vae_model.posterior_latent_size:] = \
+                    self.vae_model.reparameterize(*vae_reparam_input).data.cpu()
+
+            # Calculate the total loss.
+            total_loss = ep_loss[0]
+            for t in range(1, len(ep_loss)):
+                total_loss = total_loss + ep_loss[t]
+            total_loss.backward()
+
+            # Get the gradients and network weights
+            if self.args.log_gradients_tensorboard:
+                self.log_model_to_tensorboard()
+
+            self.vae_opt.step()
+            if self.use_rnn_goal_predictor:
+                self.Q_model_opt.step()
+
+
+            # Update stats
+            total_epoch_loss += train_loss
+            total_epoch_per_step_loss += (train_loss / episode_len)
+            train_stats['train_loss'].append(train_loss)
+            self.logger.summary_writer.add_scalar('loss/per_sample',
+                                                   train_loss,
+                                                   self.train_step_count)
+            self.logger.summary_writer.add_scalar('loss/policy_loss_per_sample',
+                                                   train_policy_loss,
+                                                   self.train_step_count)
+            self.logger.summary_writer.add_scalar('loss/KLD_per_sample',
+                                                   train_KLD_loss,
+                                                   self.train_step_count)
+            if self.args.use_separate_goal_policy:
+                self.logger.summary_writer.add_scalar(
+                        'loss/policy2_loss_per_sample',
+                        train_policy2_loss,
+                        self.train_step_count)
+
+
+            if batch_idx % self.args.log_interval == 0:
+                if self.args.use_separate_goal_policy:
+                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
+                          'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t '\
+                          'KLD: {:.2f}, \t Timesteps: {}'.format(
+                        epoch, batch_idx, num_batches, train_loss,
+                        train_policy_loss, train_policy2_loss, train_KLD_loss,
+                        ep_timesteps))
+                else:
+                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
+                            'Policy Loss: {:.2f}, \t KLD: {:.2f}, \t ' \
+                            'Timesteps: {}'.format(
+                        epoch, batch_idx, num_batches, train_loss,
+                        train_policy_loss, train_KLD_loss, ep_timesteps))
+
+            self.train_step_count += 1
+
+        # Add other data to logger
+        self.logger.summary_writer.add_scalar('loss/per_epoch_all_step',
+                                               total_epoch_loss / num_batches,
+                                               self.train_step_count)
+        self.logger.summary_writer.add_scalar(
+                'loss/per_epoch_per_step',
+                total_epoch_per_step_loss  / num_batches,
+                self.train_step_count)
+
+        return train_stats
+
     def train_variable_length_epoch(self, epoch, expert, batch_size=1):
         '''Train VAE with variable length expert samples.
         '''
@@ -1148,7 +1389,6 @@ class VAETrain(object):
 
         # TODO: The current sampling process can retrain on a single trajectory
         # multiple times. Will fix it later.
-        batch_size = 1
         num_batches = len(expert) // batch_size
         total_epoch_loss, total_epoch_per_step_loss = 0.0, 0.0
 
