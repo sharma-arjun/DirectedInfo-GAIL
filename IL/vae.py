@@ -194,7 +194,7 @@ class DiscreteVAE(VAE):
             probs = F.softmax(logits / temperature)
         return probs
 
-    def forward(self, x, c, g):
+    def forward(self, x, c, g, only_goal_policy=False):
         if only_goal_policy:
             decoder_output_2 = self.decode_goal_policy(x, g)
             # Return a tuple as the else part below. Caller should expect a
@@ -981,11 +981,12 @@ class VAETrain(object):
             true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(
                 0).type(self.dtype))
 
-            final_goal, pred_goal = self.predict_goal(ep_state,
-                                                      ep_action,
-                                                      ep_c,
-                                                      ep_mask,
-                                                      self.num_goals)
+            if self.use_rnn_goal_predictor:
+                final_goal, pred_goal = self.predict_goal(ep_state,
+                                                          ep_action,
+                                                          ep_c,
+                                                          ep_mask,
+                                                          self.num_goals)
 
             # ep_action is tuple of arrays
             action_var = Variable(
@@ -1017,8 +1018,13 @@ class VAETrain(object):
                     x.reshape((1, -1))).type(self.dtype))
 
                 # vae_output is the reconstruction output using x and g
-                vae_output = self.vae_model(x_var, None, final_goal,
-                                            only_goal_policy=True)
+                if self.args.use_rnn_goal:
+                    vae_output = self.vae_model(x_var, None, final_goal,
+                                                only_goal_policy=True)
+                else:
+                    vae_output = self.vae_model(x_var, None, true_goal,
+                                                only_goal_policy=True)
+
                 expert_action_var = action_var[t].clone().unsqueeze(0)
 
                 loss = self.loss_function_using_goal(
@@ -1069,7 +1075,6 @@ class VAETrain(object):
 
                     curr_state_arr = next_state
 
-            # print('loss: {}'.format([x.data[0] for x in ep_loss]))
             # Calculate the total loss and backprop.
             total_loss = ep_loss[0]
             for t in range(1, len(ep_loss)):
@@ -1201,7 +1206,8 @@ class VAETrain(object):
                 x_hist = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                  dtype=np.float32)
                 x_hist[:, history_size - 1, :] = x_feat
-                x = self.get_history_features(x_hist, self.args.use_velocity_features)
+                x = self.get_history_features(
+                        x_hist, self.args.use_velocity_features)
 
             # Store list of losses to backprop later.
             ep_loss, curr_state_arr = [], ep_state[0]
@@ -1280,17 +1286,16 @@ class VAETrain(object):
                         break
 
                     next_state = np.concatenate((
-                        next_state,
-                        np.array([(t+1)/(episode_len+1)])), axis=0)
+                        next_state, np.array([(t+1)/(episode_len+1)])), axis=0)
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = next_state
-                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
+                        x = self.get_history_features(
+                                x_hist, self.args.use_velocity_features)
                     else:
                         x[:] = next_state
 
                     curr_state_arr = next_state
-
 
 
                 # update c
