@@ -922,7 +922,7 @@ class VAETrain(object):
                             self.vae_model.reparameterize(
                                     *vae_reparam_input).data.cpu()
 
-	    '''
+            '''
             ===== Print predicted trajectories while debugging ====
             def get_traj_from_tuple(x):
                 traj = []
