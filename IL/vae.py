@@ -136,12 +136,16 @@ class VAE(nn.Module):
             if self.use_history_in_policy:
                 decoder_output_1 = self.decode(x, c)
             else:
-                decoder_output_1 = self.decode(x[:, -self.policy_state_size:], c)
+                decoder_output_1 = self.decode(
+                        x[:, -self.policy_state_size:], c)
         else:
             if self.use_history_in_policy:
-                decoder_output_1 = self.decode(x, c[:,-self.posterior_latent_size:])
+                decoder_output_1 = self.decode(
+                        x, c[:,-self.posterior_latent_size:])
             else:
-                decoder_output_1 = self.decode(x[:, -self.policy_state_size:], c[:,-self.posterior_latent_size:])
+                decoder_output_1 = self.decode(
+                        x[:, -self.policy_state_size:],
+                        c[:,-self.posterior_latent_size:])
 
             if self.use_separate_goal_policy:
                 decoder_output_2 = self.decode_goal_policy(x, g)
@@ -219,9 +223,12 @@ class DiscreteVAE(VAE):
                 decoder_output_1 = self.decode(x[:,-self.policy_state_size:], c)
         else:
             if self.use_history_in_policy:
-                decoder_output_1 = self.decode(x, c[:,-self.posterior_latent_size:])
+                decoder_output_1 = self.decode(
+                        x, c[:,-self.posterior_latent_size:])
             else:
-                decoder_output_1 = self.decode(x[:, -self.policy_state_size:], c[:,-self.posterior_latent_size:])
+                decoder_output_1 = self.decode(
+                        x[:, -self.policy_state_size:],
+                        c[:,-self.posterior_latent_size:])
 
         if self.use_separate_goal_policy:
             decoder_output_2 = self.decode_goal_policy(x, g)
@@ -1097,9 +1104,12 @@ class VAETrain(object):
             total_epoch_loss += train_loss
             total_epoch_per_step_loss += (train_loss / episode_len)
             train_stats['train_loss'].append(train_loss)
+
+            '''
             if len(train_stats['train_loss']) > 10 and \
                     np.sum(train_stats['train_loss'][-10:]) < 4.0:
                 pdb.set_trace()
+            '''
 
             self.logger.summary_writer.add_scalar('loss/per_sample',
                                                    train_loss,
