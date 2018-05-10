@@ -40,7 +40,8 @@ class VAE(nn.Module):
                  history_size=1,
                  hidden_size=64,
                  use_goal_in_policy=True,
-                 use_separate_goal_policy=True):
+                 use_separate_goal_policy=True,
+                 use_history_in_policy=False):
         '''
         state_size: State size
         latent_size: Size of 'c' variable
@@ -50,10 +51,12 @@ class VAE(nn.Module):
         super(VAE, self).__init__()
 
         self.history_size = history_size
+        self.policy_state_size = policy_state_size
         self.posterior_latent_size = posterior_latent_size
         self.posterior_goal_size = posterior_goal_size
         self.use_goal_in_policy = use_goal_in_policy
         self.use_separate_goal_policy = use_separate_goal_policy
+        self.use_history_in_policy = use_history_in_policy
 
         self.policy_latent_size = policy_latent_size
         if use_goal_in_policy:
@@ -64,7 +67,12 @@ class VAE(nn.Module):
         #else:
         output_activation=None
 
-        self.policy = Policy(state_size=policy_state_size*self.history_size,
+        if use_history_in_policy:
+            policy1_state_size = policy_state_size * history_size
+        else:
+            policy1_state_size = policy_state_size
+
+        self.policy = Policy(state_size=policy1_state_size,
                              action_size=policy_action_size,
                              latent_size=self.policy_latent_size,
                              output_size=policy_output_size,
@@ -123,11 +131,17 @@ class VAE(nn.Module):
             decoder_output_1 = None
             decoder_output_2 = None
 
-            if self.use_goal_in_policy:
+
+        if self.use_goal_in_policy:
+            if self.use_history_in_policy:
                 decoder_output_1 = self.decode(x, c)
             else:
-                decoder_output_1 = self.decode(
-                        x, c[:,-self.posterior_latent_size:])
+                decoder_output_1 = self.decode(x[:, -self.policy_state_size:], c)
+        else:
+            if self.use_history_in_policy:
+                decoder_output_1 = self.decode(x, c[:,-self.posterior_latent_size:])
+            else:
+                decoder_output_1 = self.decode(x[:, -self.policy_state_size:], c[:,-self.posterior_latent_size:])
 
             if self.use_separate_goal_policy:
                 decoder_output_2 = self.decode_goal_policy(x, g)
@@ -199,9 +213,15 @@ class DiscreteVAE(VAE):
         decoder_output_2 = None
 
         if self.use_goal_in_policy:
-            decoder_output_1 = self.decode(x, c)
+            if self.use_history_in_policy:
+                decoder_output_1 = self.decode(x, c)
+            else:
+                decoder_output_1 = self.decode(x[:,-self.policy_state_size:], c)
         else:
-            decoder_output_1 = self.decode(x, c[:,-self.posterior_latent_size:])
+            if self.use_history_in_policy:
+                decoder_output_1 = self.decode(x, c[:,-self.posterior_latent_size:])
+            else:
+                decoder_output_1 = self.decode(x[:, -self.policy_state_size:], c[:,-self.posterior_latent_size:])
 
         if self.use_separate_goal_policy:
             decoder_output_2 = self.decode_goal_policy(x, g)
@@ -275,7 +295,8 @@ class VAETrain(object):
                     history_size=history_size,
                     hidden_size=64,
                     use_goal_in_policy=args.use_goal_in_policy,
-                    use_separate_goal_policy=args.use_separate_goal_policy)
+                    use_separate_goal_policy=args.use_separate_goal_policy,
+                    use_history_in_policy=args.use_history_in_policy)
 
         self.obstacles, self.transition_func = None, None
 
@@ -1522,6 +1543,10 @@ if __name__ == '__main__':
     parser.add_argument('--use_separate_goal_policy', type=int, default=1,
                         choices=[0, 1],
                         help='Use another decoder with goal input.')
+    # 
+    parser.add_argument('--use_history_in_policy', type=int, default=0,
+                        choices=[0, 1],
+                        help='Use history of states in policy.')
 
     # Arguments for VAE training
     parser.add_argument('--use_discrete_vae', dest='use_discrete_vae',
