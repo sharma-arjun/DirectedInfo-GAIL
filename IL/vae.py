@@ -858,7 +858,8 @@ class VAETrain(object):
                     vae_reparam_input = (vae_output[2], vae_output[3])
 
                 # store latent variables (logits or mu)
-                pred_context.append(vae_output[2].data.numpy())
+                if not test_goal_policy_only:
+                    pred_context.append(vae_output[2].data.numpy())
 
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
 
