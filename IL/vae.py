@@ -6,6 +6,7 @@ import pdb
 import pickle
 import torch
 import gym
+import math
 
 from torch import nn, optim
 from torch.autograd import Variable
@@ -172,10 +173,12 @@ class DiscreteVAE(VAE):
         )
         self.encoder_softmax = nn.Softmax(dim=1)
         self.temperature = temperature
+        self.init_temperature = temperature
 
-    def update_temperature(self):
+    def update_temperature(self, epoch):
         '''Update temperature.'''
-        raise ValueError("To be implemented.")
+        r = 66e-6
+        self.temperature = max(0.5, self.init_temperature * math.exp(-r * epoch))
 
     def encode(self, x, c):
         '''Return the log probability output for the encoder.'''
@@ -281,7 +284,7 @@ class VAETrain(object):
         # Hack -- VAE input dim (s + a + latent).
         if args.use_discrete_vae:
             self.vae_model = DiscreteVAE(
-                    temperature=1.0,
+                    temperature=args.temperature,
                     policy_state_size=state_size,
                     posterior_state_size=state_size,
                     policy_action_size=0,
@@ -645,6 +648,7 @@ class VAETrain(object):
 
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
+            self.vae_model.update_temperature(epoch-1)
             train_stats = self.train_fixed_length_epoch(epoch,
                                                         expert,
                                                         batch_size)
@@ -1828,6 +1832,10 @@ if __name__ == '__main__':
                         help='State history size to use in VAE.')
     parser.add_argument('--vae_context_size', type=int, default=1,
                         help='Context size for VAE.')
+
+    # Temperature
+    parser.add_argument('--temperature', type=float, default=1.0,
+                        help='DiscreteVAE temperature')
 
     # Goal prediction
     parser.add_argument('--flag_goal_pred', type=str, default='last_hidden',
