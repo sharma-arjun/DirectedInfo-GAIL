@@ -65,7 +65,7 @@ class State(object):
     def get_features(self):
         assert self.state is not None, 'Feature not set'
         return self.state
-    
+
     def feature_size(self, feat_type, view_size):
         if feat_type == 'view':
             return 2 + view_size*view_size - 1
@@ -97,24 +97,25 @@ class State(object):
         return state
 
 class StateVector(State):
-    def __init__(self, coordinates_arr, list_of_obstacles, 
+    def __init__(self, coordinates_arr, list_of_obstacles,
                  feat_type='view', view_size=3):
         super(StateVector, self).__init__((1, 1),  # Fake coordinates not used
                                           list_of_obstacles,
                                           feat_type=feat_type,
                                           view_size=view_size)
         self.coordinates_arr = coordinates_arr
+        self.coordinates = coordinates_arr
         self.state_arr = self.set_features_array(coordinates_arr,
                                                  feat_type=feat_type,
                                                  view_size=view_size)
-        
+
 
     def set_features_array(self, coordinates_arr,
                            feat_type='view', view_size=3):
         batch_size = coordinates_arr.shape[0]
-        state_arr = np.zeros(batch_size, self.feature_size(feat_type,
-                                                           view_size))
-        for b in range(self.batch_size):
+        state_arr = np.zeros((batch_size,
+                              self.feature_size(feat_type, view_size)))
+        for b in range(batch_size):
             state_arr[b, :] = self.set_features(
                     coordinates_arr[b, :],
                     feat_type=feat_type,
@@ -161,9 +162,9 @@ class Action(object):
             return (1,-1) # south-east
 
 class ActionVector(Action):
-    def __init__(slf, delta_array):
+    def __init__(self, delta_arr):
         # Pass in a dummy action
-        super(ActionVector, self).__init__(self, delta_array[0, :])
+        super(ActionVector, self).__init__(delta_arr[0])
         self.delta_arr = delta_arr
 
 class TransitionFunction():
@@ -182,11 +183,11 @@ class TransitionFunction():
         if type(state) is StateVector:
             assert state.coordinates_arr.shape[0] == action.delta_arr.shape[0], \
                     "(State, Action) batch sizes do not match"
-            batch_size = state.coordinates_arr.shape[0] 
+            batch_size = state.coordinates_arr.shape[0]
             new_coord_arr = np.zeros(state.coordinates.shape)
             for b in range(batch_size):
                 state_coord = state.coordinates_arr[b, :]
-                action_delta = action.delta_arr[b, :]
+                action_delta = action.delta_arr[b]
                 new_coord, new_list_of_obstacle = self.next_state(
                         state_coord,
                         action_delta,
@@ -198,7 +199,6 @@ class TransitionFunction():
                                     new_list_of_obstacle,
                                     feat_type=state.feat_type,
                                     view_size=state.view_size)
-                                    )
         elif type(state) is State:
             new_coord, new_list_of_obstacle = self.next_state(
                     state.coordinates,
@@ -255,7 +255,7 @@ class TransitionFunction():
                 elif (state_coord[0], max(min(state_coord[1]-1,
                     self.height-1),0)) not in new_list_of_obstacles: # down
                     new_coordinates = (
-                            state_coord[0], 
+                            state_coord[0],
                             max(min(state_coord[1]-1, self.height-1), 0)
                             )
                   #print 'Warning at transition 3'
@@ -268,8 +268,8 @@ class TransitionFunction():
                 else:
                     raise ValueError('There is an obstacle for every transition')
 
-        return new_state, new_list_of_obstacles
-    
+        return new_coordinates, new_list_of_obstacles
+
 
 class RewardFunction():
   def __init__(self, penalty, reward):

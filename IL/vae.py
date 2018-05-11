@@ -14,7 +14,7 @@ from torch.nn import functional as F
 from load_expert_traj import Expert, ExpertHDF5
 from load_expert_traj import recursively_save_dict_contents_to_group
 from grid_world import State, Action, TransitionFunction
-from grid_world import StateVector
+from grid_world import StateVector, ActionVector
 from grid_world import RewardFunction, RewardFunction_SR2
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from itertools import product
@@ -695,7 +695,7 @@ class VAETrain(object):
         pred_goal = []
         for t in range(episode_len):
             if self.env_type == 'grid':
-                state_obj = State(ep_state[:, t, :], self.obstacles)
+                state_obj = StateVector(ep_state[:, t, :], self.obstacles)
                 # state_tensor is (N, F)
                 state_tensor = torch.from_numpy(self.get_state_features(
                     state_obj, self.args.use_state_features)).type(self.dtype)
@@ -874,7 +874,7 @@ class VAETrain(object):
 
                 # store latent variables (logits or mu)
                 if not test_goal_policy_only:
-                    pred_context.append(vae_output[2].data.numpy())
+                    pred_context.append(vae_output[2].data.cpu().numpy())
 
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
 
@@ -1226,7 +1226,8 @@ class VAETrain(object):
             ep_loss, curr_state_arr = [], ep_state[:, 0, :]
             for t in range(episode_len):
                 ep_timesteps += 1
-                x_var = Variable(torch.from_numpy(x).type(self.dtype))
+                x_var = Variable(torch.from_numpy(
+                    x.reshape((batch_size, -1))).type(self.dtype))
 
                 # Append 'c' at the end.
                 if args.use_rnn_goal:
@@ -1796,7 +1797,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_separate_goal_policy', type=int, default=1,
                         choices=[0, 1],
                         help='Use another decoder with goal input.')
-    # 
+    #
     parser.add_argument('--use_history_in_policy', type=int, default=0,
                         choices=[0, 1],
                         help='Use history of states in policy.')
