@@ -317,13 +317,13 @@ class VAETrain(object):
 
         if args.run_mode == 'train':
             if use_rnn_goal_predictor:
-                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-4)
+                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
                 self.Q_model_opt = optim.Adam([
                         {'params': self.Q_model.parameters()},
                         {'params': self.Q_2_model.parameters()},
                         {'params': self.Q_model_linear.parameters()},
                     ],
-                    lr=1e-4)
+                    lr=1e-3)
             else:
                 self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
         elif args.run_mode == 'train_goal_pred':
@@ -1674,10 +1674,13 @@ class VAETrain(object):
                     other_results_dict=None, num_test_samples=100,
                     test_goal_policy_only=False):
         '''Test models by generating expert trajectories.'''
+        self.convert_models_to_type(self.dtype)
+
         results = self.test_generate_trajectory_variable_length(
                 expert,
                 num_test_samples=num_test_samples,
                 test_goal_policy_only=test_goal_policy_only)
+
 
         if self.use_rnn_goal_predictor:
             goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
@@ -1755,7 +1758,7 @@ def main(args):
         test_goal_policy_only = True if args.run_mode == 'test_goal_pred' else \
                 False
         vae_train.test_models(expert, results_pkl_path=results_pkl_path,
-                              num_test_samples=50,
+                              num_test_samples=300,
                               test_goal_policy_only=test_goal_policy_only)
     elif args.run_mode == 'train_goal_pred':
         assert args.use_separate_goal_policy == 1, \
