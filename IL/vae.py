@@ -191,7 +191,14 @@ class DiscreteVAE(VAE):
         """ Draw a sample from the Gumbel-Softmax distribution"""
         dtype = logits.data.type()
         y = logits + Variable(self.sample_gumbel(logits.size())).type(dtype)
-        return F.softmax(y / temperature, dim=1)
+        y = F.softmax(y / temperature, dim=1)
+        # shape = y.size()
+        # _, ind = y.max(dim=-1)
+        # y_hard = torch.zeros_like(y).view(-1, shape[-1])
+        # y_hard.scatter_(1, ind.view(-1, 1), 1)
+        # y_hard = y_hard.view(*shape)
+        # return (y_hard - y).detach() + y
+        return y
 
     def reparameterize(self, logits, temperature, eps=1e-10):
         if self.training:
