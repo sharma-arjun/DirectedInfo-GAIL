@@ -4,7 +4,7 @@ from itertools import product
 
 import pdb
 
-def create_obstacles(width, height, env_name=None):
+def create_obstacles(width, height, env_name=None, room_size=None):
   #return [(4,6),(9,6),(14,6),(4,12),(9,12),(14,12)] # 19 x 19
   #return [(3,5),(7,5),(11,5),(3,10),(7,10),(11,10)] # 17 x 17
   #return [(3,4),(6,4),(9,4),(3,9),(6,9),(9,9)] # 15 x 15
@@ -22,6 +22,33 @@ def create_obstacles(width, height, env_name=None):
         for k in product_iter:
           obstacles.append(k)
     return obstacles
+
+  elif env_name == 'room':
+    assert(room_size != None)
+
+    room_cells = []
+    room_starts = [(1, 1), (1, height-room_size-1),
+                   (width-room_size-1, 1), (width-room_size-1, height-room_size-1)]
+
+    for s in room_starts:
+      for i in range(room_size):
+        for j in range(room_size):
+          room_cells.append((s[0] + i, s[1] + j))
+
+    all_cells = set(product(range(0, width), range(0, height)))
+
+    corridor_cells = []
+    for i in range(room_size+1, height-room_size-1):
+      corridor_cells.append((room_size, i))
+      corridor_cells.append((width-room_size-1, i))
+
+    for i in range(room_size+1, width-room_size-1):
+      corridor_cells.append((i, (height-1) // 2))
+
+    obstacles = list(all_cells - set(room_cells) - set(corridor_cells))
+
+    return obstacles, room_cells 
+
   else:
     return []
 

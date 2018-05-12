@@ -177,8 +177,8 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 66e-6
-        self.temperature = max(0.5, self.init_temperature * math.exp(-r * epoch))
+        r = 87e-5
+        self.temperature = max(0.1, self.init_temperature * math.exp(-r * epoch))
 
     def encode(self, x, c):
         '''Return the log probability output for the encoder.'''
@@ -648,7 +648,9 @@ class VAETrain(object):
 
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
-            self.vae_model.update_temperature(epoch-1)
+            if args.use_discrete_vae:
+                self.vae_model.update_temperature(epoch-1)
+                print('Temperature:', self.vae_model.temperature)
             train_stats = self.train_fixed_length_epoch(epoch,
                                                         expert,
                                                         batch_size)
@@ -1740,6 +1742,8 @@ def main(args):
     # expert.push()
 
     if args.run_mode == 'test' or args.run_mode == 'test_goal_pred':
+        if args.use_discrete_vae:
+            vae_train.vae_model.temperature = 0.1
         assert len(args.checkpoint_path) > 0, \
                 'No checkpoint provided for testing'
         if args.run_mode == 'test_goal_pred':

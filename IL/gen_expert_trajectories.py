@@ -9,6 +9,8 @@ import pickle
 import random
 import sys
 import os
+from graph import Graph
+import pdb
 
 from load_expert_traj import recursively_save_dict_contents_to_group
 
@@ -499,6 +501,87 @@ def gen_diverse_trajs(grid_width, grid_height):
 
     return env_data_dict, expert_data_dict, obstacles, set_diff
 
+def gen_room_trajs(grid_width, grid_height, room_size):
+
+    N = 300
+    T = 1000
+
+    expert_data_dict = {}
+    env_data_dict = {
+            'num_actions': 4,
+            'num_goals': 1,
+            }
+
+    obstacles, rooms = create_obstacles(grid_width, grid_height, env_name='room',
+                                        room_size=room_size)
+    #T = TransitionFunction(grid_width, grid_height, obstacle_movement)
+    set_diff = list(set(product(tuple(range(0, grid_width)),tuple(range(0, grid_height)))) \
+                    - set(obstacles))
+    room_set = set(rooms)
+
+    graph = Graph()
+    deltas = {(0,1): 0, (0,-1): 1, (-1,0): 2, (1,0): 3}
+
+    for node in set_diff:
+        for a in deltas:
+            neigh = (node[0]+a[0], node[1]+a[1])
+            if neigh[0] >= 0 and neigh[0] < grid_width and neigh[1] >= 0 and neigh[1] < grid_height:
+                if neigh not in obstacles:
+                    graph.add_edge(node, neigh, 1)
+                    graph.add_edge(neigh, node, 1)
+
+
+    for n in range(N):
+
+        rem_len = T
+
+        states = []
+        actions = []
+
+        path_key = str(n)
+        expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
+
+        while rem_len > 0:
+
+            start_state = State(sample_start(set_diff), obstacles)
+            apple_state = State(sample_start(list(room_set-set(start_state.coordinates))), obstacles)
+
+            source = start_state.coordinates
+            destination = apple_state.coordinates
+            p = graph.Dijkstra(source)
+            node = destination
+
+            path = []
+            while node != source:
+                path.append(node)
+                node = p[node]
+
+            path.append(source)
+            path.reverse()
+
+            path_len = min(len(path)-1, rem_len)
+
+            for i in range(path_len):
+                s = path[i]
+                next_s = path[i+1]
+                
+                state = np.array(s + destination)
+                action = (next_s[0]-s[0], next_s[1]-s[1])
+                action_delta = deltas[action]
+
+                states.append(state)
+                actions.append(action_delta)
+
+            rem_len = rem_len - path_len
+        
+        
+        expert_data_dict[path_key]['state'] = states
+        expert_data_dict[path_key]['action'] = actions
+        expert_data_dict[path_key]['goal'] = [0]*T
+
+    return env_data_dict, expert_data_dict, obstacles, set_diff
+        
+
 def main(args):
 
     if not os.path.exists(args.save_dir):
@@ -519,6 +602,9 @@ def main(args):
     elif args.data_type == 'gen_diverse_trajs':
         env_data_dict, expert_data_dict, obstacles, set_diff = gen_diverse_trajs(
                 args.width, args.height)
+    elif args.data_type == 'gen_room_trajs':
+        env_data_dict, expert_data_dict, obstacles, set_diff = gen_room_trajs(
+                args.width, args.height, args.room_size)
     else:
         raise ValueError("Undefined value")
 
@@ -549,7 +635,8 @@ if __name__ == '__main__':
                                  'gen_LR', 
                                  'gen_square_rect',
                                  'gen_square_rect_2',
-                                 'gen_diverse_trajs'],
+                                 'gen_diverse_trajs',
+                                 'gen_room_trajs'],
                         help='Type of data to be generated.')
     parser.add_argument('--save_dir', type=str, required=True,
                         help='Directory to save expert data in.')
@@ -557,6 +644,8 @@ if __name__ == '__main__':
                         help='Gridworld environment width.')
     parser.add_argument('--height', type=int, default=11,
                         help='Gridworld environment height.')
+    parser.add_argument('--room-size', type=int, default=3,
+                        help='Room size for Rooms grid environment.')
     parser.add_argument('--save_format', type=str, default='text',
                         choices=['text', 'h5'],
                         help='Format to save expert data in.')
