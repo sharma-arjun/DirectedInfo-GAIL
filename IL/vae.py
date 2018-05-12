@@ -515,6 +515,15 @@ class VAETrain(object):
 
         self.vae_model.train()
 
+    def save_checkpoint(self, epoch):
+        model_data = {
+                'vae_model': self.vae_model,
+                'Q_model': self.Q_model,
+                'Q_2_model': self.Q_2_model,
+                'Q_model_linear': self.Q_model_linear,
+        }
+        torch.save(model_data, self.model_checkpoint_filename(epoch))
+
     def load_checkpoint(self, checkpoint_path):
         '''Load models from checkpoint.'''
         checkpoint_models = torch.load(checkpoint_path)
@@ -575,8 +584,8 @@ class VAETrain(object):
             mu, logvar = self.vae_model.encode(x, c)
             return self.vae_model.reparameterize(mu, logvar)
 
-    def train_goal_pred_only(self, expert, num_epochs, batch_size):
-        '''Train goal prediction part of the network.'''
+    def train(self, expert, num_epochs, batch_size,
+              train_goal_policy_only=False):
         final_train_stats = {
             'train_loss': [],
             'goal_pred_conf_arr': [],
@@ -595,7 +604,13 @@ class VAETrain(object):
 
         for epoch in range(1, num_epochs+1):
             # self.train_epoch(epoch, expert)
-            train_stats = self.train_goal_policy(epoch, expert, batch_size)
+            # self.vae_model.update_temperature(epoch-1)
+            train_stats = self.train_fixed_length_epoch(
+                    epoch,
+                    expert,
+                    batch_size,
+                    train_goal_policy_only=train_goal_policy_only)
+
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
 
@@ -603,87 +618,19 @@ class VAETrain(object):
                 results_pkl_path = os.path.join(self.args.results_dir,
                                                 'results.pkl')
                 self.test_models(expert, results_pkl_path=None,
-                                 test_goal_policy_only=True)
+                                 test_goal_policy_only=train_goal_policy_only)
 
             if epoch % self.args.checkpoint_every_epoch == 0:
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(torch.FloatTensor)
-
-                 # Loading opt in mac leads to CUDA error?
-                model_data = {
-                    'goal_mlp': self.vae_model.policy_goal,
-                    'Q_model': self.Q_model,
-                    'Q_2_model': self.Q_2_model,
-                    'Q_model_linear': self.Q_model_linear,
-                }
-
-                torch.save(model_data, self.model_checkpoint_filename(epoch))
-                print("Did save checkpoint file: {}".format(
-                    self.model_checkpoint_filename(epoch)))
-
+                self.save_checkpoint(epoch)
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(self.dtype)
 
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
         self.test_models(expert, results_pkl_path=results_pkl_path,
                          other_results_dict={'train_stats': final_train_stats},
-                         test_goal_policy_only=True)
-
-    def train(self, expert, num_epochs, batch_size):
-        final_train_stats = {
-            'train_loss': [],
-            'goal_pred_conf_arr': [],
-        }
-        self.train_step_count = 0
-        # Convert models to right type.
-        self.convert_models_to_type(self.dtype)
-
-        # Create the checkpoint directory.
-        if not os.path.exists(self.model_checkpoint_dir()):
-            os.makedirs(self.model_checkpoint_dir())
-        # Save runtime arguments to pickle file
-        args_pkl_filepath = os.path.join(self.args.results_dir, 'args.pkl')
-        with open(args_pkl_filepath, 'wb') as args_pkl_f:
-            pickle.dump(self.args, args_pkl_f, protocol=2)
-
-        for epoch in range(1, num_epochs+1):
-            # self.train_epoch(epoch, expert)
-            if args.use_discrete_vae:
-                self.vae_model.update_temperature(epoch-1)
-                print('Temperature:', self.vae_model.temperature)
-            train_stats = self.train_fixed_length_epoch(epoch,
-                                                        expert,
-                                                        batch_size)
-            # Update stats for epoch
-            final_train_stats['train_loss'].append(train_stats['train_loss'])
-
-            if epoch % 1 == 0:
-                results_pkl_path = os.path.join(self.args.results_dir,
-                                                'results.pkl')
-                self.test_models(expert, results_pkl_path=None)
-
-            if epoch % self.args.checkpoint_every_epoch == 0:
-                if self.dtype != torch.FloatTensor:
-                    self.convert_models_to_type(torch.FloatTensor)
-
-                 # Loading opt in mac leads to CUDA error?
-                model_data = {
-                    'vae_model': self.vae_model,
-                    'Q_model': self.Q_model,
-                    'Q_2_model': self.Q_2_model,
-                    'Q_model_linear': self.Q_model_linear,
-                }
-
-                torch.save(model_data, self.model_checkpoint_filename(epoch))
-                print("Did save checkpoint file: {}".format(
-                    self.model_checkpoint_filename(epoch)))
-
-                if self.dtype != torch.FloatTensor:
-                    self.convert_models_to_type(self.dtype)
-
-        results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
-        self.test_models(expert, results_pkl_path=results_pkl_path,
-                         other_results_dict={'train_stats': final_train_stats})
+                         test_goal_policy_only=train_goal_policy_only)
 
 
     # TODO: Add option to not save gradients for backward pass when not needed
@@ -699,11 +646,16 @@ class VAETrain(object):
         # Predict goal for the entire episode i.e., forward prop through Q
         batch_size, episode_len = ep_state.shape[0], ep_state.shape[1]
 
-        ht = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
-        ct = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
-        ht_2 = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
-        ct_2 = Variable(torch.zeros(batch_size, 64).type(self.dtype), requires_grad=True)
-        final_goal = Variable(torch.zeros(batch_size, num_goals).type(self.dtype))
+        ht = Variable(torch.zeros(batch_size, 64).type(self.dtype),
+                      requires_grad=True)
+        ct = Variable(torch.zeros(batch_size, 64).type(self.dtype),
+                      requires_grad=True)
+        ht_2 = Variable(torch.zeros(batch_size, 64).type(self.dtype),
+                        requires_grad=True)
+        ct_2 = Variable(torch.zeros(batch_size, 64).type(self.dtype),
+                        requires_grad=True)
+        final_goal = Variable(torch.zeros(batch_size, num_goals).type(
+            self.dtype))
         pred_goal = []
         for t in range(episode_len):
             if self.env_type == 'grid':
@@ -972,199 +924,8 @@ class VAETrain(object):
 
         return results
 
-    def train_goal_policy(self, epoch, expert, batch_size=1):
-        '''Train the goal prediction model only.'''
-        self.set_models_to_train()
-        history_size = self.vae_model.history_size
-        train_stats = {
-            'train_loss': [],
-        }
-
-        # TODO: The current sampling process can retrain on a single trajectory
-        # multiple times. Will fix it later.
-        batch_size = 1
-        num_batches = len(expert) // batch_size
-        total_epoch_loss, total_epoch_per_step_loss = 0.0, 0.0
-
-        for batch_idx in range(num_batches):
-            # Train loss for this batch
-            train_loss, train_goal_policy_loss = 0.0, 0.0
-            ep_timesteps = 0
-            batch = expert.sample(batch_size)
-
-            # vae_opt only optimizes goal model here.
-            self.vae_opt.zero_grad()
-            self.Q_model_opt.zero_grad()
-
-            ep_state, ep_action, ep_c, ep_mask = batch
-            episode_len = len(ep_state[0])
-
-            # After below operation ep_state, ep_action will be a tuple of
-            # states, tuple of actions
-            ep_state = (ep_state[0])
-            ep_action = (ep_action[0])
-            ep_c = (ep_c[0])[np.newaxis, :]
-            ep_mask = (ep_mask[0])[np.newaxis, :]
-
-            true_goal_numpy = np.zeros((self.num_goals))
-            true_goal_numpy[int(ep_c[0][0])] = 1
-            true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(
-                0).type(self.dtype))
-
-            if self.use_rnn_goal_predictor:
-                final_goal, pred_goal = self.predict_goal(ep_state,
-                                                          ep_action,
-                                                          ep_c,
-                                                          ep_mask,
-                                                          self.num_goals)
-
-            # ep_action is tuple of arrays
-            action_var = Variable(
-                    torch.from_numpy(np.array(ep_action)).type(self.dtype))
-
-            if self.env_type == 'grid':
-                x_state_obj = State(ep_state[0].tolist(), self.obstacles)
-                x_feat = self.get_state_features(x_state_obj,
-                                                 self.args.use_state_features)
-            elif self.env_type == 'mujoco':
-                x_feat = ep_state[0]
-                self.env.reset()
-                self.env.env.set_state(np.concatenate(
-                    (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
-
-            x = np.reshape(x_feat, (1, -1))
-
-            # Add history to state
-            if history_size > 1:
-                x = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
-                                 dtype=np.float32)
-                x[:, history_size - 1, :] = x_feat
-
-            # Store list of losses to backprop later.
-            ep_loss, curr_state_arr = [], ep_state[0]
-            for t in range(episode_len):
-                ep_timesteps += 1
-                x_var = Variable(torch.from_numpy(
-                    x.reshape((1, -1))).type(self.dtype))
-
-                # vae_output is the reconstruction output using x and g
-                if self.args.use_rnn_goal:
-                    vae_output = self.vae_model(x_var, None, final_goal,
-                                                only_goal_policy=True)
-                else:
-                    vae_output = self.vae_model(x_var, None, true_goal,
-                                                only_goal_policy=True)
-
-                expert_action_var = action_var[t].clone().unsqueeze(0)
-
-                loss = self.loss_function_using_goal(
-                        vae_output[0],
-                        expert_action_var,
-                        epoch)
-
-                ep_loss.append(loss)
-                train_loss += loss.data[0]
-
-                pred_actions_numpy = vae_output[0].data.cpu().numpy()
-
-                if history_size > 1:
-                    x[:,:(history_size-1),:] = x[:,1:,:]
-
-                if self.env_type == 'grid':
-                    # Get next state from action
-                    action = Action(np.argmax(pred_actions_numpy[0, :]))
-                    # Get current state
-                    state = State(curr_state_arr.tolist(), self.obstacles)
-                    # Get next state
-                    next_state = self.transition_func(state, action, 0)
-
-                    if history_size > 1:
-                        x[:, history_size-1] = self.get_state_features(
-                                next_state, self.args.use_state_features)
-                    else:
-                        x[:] = self.get_state_features(
-                                next_state, self.args.use_state_features)
-                    # Update current state
-                    curr_state_arr = np.array(next_state.coordinates,
-                                              dtype=np.float32)
-
-                elif self.env_type == 'mujoco':
-                    action = pred_actions_numpy[0, :]
-                    next_state, _, done, _ = self.env.step(action)
-                    if done:
-                        break
-
-                    next_state = np.concatenate(
-                            (next_state, np.array([(t+1)/(episode_len+1)])),
-                            axis=0)
-
-                    if history_size > 1:
-                        x[:, history_size-1] = next_state
-                    else:
-                        x[:] = next_state
-
-                    curr_state_arr = next_state
-
-            # Calculate the total loss and backprop.
-            total_loss = ep_loss[0]
-            for t in range(1, len(ep_loss)):
-                total_loss = total_loss + ep_loss[t]
-            total_loss.backward()
-
-            # Get the gradients and network weights
-            if self.args.log_gradients_tensorboard:
-                self.log_model_to_tensorboard(
-                        models_to_log=(
-                            'goal_policy',
-                            'Q_model_linear',
-                            'Q_model',
-                        ))
-
-            self.vae_opt.step()
-            self.Q_model_opt.step()
-
-            # Update stats
-            total_epoch_loss += train_loss
-            total_epoch_per_step_loss += (train_loss / episode_len)
-            train_stats['train_loss'].append(train_loss)
-
-            '''
-            if len(train_stats['train_loss']) > 10 and \
-                    np.sum(train_stats['train_loss'][-10:]) < 4.0:
-                pdb.set_trace()
-            '''
-
-            self.logger.summary_writer.add_scalar('loss/per_sample',
-                                                   train_loss,
-                                                   self.train_step_count)
-
-            if batch_idx % self.args.log_interval == 0:
-                if self.args.use_separate_goal_policy:
-                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
-                          'Timesteps: {}'.format(
-                        epoch, batch_idx, num_batches, train_loss,
-                        ep_timesteps))
-                else:
-                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
-                          'Timesteps: {}'.format(
-                        epoch, batch_idx, num_batches, train_loss,
-                        ep_timesteps))
-
-            self.train_step_count += 1
-
-        # Add other data to logger
-        self.logger.summary_writer.add_scalar('loss/per_epoch_all_step',
-                                               total_epoch_loss / num_batches,
-                                               self.train_step_count)
-        self.logger.summary_writer.add_scalar(
-                'loss/per_epoch_per_step',
-                total_epoch_per_step_loss  / num_batches,
-                self.train_step_count)
-
-        return train_stats
-
     def train_fixed_length_epoch(self, epoch, expert, batch_size=1,
-                                 episode_len=6):
+                                 episode_len=6, train_goal_policy_only=False):
         '''Train VAE with variable length expert samples.
         '''
         self.set_models_to_train()
@@ -1246,42 +1007,56 @@ class VAETrain(object):
 
                 # Append 'c' at the end.
                 if args.use_rnn_goal:
-                    c_var = torch.cat(
-                            [final_goal,
-                                Variable(torch.from_numpy(c).type(self.dtype))],
-                            dim=1)
+                    if train_goal_policy_only:
+                        c_var = None
+                    else:
+                        c_var = torch.cat([final_goal,
+                            Variable(torch.from_numpy(c).type(self.dtype))],
+                                dim=1)
 
-                    vae_output = self.vae_model(x_var, c_var, final_goal)
+                    vae_output = self.vae_model(
+                            x_var, c_var, final_goal,
+                            only_goal_policy=train_goal_policy_only)
                 else:
-                    c_var = torch.cat(
-                            [true_goal,
-                                Variable(torch.from_numpy(c).type(self.dtype))],
-                            dim=1)
-
-                    vae_output = self.vae_model(x_var, c_var, true_goal)
-
+                    if train_goal_policy_only:
+                        c_var = None
+                    else:
+                        c_var = torch.cat(
+                                [true_goal,
+                                    Variable(torch.from_numpy(c).type(self.dtype))],
+                                dim=1)
+                    vae_output = self.vae_model(
+                            x_var, c_var, true_goal,
+                            only_goal_policy=train_goal_policy_only)
 
                 expert_action_var = action_var[:, t, :].clone()
-                if self.args.use_discrete_vae:
+                if train_goal_policy_only:
+                    vae_reparam_input = None
+                elif self.args.use_discrete_vae:
                     vae_reparam_input = (vae_output[2],
                                          self.vae_model.temperature)
                 else:
                     vae_reparam_input = (vae_output[2], vae_output[3])
 
-                loss, policy_loss, policy2_loss, KLD_loss = self.loss_function(
-                        vae_output[0],
-                        vae_output[1],
-                        expert_action_var,
-                        vae_output[2:],
-                        epoch)
+                if train_goal_policy_only:
+                    loss = self.loss_function_using_goal(vae_output[0],
+                                                         expert_action_var,
+                                                         epoch)
+                else:
+                    loss, policy_loss, policy2_loss, KLD_loss = \
+                            self.loss_function(vae_output[0],
+                                               vae_output[1],
+                                               expert_action_var,
+                                               vae_output[2:],
+                                               epoch)
+
+                    train_policy_loss += policy_loss.data[0]
+                    if self.args.use_separate_goal_policy:
+                        train_policy2_loss += policy2_loss.data[0]
+                    train_KLD_loss += KLD_loss.data[0]
 
                 ep_loss.append(loss)
-                #loss.backward()
                 train_loss += loss.data[0]
-                train_policy_loss += policy_loss.data[0]
-                if self.args.use_separate_goal_policy:
-                    train_policy2_loss += policy2_loss.data[0]
-                train_KLD_loss += KLD_loss.data[0]
 
                 # pred_actions_numpy is (N, A)
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
@@ -1300,7 +1075,8 @@ class VAETrain(object):
                     if history_size > 1:
                         x_hist[:, history_size-1] = self.get_state_features(
                                 next_state, self.args.use_state_features)
-                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
+                        x = self.get_history_features(
+                                x_hist, self.args.use_velocity_features)
                     else:
                         x[:] = self.get_state_features(
                                 next_state, self.args.use_state_features)
@@ -1328,8 +1104,10 @@ class VAETrain(object):
 
 
                 # update c
-                c[:, -self.vae_model.posterior_latent_size:] = \
-                    self.vae_model.reparameterize(*vae_reparam_input).data.cpu()
+                if not train_goal_policy_only:
+                    c[:, -self.vae_model.posterior_latent_size:] = \
+                        self.vae_model.reparameterize(
+                                *vae_reparam_input).data.cpu()
 
             # Calculate the total loss.
             total_loss = ep_loss[0]
@@ -1337,13 +1115,17 @@ class VAETrain(object):
                 total_loss = total_loss + ep_loss[t]
             total_loss.backward()
 
-            # Get the gradients and network weights
-            if self.args.log_gradients_tensorboard:
-                self.log_model_to_tensorboard()
-
             self.vae_opt.step()
             if self.use_rnn_goal_predictor:
                 self.Q_model_opt.step()
+
+            # Get the gradients and network weights
+            if self.args.log_gradients_tensorboard:
+                if train_goal_policy_only:
+                    self.log_model_to_tensorboard(models_to_log=(
+                            'goal_policy', 'Q_model_linear', 'Q_model'))
+                else:
+                    self.log_model_to_tensorboard()
 
 
             # Update stats
@@ -1353,21 +1135,29 @@ class VAETrain(object):
             self.logger.summary_writer.add_scalar('loss/per_sample',
                                                    train_loss,
                                                    self.train_step_count)
-            self.logger.summary_writer.add_scalar('loss/policy_loss_per_sample',
-                                                   train_policy_loss,
-                                                   self.train_step_count)
-            self.logger.summary_writer.add_scalar('loss/KLD_per_sample',
-                                                   train_KLD_loss,
-                                                   self.train_step_count)
-            if self.args.use_separate_goal_policy:
+            if not train_goal_policy_only:
                 self.logger.summary_writer.add_scalar(
-                        'loss/policy2_loss_per_sample',
-                        train_policy2_loss,
+                        'loss/policy_loss_per_sample',
+                        train_policy_loss,
+                        self.train_step_count)
+                self.logger.summary_writer.add_scalar(
+                        'loss/KLD_per_sample',
+                        train_KLD_loss,
                         self.train_step_count)
 
+                if self.args.use_separate_goal_policy:
+                    self.logger.summary_writer.add_scalar(
+                            'loss/policy2_loss_per_sample',
+                            train_policy2_loss,
+                            self.train_step_count)
 
             if batch_idx % self.args.log_interval == 0:
-                if self.args.use_separate_goal_policy:
+                if train_goal_policy_only:
+                    print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
+                          'Timesteps: {}'.format(
+                        epoch, batch_idx, num_batches, train_loss,
+                        ep_timesteps))
+                elif self.args.use_separate_goal_policy:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
                           'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t '\
                           'KLD: {:.2f}, \t Timesteps: {}'.format(
@@ -1768,11 +1558,12 @@ def main(args):
         assert args.use_separate_goal_policy == 1, \
                 'use_separate_goal_policy flag should be set for goal prediction'
         if len(args.finetune_path) > 0:
-            vae_train.load_checkpoint_goal_policy(args.finetune_path)
+            vae_train.load_checkpoint(args.finetune_path)
             assert os.path.dirname(os.path.realpath(args.finetune_path)) != \
                     os.path.dirname(os.path.realpath(args.results_dir)), \
                     "Do not save new results in finetune dir."
-        vae_train.train_goal_pred_only(expert, args.num_epochs, args.batch_size)
+        vae_train.train(expert, args.num_epochs, args.batch_size,
+                        train_goal_policy_only=True)
     elif args.run_mode == 'train':
         if len(args.finetune_path) > 0:
             vae_train.load_checkpoint(args.finetune_path)
