@@ -2,7 +2,7 @@ import numpy as np
 import argparse
 import h5py
 import os
-import pdb
+import pdb, ipdb
 import pickle
 import torch
 import gym
@@ -352,7 +352,7 @@ class VAETrain(object):
                             'cp_{}.pth'.format(epoch))
 
     def create_environment(self, env_type, env_name=None):
-        if env_type == 'grid':
+        if 'grid' in env_type:
             self.transition_func = TransitionFunction(self.width,
                                                       self.height,
                                                       obstacle_movement)
@@ -619,6 +619,7 @@ class VAETrain(object):
                 results_pkl_path = os.path.join(self.args.results_dir,
                                                 'results.pkl')
                 self.test_models(expert, results_pkl_path=None,
+                                 num_test_samples=5,   
                                  test_goal_policy_only=train_goal_policy_only)
 
             if epoch % self.args.checkpoint_every_epoch == 0:
@@ -630,6 +631,7 @@ class VAETrain(object):
 
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
         self.test_models(expert, results_pkl_path=results_pkl_path,
+                         num_test_samples=2,
                          other_results_dict={'train_stats': final_train_stats},
                          test_goal_policy_only=train_goal_policy_only)
 
@@ -659,7 +661,7 @@ class VAETrain(object):
             self.dtype))
         pred_goal = []
         for t in range(episode_len):
-            if self.env_type == 'grid':
+            if 'grid' in self.env_type:
                 state_obj = StateVector(ep_state[:, t, :], self.obstacles)
                 # state_tensor is (N, F)
                 state_tensor = torch.from_numpy(self.get_state_features(
@@ -751,8 +753,11 @@ class VAETrain(object):
                 final_goal_numpy = final_goal.data.cpu().numpy().reshape((-1))
                 results['pred_goal'].append(final_goal_numpy)
 
-            true_goal_numpy = np.zeros((ep_c.shape[0], self.num_goals))
-            true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
+            if self.env_type == 'grid_room':
+                true_goal_numpy = np.copy(ep_c)
+            else:
+                true_goal_numpy = np.zeros((ep_c.shape[0], self.num_goals))
+                true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
             true_goal = Variable(torch.from_numpy(true_goal_numpy).type(
                 self.dtype))
 
@@ -765,7 +770,7 @@ class VAETrain(object):
             # Get the initial state
             c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
-            if self.env_type == 'grid':
+            if 'grid' in self.env_type:
                 x_state_obj = StateVector(ep_state[:, 0, :], self.obstacles)
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
@@ -806,10 +811,13 @@ class VAETrain(object):
                             Variable(torch.from_numpy(c).type(self.dtype))],
                             dim=1)
                 else:
-                    c_var = torch.cat([
-                        true_goal,
-                        Variable(torch.from_numpy(c).type(self.dtype))],
-                        dim=1)
+                    c_var = Variable(torch.from_numpy(c).type(self.dtype))
+                    if len(true_goal.size()) == 2:
+                        c_var = torch.cat([true_goal, c_var], dim=1)
+                    elif len(true_goal.size()) == 3:
+                        c_var = torch.cat([true_goal[:, t, :], c_var], dim=1)
+                    else:
+                        raise ValueError("incorrect true goal size")
 
                 if self.args.use_rnn_goal:
                     vae_output = self.vae_model(
@@ -818,11 +826,14 @@ class VAETrain(object):
                             final_goal,
                             only_goal_policy=test_goal_policy_only)
                 else:
-                    vae_output = self.vae_model(
-                            x_var,
-                            c_var,
-                            true_goal,
-                            only_goal_policy=test_goal_policy_only)
+                    if len(true_goal.size()) == 2:
+                        vae_output = self.vae_model(
+                                x_var, c_var, true_goal,
+                                only_goal_policy=test_goal_policy_only)
+                    else:
+                        vae_output = self.vae_model(
+                                x_var, c_var, true_goal[:, t, ],
+                                only_goal_policy=test_goal_policy_only)
 
                 if test_goal_policy_only:
                     # No reparametization happens when training goal policy only
@@ -854,7 +865,7 @@ class VAETrain(object):
                 if history_size > 1:
                     x_hist[:, :(history_size-1), :] = x_hist[:,1:, :]
 
-                if self.env_type == 'grid':
+                if 'grid' in self.env_type:
                     # Get next state from action
                     action = ActionVector(np.argmax(pred_actions_numpy, axis=1))
                     # Get current state object
@@ -956,8 +967,11 @@ class VAETrain(object):
             ep_action = np.array(ep_action, dtype=np.float32)
             ep_c = np.array(ep_c, dtype=np.int32)
 
-            true_goal_numpy = np.zeros((ep_c.shape[0], self.num_goals))
-            true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
+            if self.env_type == 'grid_room':
+                true_goal_numpy = np.copy(ep_c)
+            else: 
+                true_goal_numpy = np.zeros((ep_c.shape[0], self.num_goals))
+                true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
             true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                     self.dtype)
 
@@ -978,7 +992,7 @@ class VAETrain(object):
             # Get the initial state (N, C)
             c = -1 * np.ones((batch_size, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
-            if self.env_type == 'grid':
+            if 'grid' in self.env_type:
                 x_state_obj = StateVector(ep_state[:, 0, :], self.obstacles)
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
@@ -1022,13 +1036,22 @@ class VAETrain(object):
                     if train_goal_policy_only:
                         c_var = None
                     else:
-                        c_var = torch.cat(
-                                [true_goal,
-                                    Variable(torch.from_numpy(c).type(self.dtype))],
-                                dim=1)
-                    vae_output = self.vae_model(
-                            x_var, c_var, true_goal,
-                            only_goal_policy=train_goal_policy_only)
+                        c_var = Variable(torch.from_numpy(c).type(self.dtype))
+                        if len(true_goal.size()) == 2:
+                            c_var = torch.cat([true_goal, c_var], dim=1)
+                        elif len(true_goal.size()) == 3:
+                            c_var = torch.cat([true_goal[:, t, :], c_var], dim=1)
+                        else:
+                            raise ValueError("incorrect true goal size")
+
+                    if len(true_goal.size()) == 2:
+                        vae_output = self.vae_model(
+                                x_var, c_var, true_goal,
+                                only_goal_policy=train_goal_policy_only)
+                    else:
+                        vae_output = self.vae_model(
+                                x_var, c_var, true_goal[:, t, ],
+                                only_goal_policy=train_goal_policy_only)
 
                 expert_action_var = action_var[:, t, :].clone()
                 if train_goal_policy_only:
@@ -1065,7 +1088,7 @@ class VAETrain(object):
                 if history_size > 1:
                     x_hist[:, :(history_size-1), :] = x_hist[:, 1:, :]
 
-                if self.env_type == 'grid':
+                if 'grid' in self.env_type:
                     # Get next state from action (N,)
                     action = ActionVector(np.argmax(pred_actions_numpy, axis=1))
                     # Get current state
@@ -1220,8 +1243,11 @@ class VAETrain(object):
             ep_c = (ep_c[0])[np.newaxis, :]
             ep_mask = (ep_mask[0])[np.newaxis, :]
 
-            true_goal_numpy = np.zeros((self.num_goals))
-            true_goal_numpy[int(ep_c[0][0])] = 1
+            if self.env_type == 'grid_room':
+                true_goal_numpy = np.copy(ep_c)
+            else:
+                true_goal_numpy = np.zeros((self.num_goals))
+                true_goal_numpy[int(ep_c[0][0])] = 1
             true_goal = Variable(torch.from_numpy(true_goal_numpy).unsqueeze(
                 0).type(self.dtype))
 
@@ -1243,7 +1269,7 @@ class VAETrain(object):
             # Get the initial state
             c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
-            if self.env_type == 'grid':
+            if 'grid' in self.env_type:
                 x_state_obj = State(ep_state[0].tolist(), self.obstacles)
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
@@ -1314,7 +1340,7 @@ class VAETrain(object):
                 if history_size > 1:
                     x_hist[:,:(history_size-1),:] = x_hist[:,1:,:]
 
-                if self.env_type == 'grid':
+                if 'grid' in self.env_type:
                     # Get next state from action
                     action = Action(np.argmax(pred_actions_numpy[0, :]))
                     # Get current state
@@ -1523,7 +1549,7 @@ def main(args):
     )
 
     expert = ExpertHDF5(args.expert_path, args.vae_state_size)
-    if args.env_type == 'grid':
+    if 'grid' in args.env_type:
         expert.push(only_coordinates_in_state=True, one_hot_action=True)
     elif args.env_type == 'mujoco':
         expert.push(only_coordinates_in_state=False, one_hot_action=False)
@@ -1696,7 +1722,8 @@ if __name__ == '__main__':
     parser.set_defaults(discrete_action=False)
 
     # Environment - Grid or Mujoco
-    parser.add_argument('--env-type', default='grid', choices=['grid', 'mujoco'],
+    parser.add_argument('--env-type', default='grid', 
+                        choices=['grid', 'grid_room', 'mujoco'],
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')
