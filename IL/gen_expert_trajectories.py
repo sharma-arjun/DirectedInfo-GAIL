@@ -525,24 +525,20 @@ def gen_room_trajs(grid_width, grid_height, room_size):
     for node in set_diff:
         for a in deltas:
             neigh = (node[0]+a[0], node[1]+a[1])
-            if neigh[0] >= 0 and neigh[0] < grid_width and neigh[1] >= 0 and neigh[1] < grid_height:
+            if neigh[0] >= 0 and neigh[0] < grid_width and \
+                    neigh[1] >= 0 and neigh[1] < grid_height:
                 if neigh not in obstacles:
                     graph.add_edge(node, neigh, 1)
                     graph.add_edge(neigh, node, 1)
 
 
     for n in range(N):
+        states, actions, goals = [], [], []
 
-        rem_len = T
-
-        states = []
-        actions = []
-
-        path_key = str(n)
+        rem_len, path_key = T, str(n)
         expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
 
         while rem_len > 0:
-
             start_state = State(sample_start(set_diff), obstacles)
             apple_state = State(sample_start(
                 list(room_set-set(start_state.coordinates))), obstacles)
@@ -572,13 +568,14 @@ def gen_room_trajs(grid_width, grid_height, room_size):
 
                 states.append(state)
                 actions.append(action_delta)
+                goals.append(destination)
 
             rem_len = rem_len - path_len
         
         
         expert_data_dict[path_key]['state'] = states
         expert_data_dict[path_key]['action'] = actions
-        expert_data_dict[path_key]['goal'] = [0]*T
+        expert_data_dict[path_key]['goal'] = goals
 
     return env_data_dict, expert_data_dict, obstacles, set_diff
         
