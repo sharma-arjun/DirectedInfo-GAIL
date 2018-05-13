@@ -544,7 +544,8 @@ def gen_room_trajs(grid_width, grid_height, room_size):
         while rem_len > 0:
 
             start_state = State(sample_start(set_diff), obstacles)
-            apple_state = State(sample_start(list(room_set-set(start_state.coordinates))), obstacles)
+            apple_state = State(sample_start(
+                list(room_set-set(start_state.coordinates))), obstacles)
 
             source = start_state.coordinates
             destination = apple_state.coordinates

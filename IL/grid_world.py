@@ -214,6 +214,8 @@ class TransitionFunction():
             new_coord_arr = np.zeros(state.coordinates.shape)
             for b in range(batch_size):
                 state_coord = state.coordinates_arr[b, :]
+                if type(state_coord) is not type([]):
+                    state_coord = state_coord.tolist()
                 action_delta = action.delta_arr[b]
                 new_coord, new_list_of_obstacle = self.next_state(
                         state_coord,

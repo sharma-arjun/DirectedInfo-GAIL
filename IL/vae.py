@@ -609,7 +609,8 @@ class VAETrain(object):
                     epoch,
                     expert,
                     batch_size,
-                    train_goal_policy_only=train_goal_policy_only)
+                    train_goal_policy_only=train_goal_policy_only,
+                    episode_len=self.args.episode_len)
 
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
@@ -1705,6 +1706,9 @@ if __name__ == '__main__':
                         choices=['train', 'test',
                                  'train_goal_pred', 'test_goal_pred'],
                         help='Mode to run in.')
+    # Expert batch episode length
+    parser.add_argument('--episode_len', type=int, default=6,
+                        help='Fixed episode length for batch training.')
 
     args = parser.parse_args()
     if args.cuda and not torch.cuda.is_available():
