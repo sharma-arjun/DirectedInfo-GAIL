@@ -634,61 +634,6 @@ class VAETrain(object):
                          other_results_dict={'train_stats': final_train_stats},
                          test_goal_policy_only=train_goal_policy_only)
 
-    def train(self, expert, num_epochs, batch_size):
-        final_train_stats = {
-            'train_loss': [],
-            'goal_pred_conf_arr': [],
-        }
-        self.train_step_count = 0
-        # Convert models to right type.
-        self.convert_models_to_type(self.dtype)
-
-        # Create the checkpoint directory.
-        if not os.path.exists(self.model_checkpoint_dir()):
-            os.makedirs(self.model_checkpoint_dir())
-        # Save runtime arguments to pickle file
-        args_pkl_filepath = os.path.join(self.args.results_dir, 'args.pkl')
-        with open(args_pkl_filepath, 'wb') as args_pkl_f:
-            pickle.dump(self.args, args_pkl_f, protocol=2)
-
-        for epoch in range(1, num_epochs+1):
-            # self.train_epoch(epoch, expert)
-            if args.use_discrete_vae:
-                self.vae_model.update_temperature(epoch)
-            train_stats = self.train_variable_length_epoch(epoch,
-                                                           expert,
-                                                           batch_size)
-            # Update stats for epoch
-            final_train_stats['train_loss'].append(train_stats['train_loss'])
-
-            if epoch % 1 == 0:
-                results_pkl_path = os.path.join(self.args.results_dir,
-                                                'results.pkl')
-                self.test_models(expert, results_pkl_path=None)
-
-            if epoch % self.args.checkpoint_every_epoch == 0:
-                if self.dtype != torch.FloatTensor:
-                    self.convert_models_to_type(torch.FloatTensor)
-
-                 # Loading opt in mac leads to CUDA error?
-                model_data = {
-                    'vae_model': self.vae_model,
-                    'Q_model': self.Q_model,
-                    'Q_2_model': self.Q_2_model,
-                    'Q_model_linear': self.Q_model_linear,
-                }
-
-                torch.save(model_data, self.model_checkpoint_filename(epoch))
-                print("Did save checkpoint file: {}".format(
-                    self.model_checkpoint_filename(epoch)))
-
-                if self.dtype != torch.FloatTensor:
-                    self.convert_models_to_type(self.dtype)
-
-        results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
-        self.test_models(expert, results_pkl_path=results_pkl_path,
-                         other_results_dict={'train_stats': final_train_stats})
-
 
 
     # TODO: Add option to not save gradients for backward pass when not needed
@@ -1330,7 +1275,6 @@ class VAETrain(object):
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[0]
-                pdb.set_trace()
                 self.env.reset()
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
