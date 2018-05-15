@@ -2,7 +2,7 @@ import numpy as np
 import argparse
 import h5py
 import os
-import pdb, ipdb
+import pdb
 import pickle
 import torch
 import gym
@@ -956,6 +956,7 @@ class VAETrain(object):
             train_loss, train_policy_loss = 0.0, 0.0
             train_KLD_loss, train_policy2_loss = 0.0, 0.0
             ep_timesteps = 0
+            true_return = 0.0
             batch = expert.sample(batch_size)
 
             self.vae_opt.zero_grad()
@@ -1110,7 +1111,36 @@ class VAETrain(object):
 
                 elif self.env_type == 'mujoco':
                     action = pred_actions_numpy[0, :]
-                    next_state, _, done, _ = self.env.step(action)
+
+                    if ep_c[0, 0] == 0:
+                        self.env.env.mode = 'walk'
+                    elif ep_c[0, 0] == 1:
+                        self.env.env.mode = 'walkback'
+                    elif ep_c[0, 0] == 2:
+                        self.env.env.mode = 'jump'
+                    elif ep_c[0, 0] == 3:
+                        if t < episode_len/2:
+                            self.env.env.mode = 'jump'
+                        else:
+                            self.env.env.mode = 'walk'
+                    elif ep_c[0, 0] == 4:
+                        if t < episode_len/2:
+                            self.env.env.mode = 'jump'
+                        else:
+                            self.env.env.mode = 'walkback'
+                    elif ep_c[0, 0] == 5:
+                        if t < episode_len/2:
+                            self.env.env.mode = 'walk'
+                        else:
+                            self.env.env.mode = 'jump'
+                    elif ep_c[0, 0] == 6:
+                        if t < episode_len/2:
+                            self.env.env.mode = 'walkback'
+                        else:
+                            self.env.env.mode = 'jump'
+
+                    next_state, true_reward, done, _ = self.env.step(action)
+                    true_return += true_reward
                     if done:
                         break
 
@@ -1178,22 +1208,22 @@ class VAETrain(object):
             if batch_idx % self.args.log_interval == 0:
                 if train_goal_policy_only:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
-                          'Timesteps: {}'.format(
+                          'Timesteps: {} \t Return: {:.3f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        ep_timesteps))
+                        ep_timesteps, true_return))
                 elif self.args.use_separate_goal_policy:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
                           'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t '\
-                          'KLD: {:.2f}, \t Timesteps: {}'.format(
+                          'KLD: {:.2f}, \t Timesteps: {} \t Return: {:.3f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
                         train_policy_loss, train_policy2_loss, train_KLD_loss,
-                        ep_timesteps))
+                        ep_timesteps, true_return))
                 else:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
                             'Policy Loss: {:.2f}, \t KLD: {:.2f}, \t ' \
-                            'Timesteps: {}'.format(
+                            'Timesteps: {} \t Return: {:.3f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_policy_loss, train_KLD_loss, ep_timesteps))
+                        train_policy_loss, train_KLD_loss, ep_timesteps, true_return))
 
             self.train_step_count += 1
 
