@@ -535,7 +535,7 @@ class VAETrain(object):
     def load_checkpoint_goal_policy(self, checkpoint_path):
         '''Load models from checkpoint.'''
         checkpoint_models = torch.load(checkpoint_path)
-        self.vae_model.policy_goal.load_state_dict(checkpoint_models['goal_mlp'])
+        self.vae_model.load_state_dict(checkpoint_models['vae_model'])
         self.Q_model.load_state_dict(checkpoint_models['Q_model'])
         self.Q_2_model.load_state_dict(checkpoint_models['Q_2_model'])
         self.Q_model_linear.load_state_dict(checkpoint_models['Q_model_linear'])
@@ -1609,13 +1609,7 @@ def main(args):
             vae_train.vae_model.temperature = 0.1
         assert len(args.checkpoint_path) > 0, \
                 'No checkpoint provided for testing'
-        if args.run_mode == 'test_goal_pred':
-            vae_train.load_checkpoint_goal_policy(args.checkpoint_path)
-        elif args.run_mode == 'test':
-            vae_train.load_checkpoint(args.checkpoint_path)
-        else:
-            raise ValueError('Incorrect run_mode: {}'.format(args.run_mode))
-
+        vae_train.load_checkpoint(args.checkpoint_path)
         print("Did load models at: {}".format(args.checkpoint_path))
         results_pkl_path = os.path.join(
             args.results_dir,
