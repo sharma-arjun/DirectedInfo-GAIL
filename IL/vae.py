@@ -516,29 +516,29 @@ class VAETrain(object):
 
     def save_checkpoint(self, epoch):
         model_data = {
-                'vae_model': self.vae_model,
-                'Q_model': self.Q_model,
-                'Q_2_model': self.Q_2_model,
-                'Q_model_linear': self.Q_model_linear,
+                'vae_model': self.vae_model.state_dict(),
+                'Q_model': self.Q_model.state_dict(),
+                'Q_2_model': self.Q_2_model.state_dict(),
+                'Q_model_linear': self.Q_model_linear.state_dict(),
         }
         torch.save(model_data, self.model_checkpoint_filename(epoch))
 
     def load_checkpoint(self, checkpoint_path):
         '''Load models from checkpoint.'''
         checkpoint_models = torch.load(checkpoint_path)
-        self.vae_model = checkpoint_models['vae_model']
-        self.Q_model = checkpoint_models['Q_model']
+        self.vae_model.load_state_dict(checkpoint_models['vae_model'])
+        self.Q_model.load_state_dict(checkpoint_models['Q_model'])
         if checkpoint_models.get('Q_2_model') is not None:
-            self.Q_2_model = checkpoint_models['Q_2_model']
-        self.Q_model_linear = checkpoint_models['Q_model_linear']
+            self.Q_2_model.load_state_dict(checkpoint_models['Q_2_model'])
+        self.Q_model_linear.load_state_dict(checkpoint_models['Q_model_linear'])
 
     def load_checkpoint_goal_policy(self, checkpoint_path):
         '''Load models from checkpoint.'''
         checkpoint_models = torch.load(checkpoint_path)
-        self.vae_model.policy_goal = checkpoint_models['goal_mlp']
-        self.Q_model = checkpoint_models['Q_model']
-        self.Q_2_model = checkpoint_models['Q_2_model']
-        self.Q_model_linear = checkpoint_models['Q_model_linear']
+        self.vae_model.policy_goal.load_state_dict(checkpoint_models['goal_mlp'])
+        self.Q_model.load_state_dict(checkpoint_models['Q_model'])
+        self.Q_2_model.load_state_dict(checkpoint_models['Q_2_model'])
+        self.Q_model_linear.load_state_dict(checkpoint_models['Q_model_linear'])
 
     def get_state_features(self, state_obj, use_state_features):
         if use_state_features:
@@ -1536,8 +1536,8 @@ def main(args):
     vae_train = VAETrain(
         args,
         logger,
-        width=21,
-        height=21,
+        width=11,
+        height=15,
         state_size=args.vae_state_size,
         action_size=args.vae_action_size,
         history_size=args.vae_history_size,
