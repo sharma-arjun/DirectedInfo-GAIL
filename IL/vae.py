@@ -830,10 +830,10 @@ class VAETrain(object):
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
-                x_feat = ep_state[0]
+                x_feat = ep_state[:, 0, :]
                 dummy_state = self.env.reset()
                 self.env.env.set_state(np.concatenate(
-                    (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 dummy_state = x_feat
 
             # x is (N, F)
@@ -958,7 +958,7 @@ class VAETrain(object):
                         x[:] = next_state
 
                     # Update current state
-                    curr_state_arr = next_state
+                    curr_state_arr = np.reshape(next_state, (batch_size, -1))
 
                 # update c
                 if not test_goal_policy_only:
@@ -1052,10 +1052,10 @@ class VAETrain(object):
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
-                x_feat = ep_state[0]
+                x_feat = ep_state[:, 0, :]
                 self.env.reset()
                 self.env.env.set_state(np.concatenate(
-                    (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
+                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
 
             # x is (N, F)
             x = x_feat
@@ -1179,7 +1179,7 @@ class VAETrain(object):
                     else:
                         x[:] = next_state
 
-                    curr_state_arr = next_state
+                    curr_state_arr = np.reshape(next_state, (batch_size, -1))
 
 
                 # update c
@@ -1330,6 +1330,7 @@ class VAETrain(object):
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[0]
+                pdb.set_trace()
                 self.env.reset()
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
@@ -1430,7 +1431,7 @@ class VAETrain(object):
                     else:
                         x[:] = next_state
 
-                    curr_state_arr = next_state
+                    curr_state_arr = np.reshape(next_state, (batch_size, -1))
 
 
                 # update c
