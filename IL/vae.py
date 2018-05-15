@@ -688,7 +688,7 @@ class VAETrain(object):
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
         self.test_models(expert, results_pkl_path=results_pkl_path,
                          other_results_dict={'train_stats': final_train_stats})
->>>>>>> added temperature annealing
+
 
 
     # TODO: Add option to not save gradients for backward pass when not needed
@@ -1716,7 +1716,7 @@ if __name__ == '__main__':
 
     # Temperature
     parser.add_argument('--temperature', type=float, default=1.0,
-                        help='DiscreteVAE temperature')
+                        help='Discrete VAE temperature')
 
     # Goal prediction
     parser.add_argument('--flag_goal_pred', type=str, default='last_hidden',
@@ -1776,10 +1776,6 @@ if __name__ == '__main__':
                         action='store_false',
                         help='actions are continuous, use MSE loss')
     parser.set_defaults(discrete_action=False)
-
-    # Softmax Temperature
-    parser.add_argument('--temperature', type=float, default=1.0,
-                        help='Temperature for softmax.')
 
     # Environment - Grid or Mujoco
     parser.add_argument('--env-type', default='grid', 
