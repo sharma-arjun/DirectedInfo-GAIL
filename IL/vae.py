@@ -871,7 +871,11 @@ class VAETrain(object):
                     # Get current state object
                     state = StateVector(curr_state_arr, self.obstacles)
                     # Get next state
-                    next_state = self.transition_func(state, action, 0)
+                    #next_state = self.transition_func(state, action, 0)
+                    if t < episode_len-1:
+                        next_state = StateVector(ep_state[:, t+1, :], self.obstacles)
+                    else:
+                        break
 
                     # Update x
                     next_state_features = self.get_state_features(
@@ -888,13 +892,17 @@ class VAETrain(object):
                                               dtype=np.float32)
                 elif self.env_type == 'mujoco':
                     action = pred_actions_numpy[0, :]
-                    next_state, _, done, _ = self.env.step(action)
-                    if done:
+                    if t < episode_len-1:
+                        next_state = ep_state[:, t+1, :17]
+                    else:
                         break
+                    #next_state, _, done, _ = self.env.step(action)
+                    #if done:
+                    #    break
 
                     next_state = np.concatenate(
                             (next_state,
-                                np.array([(t+1)/(episode_len+1)])), axis=0)
+                                np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
 
                     if history_size > 1:
                         x_hist[:, history_size - 1, :] = next_state
@@ -1095,7 +1103,11 @@ class VAETrain(object):
                     # Get current state
                     state = StateVector(curr_state_arr, self.obstacles)
                     # Get next state
-                    next_state = self.transition_func(state, action, 0)
+                    #next_state = self.transition_func(state, action, 0)
+                    if t < episode_len-1:
+                        next_state = StateVector(ep_state[:, t+1, :], self.obstacles)
+                    else:
+                       break
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = self.get_state_features(
@@ -1139,13 +1151,17 @@ class VAETrain(object):
                         else:
                             self.env.env.mode = 'jump'
 
-                    next_state, true_reward, done, _ = self.env.step(action)
-                    true_return += true_reward
-                    if done:
+                    #next_state, true_reward, done, _ = self.env.step(action)
+                    if t < episode_len-1:
+                        next_state = ep_state[:, t+1, :17]
+                    else:
                         break
+                    #true_return += true_reward
+                    #if done:
+                    #    break
 
                     next_state = np.concatenate((
-                        next_state, np.array([(t+1)/(episode_len+1)])), axis=0)
+                        next_state, np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = next_state
@@ -1396,7 +1412,7 @@ class VAETrain(object):
                         break
 
                     next_state = np.concatenate((
-                        next_state, np.array([(t+1)/(episode_len+1)])), axis=0)
+                        next_state, np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = next_state
