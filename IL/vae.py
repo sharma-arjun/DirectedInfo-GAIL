@@ -588,6 +588,7 @@ class VAETrain(object):
         final_train_stats = {
             'train_loss': [],
             'goal_pred_conf_arr': [],
+            'temperature': [],
         }
         self.train_step_count = 0
         # Convert models to right type.
@@ -602,8 +603,7 @@ class VAETrain(object):
             pickle.dump(self.args, args_pkl_f, protocol=2)
 
         for epoch in range(1, num_epochs+1):
-            # self.train_epoch(epoch, expert)
-            # self.vae_model.update_temperature(epoch-1)
+            self.vae_model.update_temperature(epoch-1)
             train_stats = self.train_fixed_length_epoch(
                     epoch,
                     expert,
@@ -613,6 +613,9 @@ class VAETrain(object):
 
             # Update stats for epoch
             final_train_stats['train_loss'].append(train_stats['train_loss'])
+            if self.args.use_discrete_vae:
+                final_train_stats['temperature'].append(
+                        self.vae_model.temperature)
 
             if epoch % 1 == 0:
                 results_pkl_path = os.path.join(self.args.results_dir,
