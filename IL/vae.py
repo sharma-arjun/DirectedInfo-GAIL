@@ -180,6 +180,7 @@ class DiscreteVAE(VAE):
         r = 2e-3
         self.temperature = max(0.5, self.init_temperature * math.exp(-r*epoch))
 
+
     def encode(self, x, c):
         '''Return the log probability output for the encoder.'''
         logits = self.posterior(torch.cat((x, c), 1))
@@ -670,7 +671,7 @@ class VAETrain(object):
                 state_tensor = torch.from_numpy(self.get_state_features(
                     state_obj, self.args.use_state_features)).type(self.dtype)
             elif self.env_type == 'mujoco':
-                state_tensor = torch.from_numpy(ep_state[0, t, :]).type(self.dtype)
+                state_tensor = torch.from_numpy(ep_state[:, t, :]).type(self.dtype)
 
             # action_tensor is (N, A)
             action_tensor = torch.from_numpy(ep_action[:, t, :]).type(self.dtype)

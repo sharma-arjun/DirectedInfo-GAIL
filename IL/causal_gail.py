@@ -6,6 +6,7 @@ import pdb
 import pickle
 import math
 import random
+import gym
 from collections import namedtuple
 from itertools import count, product
 
@@ -60,18 +61,20 @@ class CausalGAILMLP(BaseGAIL):
                                         history_size=history_size,
                                         dtype=dtype)
 
+    self.vae_model = vae_model
+
     self.policy_net = Policy(state_size * history_size,
                              0,
                              context_size,
                              action_size,
                              hidden_size=64,
-                             output_activation='sigmoid')
+                             output_activation=None)
     self.old_policy_net = Policy(state_size * history_size,
                                  0,
                                  context_size,
                                  action_size,
                                  hidden_size=64,
-                                 output_activation='sigmoid')
+                                 output_activation=None)
 
     if args.use_value_net:
       # context_size contains num_goals
@@ -101,13 +104,23 @@ class CausalGAILMLP(BaseGAIL):
     self.criterion_posterior = nn.MSELoss()
 
     self.transition_func, self.true_reward = None, None
-    self.create_environment()
+    self.create_environment(args.env_type, args.env_name)
     self.expert = None
     self.obstacles, self.set_diff = None, None
 
+  def create_environment(self, env_type, env_name=None):
+    if 'grid' in env_type:
+      self.transition_func = TransitionFunction(self.width,
+                                                self.height,
+                                                obstacle_movement)
+    elif env_type == 'mujoco':
+      assert(env_name is not None)
+      self.env = gym.make(env_name)
+
   def get_c_for_traj(self, state_arr, action_arr, c_arr):
     '''Get c[1:T] for given trajectory.'''
-    traj_len = len(state_arr)
+    pdb.set_trace()
+    traj_len = state_arr.shape[1]
     c = -1*np.ones((traj_len+1, self.context_size))
 
     # Use the Q-network (RNN) to predict goal.
@@ -158,6 +171,15 @@ class CausalGAILMLP(BaseGAIL):
     # re-initialize optimizers 
     self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
     self.opt_posterior = optim.Adam(self.posterior_net.parameters(), lr=0.0003)
+
+
+  def set_expert(self, expert):
+    assert self.expert is None, "Trying to set non-None expert"
+    self.expert = expert
+    assert expert.obstacles is not None, "Obstacles cannot be None"
+    self.obstacles = expert.obstacles
+    assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
+    self.set_diff = expert.set_diff
 
   def update_params_for_batch(self,
                               states,
@@ -350,9 +372,9 @@ class CausalGAILMLP(BaseGAIL):
     for i in range(len(expert_batch.state)):
       # c sampled from expert trajectories is incorrect since we don't have
       # "true c". Hence, we use the trained VAE to get the "true c".
-      expert_c, _ = self.get_c_for_traj(expert_batch.state[i],
-                                        expert_batch.action[i],
-                                        expert_batch.c[i])
+      expert_c, _ = self.get_c_for_traj(expert_batch.state[i][np.newaxis, :],
+                                        expert_batch.action[i][np.newaxis, :],
+                                        expert_batch.c[i][np.newaxis, :])
       # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
       expert_c = expert_c[1:, :]
       ## Expand expert states ##
@@ -422,7 +444,7 @@ class CausalGAILMLP(BaseGAIL):
           optim_iters)
 
 
-  def train_gail(self, expert):
+  def train_gail(self):
     '''Train GAIL.'''
     args, dtype = self.args, self.dtype
     results = {'average_reward': [], 'episode_reward': [],
@@ -439,7 +461,7 @@ class CausalGAILMLP(BaseGAIL):
       true_traj_curr_episode, gen_traj_curr_episode = [], []
 
       while num_steps < args.batch_size:
-        traj_expert = expert.sample(size=1)
+        traj_expert = self.expert.sample(size=1)
         state_expert, action_expert, c_expert, _ = traj_expert
 
         # Expert state and actions
@@ -449,16 +471,21 @@ class CausalGAILMLP(BaseGAIL):
         expert_episode_len = len(state_expert)
 
         # Generate c from trained VAE
-        c_gen, expert_goal = self.get_c_for_traj(state_expert,
-                                                 action_expert,
-                                                 c_expert)
+        c_gen, expert_goal = self.get_c_for_traj(state_expert[np.newaxis, :],
+                                                 action_expert[np.newaxis, :],
+                                                 c_expert[np.newaxis, :])
 
         # Sample start state or should we just choose the start state from the
         # expert trajectory sampled above.
         # curr_state_obj = self.sample_start_state()
-        curr_state_obj = State(state_expert[0], self.obstacles)
-        curr_state_feat = self.get_state_features(curr_state_obj,
-                                                  self.args.use_state_features)
+        if 'grid' in self.args.env_type:
+          curr_state_obj = State(state_expert[0], self.obstacles)
+          curr_state_feat = self.get_state_features(curr_state_obj,
+                                                    self.args.use_state_features)
+        elif self.args.env_type == 'mujoco':
+          #curr_state_feat = state_expert[0]
+          curr_state_feat = self.env.reset()
+          curr_state_feat = np.concatenate((curr_state_feat, np.array([0.0])), axis=0)
 
         # Add history to state
         if args.history_size > 1:
@@ -568,15 +595,20 @@ class CausalGAILMLP(BaseGAIL):
             raise ValueError("Incorrect true reward type")
 
           # Update next state
-          next_state_obj = self.transition_func(curr_state_obj,
-                                                Action(action),
-                                                0)
-          next_state_feat = self.get_state_features(
-              next_state_obj, self.args.use_state_features)
+          if 'grid' in self.args.env_type:
+            next_state_obj = self.transition_func(curr_state_obj,
+                                                  Action(action),
+                                                  0)
+            next_state_feat = self.get_state_features(
+                next_state_obj, self.args.use_state_features)
+
+          elif self.args.env_type == 'mujoco':
+            next_state_feat, true_reward, done, _ = self.env.step(action)
+            next_state_feat = np.concatenate((next_state_feat,
+                              np.array([(t+1)/(episode_len+1)])), axis=0)
           #next_state = running_state(next_state)
 
           mask = 0 if t == expert_episode_len - 1 else 1
-
 
           # Push to memory
           memory_list.append([
@@ -675,7 +707,7 @@ class CausalGAILMLP(BaseGAIL):
 
       # We do not get the context variable from expert trajectories. Hence we
       # need to fill it in later.
-      expert_batch = expert.sample(size=args.num_expert_trajs)
+      expert_batch = self.expert.sample(size=args.num_expert_trajs)
 
       self.update_params(gen_batch, expert_batch, ep_idx,
                          args.optim_epochs, args.optim_batch_size)
@@ -717,18 +749,26 @@ def load_VAE_model(model_checkpoint_path, new_args):
     dtype = torch.cuda.FloatTensor
   logger = TensorboardXLogger(os.path.join(args.results_dir, 'log_vae_model'))
   vae_train = VAETrain(
-    saved_args,
-    logger,
-    width=21,
-    height=21,
-    state_size=saved_args.vae_state_size,
-    action_size=saved_args.vae_action_size,
-    history_size=saved_args.vae_history_size,
-    num_goals=4,
-    use_rnn_goal_predictor=saved_args.use_rnn_goal,
-    dtype=dtype
+      saved_args,
+      logger,
+      width=11,
+      height=15,
+      state_size=saved_args.vae_state_size,
+      action_size=saved_args.vae_action_size,
+      history_size=saved_args.vae_history_size,
+      num_goals=saved_args.vae_goal_size,
+      use_rnn_goal_predictor=saved_args.use_rnn_goal,
+      dtype=dtype,
+      env_type=args.env_type,
+      env_name=args.env_name
   )
+
   vae_train.load_checkpoint(model_checkpoint_path)
+  if new_args.cuda:
+    dtype = torch.cuda.FloatTensor
+  else:
+    dtype = torch.FloatTensor
+  vae_train.convert_models_to_type(dtype)
   print("Did load models at: {}".format(model_checkpoint_path))
   return vae_train
 
@@ -738,9 +778,12 @@ def main(args):
     os.makedirs(os.path.join(args.results_dir, 'log'))
   logger = TensorboardXLogger(os.path.join(args.results_dir, 'log'))
 
-  expert = ExpertHDF5(args.expert_path, 2)
+  expert = ExpertHDF5(args.expert_path, args.state_size)
   print('Loading expert trajectories ...')
-  expert.push(only_coordinates_in_state=True, one_hot_action=True)
+  if 'grid' in args.env_type:
+    expert.push(only_coordinates_in_state=True, one_hot_action=True)
+  elif args.env_type == 'mujoco':
+    expert.push(only_coordinates_in_state=False, one_hot_action=False)
   print('Expert trajectories loaded.')
 
   # Load pre-trained VAE model
@@ -761,11 +804,13 @@ def main(args):
       num_goals=4,
       history_size=args.history_size,
       dtype=dtype)
-  causal_gail_mlp.set_expert(expert)
-  causal_gail_mlp.train_gail(expert)
 
   if args.init_from_vae:
     causal_gail_mlp.load_weights_from_vae()
+
+  causal_gail_mlp.set_expert(expert) # not implemented?
+  causal_gail_mlp.train_gail()
+
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Causal GAIL using MLP.')
@@ -885,6 +930,13 @@ if __name__ == '__main__':
                       action='store_false',
                       help='Don\'t init policy and posterior from vae.')
   parser.set_defaults(init_from_vae=True)
+
+  # Environment - Grid or Mujoco
+  parser.add_argument('--env-type', default='grid', 
+                      choices=['grid', 'grid_room', 'mujoco'],
+                      help='Environment type Grid or Mujoco.')
+  parser.add_argument('--env-name', default=None,
+                      help='Environment name if Mujoco.')
 
   args = parser.parse_args()
   torch.manual_seed(args.seed)

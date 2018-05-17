@@ -504,20 +504,22 @@ def gen_diverse_trajs(grid_width, grid_height):
 def gen_room_trajs(grid_width, grid_height, room_size):
 
     N = 300
-    T = 1000
+    T = 50
 
     expert_data_dict = {}
     env_data_dict = {
             'num_actions': 4,
-            'num_goals': 1,
+            'num_goals': 4,
             }
 
-    obstacles, rooms = create_obstacles(grid_width, grid_height, env_name='room',
+    obstacles, rooms, room_centres = create_obstacles(grid_width, grid_height, env_name='room',
                                         room_size=room_size)
     #T = TransitionFunction(grid_width, grid_height, obstacle_movement)
     set_diff = list(set(product(tuple(range(0, grid_width)),tuple(range(0, grid_height)))) \
                     - set(obstacles))
+
     room_set = set(rooms)
+    room_centre_set = set(room_centres)
 
     graph = Graph()
     deltas = {(0,1): 0, (0,-1): 1, (-1,0): 2, (1,0): 3}
@@ -538,10 +540,22 @@ def gen_room_trajs(grid_width, grid_height, room_size):
         rem_len, path_key = T, str(n)
         expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
 
+        #start_state = State(sample_start(set_diff), obstacles)
+
+        # initial start state will never be at centre of any room
+        start_state = State(sample_start(list(set(set_diff) - room_centre_set)), obstacles)
         while rem_len > 0:
-            start_state = State(sample_start(set_diff), obstacles)
-            apple_state = State(sample_start(
-                list(room_set-set(start_state.coordinates))), obstacles)
+
+            #apple_state = State(sample_start(
+            #    list(room_set-set(start_state.coordinates))), obstacles)
+
+            # randomly select one room (goal) and place apple at its centre
+            goal = random.choice(range(len(room_centres)))
+            while room_centres[goal] == start_state.coordinates:
+                goal = random.choice(range(len(room_centres)))
+            apple_state = State(room_centres[goal], obstacles)
+            # randomly spawn agent in a room, but not at same location as apple
+            #start_state = State(sample_start(list(set(set_diff) - set(room_centres[goal]))), obstacles)
 
             source = start_state.coordinates
             destination = apple_state.coordinates
@@ -562,15 +576,18 @@ def gen_room_trajs(grid_width, grid_height, room_size):
                 s = path[i]
                 next_s = path[i+1]
                 
-                state = np.array(s + destination)
+                #state = np.array(s + destination)
+                state = np.array(s)
                 action = (next_s[0]-s[0], next_s[1]-s[1])
                 action_delta = deltas[action]
 
                 states.append(state)
                 actions.append(action_delta)
-                goals.append(destination)
+                #goals.append(destination)
+                goals.append(goal)
 
             rem_len = rem_len - path_len
+            start_state.coordinates = destination
         
         
         expert_data_dict[path_key]['state'] = states

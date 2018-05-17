@@ -29,6 +29,10 @@ def create_obstacles(width, height, env_name=None, room_size=None):
     room_cells = []
     room_starts = [(1, 1), (1, height-room_size-1),
                    (width-room_size-1, 1), (width-room_size-1, height-room_size-1)]
+    room_centres = [((room_size+1)//2, (room_size+1)//2),
+                    (width-1-(room_size+1)//2, (room_size+1)//2),
+                    ((room_size+1)//2, height-1-(room_size+1)//2),
+                    (width-1-(room_size+1)//2, height-1-(room_size+1)//2)]
 
     for s in room_starts:
       for i in range(room_size):
@@ -47,7 +51,7 @@ def create_obstacles(width, height, env_name=None, room_size=None):
 
     obstacles = list(all_cells - set(room_cells) - set(corridor_cells))
 
-    return obstacles, room_cells 
+    return obstacles, room_cells, room_centres
 
   else:
     return []
