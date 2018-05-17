@@ -177,7 +177,7 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 1e-3
+        r = 2e-3
         self.temperature = max(0.5, self.init_temperature * math.exp(-r*epoch))
 
     def encode(self, x, c):
@@ -874,11 +874,7 @@ class VAETrain(object):
                     # Get current state object
                     state = StateVector(curr_state_arr, self.obstacles)
                     # Get next state
-                    #next_state = self.transition_func(state, action, 0)
-                    if t < episode_len-1:
-                        next_state = StateVector(ep_state[:, t+1, :], self.obstacles)
-                    else:
-                        break
+                    next_state = self.transition_func(state, action, 0)
 
                     # Update x
                     next_state_features = self.get_state_features(
@@ -895,13 +891,9 @@ class VAETrain(object):
                                               dtype=np.float32)
                 elif self.env_type == 'mujoco':
                     action = pred_actions_numpy[0, :]
-                    if t < episode_len-1:
-                        next_state = ep_state[:, t+1, :17]
-                    else:
+                    next_state, _, done, _ = self.env.step(action)
+                    if done:
                         break
-                    #next_state, _, done, _ = self.env.step(action)
-                    #if done:
-                    #    break
 
                     next_state = np.concatenate(
                             (next_state,
