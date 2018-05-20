@@ -177,8 +177,8 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 2e-3
-        self.temperature = max(0.5, self.init_temperature * math.exp(-r*epoch))
+        r = 25e-4
+        self.temperature = max(0.1, self.init_temperature * math.exp(-r*epoch))
 
 
     def encode(self, x, c):
@@ -940,6 +940,68 @@ class VAETrain(object):
 
         return results
 
+
+    def test_generate_all_grid_states(self):
+
+        '''Test trajectory generation at each state for room_trajs.'''
+        self.vae_model.eval()
+
+        history_size, batch_size = self.vae_model.history_size, 1
+
+        results = {'pred_traj_action': {}}
+
+        # We need to sample expert trajectories to get (s, a) pairs which
+        # are required for goal prediction.
+        print(self.width)
+        print(self.height)
+        print(self.vae_model.posterior_goal_size)
+        print(self.vae_model.posterior_latent_size)
+        list_of_obstacles = self.obstacles.tolist()
+        print(list_of_obstacles)
+        for i in range(self.width):
+            for j in range(self.height):
+                if [i, j] in list_of_obstacles:
+                    continue
+                for g in range(self.vae_model.posterior_goal_size): # check num_goals
+                    true_goal_numpy = np.zeros((1, self.vae_model.posterior_goal_size))
+                    true_goal_numpy[0, g] = 1.0
+                    true_goal = Variable(torch.from_numpy(true_goal_numpy).type(
+                                         self.dtype))
+
+                    for context in range(self.vae_model.posterior_latent_size):
+                        # Get the initial state
+                        c = np.zeros((1, self.vae_model.posterior_latent_size),
+                                      dtype=np.float32)
+                        c[0, context] = 1.0
+
+                        x_state_obj = StateVector(np.array([i, j])[np.newaxis, :], 
+                                                  self.obstacles)
+                        x_feat = self.get_state_features(x_state_obj,
+                                                         self.args.use_state_features)
+
+
+                        # x is (1, F)
+                        x = x_feat
+
+                        x_var = Variable(torch.from_numpy(
+                                         x.reshape((batch_size, -1))).type(self.dtype))
+
+                        c_var = Variable(torch.from_numpy(c).type(self.dtype))
+                        c_var = torch.cat([true_goal, c_var], dim=1)
+
+                        if self.vae_model.use_goal_in_policy:
+                            action = self.vae_model.decode(x_var[:, -self.vae_model.policy_state_size:], c_var)
+                        else:
+                            action = self.vae_model.decode(x_var[:, -self.vae_model.policy_state_size:],
+                                                           c_var[:,-self.vae_model.posterior_latent_size:])
+
+                        pred_actions_numpy = action.data.cpu().numpy()
+
+                        results['pred_traj_action'][(i, j, context, g)] = pred_actions_numpy
+
+
+        return results
+
     def train_fixed_length_epoch(self, epoch, expert, batch_size=1,
                                  episode_len=6, train_goal_policy_only=False):
         '''Train VAE with variable length expert samples.
@@ -1537,11 +1599,12 @@ class VAETrain(object):
         '''Test models by generating expert trajectories.'''
         self.convert_models_to_type(self.dtype)
 
-        results = self.test_generate_trajectory_variable_length(
-                expert,
-                num_test_samples=num_test_samples,
-                test_goal_policy_only=test_goal_policy_only)
+        #results = self.test_generate_trajectory_variable_length(
+        #        expert,
+        #        num_test_samples=num_test_samples,
+        #        test_goal_policy_only=test_goal_policy_only)
 
+        results = self.test_generate_all_grid_states()
 
         if self.use_rnn_goal_predictor:
             goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))

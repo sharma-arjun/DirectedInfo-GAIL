@@ -506,9 +506,11 @@ def gen_room_trajs(grid_width, grid_height, room_size):
     N = 300
     T = 50
 
+    num_goals = 4
+
     expert_data_dict = {}
     env_data_dict = {
-            'num_actions': 4,
+            'num_actions': num_goals,
             'num_goals': 4,
             }
 
@@ -584,7 +586,9 @@ def gen_room_trajs(grid_width, grid_height, room_size):
                 states.append(state)
                 actions.append(action_delta)
                 #goals.append(destination)
-                goals.append(goal)
+                goal_onehot = np.zeros((num_goals,))
+                goal_onehot[goal] = 1.0
+                goals.append(goal_onehot)
 
             rem_len = rem_len - path_len
             start_state.coordinates = destination
