@@ -110,8 +110,8 @@ class CausalGAILMLP(BaseGAIL):
 
   def create_environment(self, env_type, env_name=None):
     if 'grid' in env_type:
-      self.transition_func = TransitionFunction(self.width,
-                                                self.height,
+      self.transition_func = TransitionFunction(self.vae_model.width,
+                                                self.vae_model.height,
                                                 obstacle_movement)
     elif env_type == 'mujoco':
       assert(env_name is not None)
@@ -119,7 +119,6 @@ class CausalGAILMLP(BaseGAIL):
 
   def get_c_for_traj(self, state_arr, action_arr, c_arr):
     '''Get c[1:T] for given trajectory.'''
-    pdb.set_trace()
     traj_len = state_arr.shape[1]
     c = -1*np.ones((traj_len+1, self.context_size))
 
