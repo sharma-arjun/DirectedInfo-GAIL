@@ -484,8 +484,9 @@ class CausalGAILMLP(BaseGAIL):
       expert_c, _ = self.get_c_for_traj(expert_batch.state[i][np.newaxis, :],
                                         expert_batch.action[i][np.newaxis, :],
                                         expert_batch.c[i][np.newaxis, :])
+      # Remove b
       # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
-      expert_c = expert_c[1:, :]
+      expert_c = expert_c.squeeze(0)[1:, :]
       ## Expand expert states ##
       expanded_states = self.expand_states_numpy(expert_batch.state[i],
                                                  self.history_size)
