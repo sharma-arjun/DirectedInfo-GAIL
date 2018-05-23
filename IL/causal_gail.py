@@ -273,7 +273,7 @@ class CausalGAILMLP(BaseGAIL):
                   norm.pdf
           scale = sigma if self.args.use_reparameterize else 0.1  
           # use fixed std if not using reparameterize otherwise use sigma.
-          posterior_reward_t = reward_func(next_ct, loc=mu, scale=0.1))
+          posterior_reward_t = reward_func(next_ct, loc=mu, scale=0.1)
 
       return self.args.lambda_posterior * posterior_reward_t  
 
@@ -682,7 +682,7 @@ class CausalGAILMLP(BaseGAIL):
 
           # Update next state
           if 'grid' in self.args.env_type:
-            action_vec = ActionVector(np.argmax(action), axis=1))
+            action_vec = ActionVector(np.argmax(action), axis=1)
             # Get current state
             state_vec = StateVector(curr_state_arr, self.obstacles)
             # Get next state
