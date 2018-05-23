@@ -721,7 +721,8 @@ class CausalGAILMLP(BaseGAIL):
           # Since grid world environments don't have a "true" reward let us
           # fake the true reward.
           if self.args.env_type == 'grid_room':
-              curr_position = curr_state_arr.astype(np.int32).tolist()
+              curr_position = curr_state_arr.reshape(-1).astype(
+                      np.int32).tolist()
               expert_position = state_expert[0, t, :].astype(np.int32).tolist()
               if curr_position == expert_position:
                   ep_true_reward += 1.0
