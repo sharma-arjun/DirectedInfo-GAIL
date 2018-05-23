@@ -1157,13 +1157,16 @@ class VAETrain(object):
 
                 if 'grid' in self.env_type:
                     # Get next state from action (N,)
-                    action = ActionVector(np.argmax(pred_actions_numpy, axis=1))
+                    # action = ActionVector(np.argmax(pred_actions_numpy, axis=1))
                     # Get current state
-                    state = StateVector(curr_state_arr, self.obstacles)
+                    # state = StateVector(curr_state_arr, self.obstacles)
                     # Get next state
-                    #next_state = self.transition_func(state, action, 0)
+                    # next_state = self.transition_func(state, action, 0)
+
+                    # Get the next state from expert (supervised learning)
                     if t < episode_len-1:
-                        next_state = StateVector(ep_state[:, t+1, :], self.obstacles)
+                        next_state = StateVector(ep_state[:, t+1, :],
+                                                 self.obstacles)
                     else:
                        break
 
@@ -1219,7 +1222,8 @@ class VAETrain(object):
                     #    break
 
                     next_state = np.concatenate((
-                        next_state, np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
+                        next_state,
+                        np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = next_state
@@ -1455,7 +1459,8 @@ class VAETrain(object):
                     if history_size > 1:
                         x_hist[:, history_size-1] = self.get_state_features(
                                 next_state, self.args.use_state_features)
-                        x = self.get_history_features(x_hist, self.args.use_velocity_features)
+                        x = self.get_history_features(
+                                x_hist, self.args.use_velocity_features)
                     else:
                         x[:] = self.get_state_features(
                                 next_state, self.args.use_state_features)
@@ -1470,7 +1475,9 @@ class VAETrain(object):
                         break
 
                     next_state = np.concatenate((
-                        next_state, np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
+                        next_state,
+                        np.ones((batch_size, 1)) * (t+1)/(episode_len+1)),
+                        axis=1)
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = next_state
