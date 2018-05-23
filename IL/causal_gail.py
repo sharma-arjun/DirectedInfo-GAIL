@@ -112,13 +112,19 @@ class CausalGAILMLP(BaseGAIL):
 
     # Create loss functions
     self.criterion = nn.BCELoss()
-    #criterion_posterior = nn.NLLLoss()
-    self.criterion_posterior = nn.MSELoss()
 
     self.transition_func, self.true_reward = None, None
     self.create_environment(args.env_type, args.env_name)
     self.expert = None
     self.obstacles, self.set_diff = None, None
+
+  def convert_models_to_type(self, dtype):
+      self.vae_train.convert_models_to_type(dtype)
+      self.policy_net = self.policy_net.type(dtype)
+      self.old_policy_net = self.old_policy_net.type(dtype)
+      self.value_net = self.value_net.type(dtype)
+      self.reward_net = self.reward_net.type(dtype)
+      self.posterior_net = self.posterior_net.type(dtype)
 
   def create_environment(self, env_type, env_name=None):
     if 'grid' in env_type:
@@ -235,18 +241,21 @@ class CausalGAILMLP(BaseGAIL):
 
   def checkpoint_data_to_save(self):
     return {
-        'policy': self.policy_net,
-        'posterior': self.posterior_net,
-        'reward': self.reward_net
+        'policy': self.policy_net.state_dict(),
+        'posterior': self.posterior_net.state_dict(),
+        'reward': self.reward_net.state_dict(),
+        'value': self.value_net.state_dict(),
         }
 
   def load_checkpoint_data(self, checkpoint_path):
     assert os.path.exists(checkpoint_path), \
         'Checkpoint path does not exists {}'.format(checkpoint_path)
     checkpoint_data = torch.load(checkpoint_path)
-    self.policy_net = checkpoint_data['policy']
-    self.posterior_net = checkpoint_data['posterior']
-    self.reward_net = checkpoint_data['reward']
+    self.policy_net.load_state_dict(checkpoint_data['policy'])
+    self.posterior_net.load_state_dict(checkpoint_data['posterior'])
+    self.reward_net.load_state_dict(checkpoint_data['reward'])
+    self.value_net.load_state_dict(checkpoint_data['value'])
+
 
   def load_weights_from_vae(self):
     # deepcopy from vae
@@ -290,6 +299,19 @@ class CausalGAILMLP(BaseGAIL):
 
       return self.args.lambda_posterior * posterior_reward_t.data.cpu().numpy()
 
+  def update_posterior_net(self, state_var, c_var, next_c_var, goal_var=None):
+      if goal_var is not None:
+          c_var = torch.cat([goal_var, c_var], dim=1)
+
+      if self.vae_train.args.use_discrete_vae:
+          logits = self.posterior_net(torch.cat((state_var, c_var), 1))
+          _, label = torch.max(next_c_var, 1)
+          posterior_loss = F.cross_entropy(logits, label)
+      else:
+          mu, logvar = self.posterior_net(torch.cat((state_var, c_var), 1))
+          posterior_loss = F.mse_loss(mu, next_c_var)
+      return posterior_loss
+
   def update_params_for_batch(self,
                               states,
                               actions,
@@ -302,7 +324,8 @@ class CausalGAILMLP(BaseGAIL):
                               expert_latent_c,
                               optim_batch_size,
                               optim_batch_size_exp,
-                              optim_iters):
+                              optim_iters,
+                              goal=None):
     '''Update parameters for one batch of data.
 
     Update the policy network, discriminator (reward) network and the posterior
@@ -321,6 +344,9 @@ class CausalGAILMLP(BaseGAIL):
       latent_c_var = Variable(latent_c[start_idx:end_idx])
       latent_next_c_var = Variable(latent_next_c[start_idx:end_idx])
       advantages_var = Variable(advantages[start_idx:end_idx])
+      goal_var = None
+      if goal is not None:
+        goal_var = Variable(goal[start_idx:end_idx])
 
       start_idx, end_idx = curr_id_exp, curr_id_exp + curr_batch_size_exp
       expert_state_var = Variable(expert_states[start_idx:end_idx])
@@ -366,28 +392,9 @@ class CausalGAILMLP(BaseGAIL):
                                             reward_grad_l2_norm,
                                             self.gail_step_count)
 
-
-      # Update posterior net. We need to do this by reparameterization
-      # trick instead.  We should not put action_var (a_t) in the
-      # posterior net since we need c_t to predict a_t while till now we
-      # only have c_{t-1}.
-      mu, logvar = self.posterior_net(
-          torch.cat((state_var, latent_c_var), 1))
-
-      if args.use_reparameterize:
-        std = logvar.mul(0.5).exp_()
-        eps = Variable(std.data.new(std.size()).normal_())
-        predicted_posterior = eps.mul(std).add_(mu)
-      else:
-        predicted_posterior = mu
-
-      # latent_next_c is of shape (N, 5) where the 1-4 columns of each row
-      # represent the goal vector hence we need to extract the last column for
-      # the true posterior.
-      true_posterior = torch.zeros(latent_next_c_var.size(0), 1).type(dtype)
-      true_posterior[:, 0] = latent_next_c_var.data[:, -1]
-      posterior_loss = self.criterion_posterior(predicted_posterior,
-                                                Variable(true_posterior))
+      posterior_loss = self.update_posterior_net(state_var, latent_c_var,
+                                                 latent_next_c_var,
+                                                 goal_var=goal_var)
       posterior_loss.backward()
       self.logger.summary_writer.add_scalar('loss/posterior',
                                             posterior_loss.data[0],
@@ -397,17 +404,27 @@ class CausalGAILMLP(BaseGAIL):
       # compute old and new action probabilities
       action_means, action_log_stds, action_stds = self.policy_net(
               torch.cat((state_var, latent_next_c_var), 1))
-      log_prob_cur = normal_log_density(action_var,
-                                        action_means,
-                                        action_log_stds,
-                                        action_stds)
-
       action_means_old, action_log_stds_old, action_stds_old = \
               self.old_policy_net(torch.cat((state_var, latent_next_c_var), 1))
-      log_prob_old = normal_log_density(action_var,
-                                        action_means_old,
-                                        action_log_stds_old,
-                                        action_stds_old)
+
+      if self.vae_train.args.discrete_action:
+          # action_probs is (N, A)
+          action_softmax = F.softmax(action_means, dim=1)
+          action_probs = (action_var * action_softmax).sum(dim=1)
+          action_old_softmax = F.softmax(action_means_old, dim=1)
+          action_old_probs = (action_var * action_old_softmax).sum(dim=1)
+
+          log_prob_cur, log_prob_old = action_probs.log(), action_old_probs.log()
+      else:
+          log_prob_cur = normal_log_density(action_var,
+                                            action_means,
+                                            action_log_stds,
+                                            action_stds)
+
+          log_prob_old = normal_log_density(action_var,
+                                            action_means_old,
+                                            action_log_stds_old,
+                                            action_stds_old)
 
       if args.use_value_net:
         # update value net
@@ -431,7 +448,7 @@ class CausalGAILMLP(BaseGAIL):
       self.opt_policy.step()
       self.logger.summary_writer.add_scalar('loss/policy',
                                             policy_surr.data[0],
-                                            self.gail_step_count)
+                                           self.gail_step_count)
 
       policy_l2_norm, policy_grad_l2_norm = \
                         get_weight_norm_for_network(self.policy_net)
@@ -464,6 +481,8 @@ class CausalGAILMLP(BaseGAIL):
     actions = torch.Tensor(np.array(gen_batch.action)).type(dtype)
     rewards = torch.Tensor(np.array(gen_batch.reward)).type(dtype)
     masks = torch.Tensor(np.array(gen_batch.mask)).type(dtype)
+    # goal can be None
+    goal = torch.Tensor(np.array(gen_batch.goal)).type(dtype)
 
     ## Expand states to include history ##
     # Generated trajectories already have history in them.
@@ -551,7 +570,8 @@ class CausalGAILMLP(BaseGAIL):
           expert_latent_c[perm_exp],
           optim_batch_size,
           optim_batch_size_exp,
-          optim_iters)
+          optim_iters,
+          goal=goal[perm])
 
 
   def train_gail(self, batch_size=1):
@@ -562,6 +582,7 @@ class CausalGAILMLP(BaseGAIL):
             'pred_traj_state': {}, 'pred_traj_action': {}}
 
     self.train_step_count, self.gail_step_count = 0, 0
+    self.convert_models_to_type(self.dtype)
 
     for ep_idx in range(args.num_epochs):
       memory = Memory()
@@ -588,7 +609,7 @@ class CausalGAILMLP(BaseGAIL):
 
         if self.args.env_type == 'grid_room':
             true_goal_numpy = np.copy(c_expert)
-        else: 
+        else:
             true_goal_numpy = np.zeros((c_expert.shape[0], self.num_goals))
             true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
         true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
@@ -677,14 +698,14 @@ class CausalGAILMLP(BaseGAIL):
 
           disc_reward += disc_reward_t
 
-          goal_var = None  
+          goal_var = None
           if self.vae_train.args.use_rnn_goal:
             raise ValueError("To be implemented.")
           else:
             if len(true_goal.size()) == 2:
               goal_var = true_goal
             elif len(true_goal.size()) == 3:
-              goal_var = true_goal[:, t, :]  
+              goal_var = true_goal[:, t, :]
             else:
               raise ValueError("incorrect true goal size")
 
@@ -754,7 +775,8 @@ class CausalGAILMLP(BaseGAIL):
             next_state_feat,
             disc_reward_t + posterior_reward_t,
             ct.reshape(-1),
-            next_ct.reshape(-1)])
+            next_ct.reshape(-1),
+            goal_var.data.cpu().numpy().reshape(-1)])
 
           if args.render:
             env.render()
@@ -868,9 +890,13 @@ class CausalGAILMLP(BaseGAIL):
         # print("Did save results to {}".format(results_path))
 
       if ep_idx % args.save_interval == 0:
+        if self.dtype != torch.FloatTensor:
+            self.convert_models_to_type(torch.FloatTensor)
         checkpoint_filepath = self.model_checkpoint_filepath(ep_idx)
         torch.save(self.checkpoint_data_to_save(), checkpoint_filepath)
         print("Did save checkpoint: {}".format(checkpoint_filepath))
+        if self.dtype != torch.FloatTensor:
+            self.convert_models_to_type(self.dtype)
 
 def load_VAE_model(model_checkpoint_path, new_args):
     '''Load pre-trained VAE model.'''

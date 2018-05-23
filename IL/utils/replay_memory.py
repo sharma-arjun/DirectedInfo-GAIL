@@ -5,13 +5,14 @@ from collections import namedtuple
 # https://github.com/pytorch/tutorials/blob/master/Reinforcement%20(Q-)Learning%20with%20PyTorch.ipynb
 
 Transition = namedtuple('Transition', ('state', 'action', 'mask', 'next_state',
-                                       'reward', 'c', 'next_c'))
+                                       'reward', 'c', 'next_c', 'goal'))
 
 class Memory(object):
     def __init__(self):
         self.memory = []
 
-    def push(self, state, action, mask, next_state, reward, c=0.0, next_c=0.0):
+    def push(self, state, action, mask, next_state, reward, c=0.0, next_c=0.0,
+             goal=None):
         """Saves a transition."""
         self.memory.append(Transition(state,
                                       action,
@@ -19,7 +20,8 @@ class Memory(object):
                                       next_state,
                                       reward,
                                       c,
-                                      next_c))
+                                      next_c,
+                                      goal))
 
     def sample(self):
         return Transition(*zip(*self.memory))
