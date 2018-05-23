@@ -720,20 +720,28 @@ class CausalGAILMLP(BaseGAIL):
 
           # Since grid world environments don't have a "true" reward let us
           # fake the true reward.
-          '''
-          true_goal_state = [int(x) for x in state_expert[-1].tolist()]
-          if self.args.flag_true_reward == 'grid_reward':
-            ep_true_reward += self.true_reward.reward_at_location(
-                curr_state_obj.coordinates, goals=[true_goal_state])
-            expert_true_reward += self.true_reward.reward_at_location(
-                  state_expert[t], goals=[true_goal_state])
-          elif self.args.flag_true_reward == 'action_reward':
-            ep_true_reward += self.true_reward.reward_at_location(
-                np.argmax(action_expert[t]), action)
-            expert_true_reward += self.true_reward.corret_action_reward
+          if self.args.env_type == 'grid_room':
+              curr_position = curr_state_arr.astype(np.int32).tolist()
+              expert_position = state_expert[0, t, :].astype(np.int32).tolist()
+              if curr_position == expert_position:
+                  ep_true_reward += 1.0
+              expert_true_reward += 1.0
           else:
-            raise ValueError("Incorrect true reward type")
-          '''
+              pass
+              '''
+              true_goal_state = [int(x) for x in state_expert[-1].tolist()]
+              if self.args.flag_true_reward == 'grid_reward':
+                ep_true_reward += self.true_reward.reward_at_location(
+                    curr_state_obj.coordinates, goals=[true_goal_state])
+                expert_true_reward += self.true_reward.reward_at_location(
+                      state_expert[t], goals=[true_goal_state])
+              elif self.args.flag_true_reward == 'action_reward':
+                ep_true_reward += self.true_reward.reward_at_location(
+                    np.argmax(action_expert[t]), action)
+                expert_true_reward += self.true_reward.corret_action_reward
+              else:
+                raise ValueError("Incorrect true reward type")
+              '''
 
           # Update next state
           if 'grid' in self.args.env_type:
