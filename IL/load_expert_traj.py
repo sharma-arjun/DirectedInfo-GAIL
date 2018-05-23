@@ -161,7 +161,6 @@ class ExpertHDF5(Expert):
             mask = np.ones((action.shape[0]))
             mask[-1] = 0
             memory.append(Trajectory(state, action, context, mask))
-            ipdb.set_trace()
 
         self.memory = memory
 
