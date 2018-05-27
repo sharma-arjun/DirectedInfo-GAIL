@@ -104,12 +104,15 @@ class CausalGAILMLP(BaseGAIL):
                                            context_size,
                                            hidden_size=64)
 
-        self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
-        self.opt_reward = optim.Adam(self.reward_net.parameters(), lr=0.0003)
+        self.opt_policy = optim.Adam(self.policy_net.parameters(),
+                                     lr=args.learning_rate)
+        self.opt_reward = optim.Adam(self.reward_net.parameters(),
+                                     lr=args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
-                                        lr=0.0003)
+                                        lr=args.learning_rate)
         if args.use_value_net:
-            self.opt_value = optim.Adam(self.value_net.parameters(), lr=0.0003)
+            self.opt_value = optim.Adam(self.value_net.parameters(),
+                                        lr=args.learning_rate)
 
         # Create loss functions
         self.criterion = nn.BCELoss()
@@ -257,16 +260,16 @@ class CausalGAILMLP(BaseGAIL):
         self.value_net.load_state_dict(checkpoint_data['value'])
 
     def load_weights_from_vae(self):
-        ipdb.set_trace()
         # deepcopy from vae
         self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
-        self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
+        self.opt_policy = optim.Adam(self.policy_net.parameters(),
+                                     lr=self.args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
-                                        lr=0.0003)
+                                        lr=self.args.learning_rate)
 
 
     def set_expert(self, expert):
@@ -597,10 +600,11 @@ class CausalGAILMLP(BaseGAIL):
             memory = Memory()
 
             num_steps = 0
-            reward_batch, true_reward_batch = [], []
-            expert_true_reward_batch = []
+            reward_batch, expert_true_reward_batch = [], []
             true_traj_curr_episode = {'state':[], 'action': []}
             gen_traj_curr_episode = {'state': [], 'action': []}
+            env_reward_batch_dict = {'linear_traj_reward': [],
+                                     'map_traj_reward': []}
 
             while num_steps < args.batch_size:
                 traj_expert = self.expert.sample(size=batch_size)
@@ -610,6 +614,15 @@ class CausalGAILMLP(BaseGAIL):
                 c_expert = np.array(c_expert, dtype=np.int32)
 
                 expert_episode_len = state_expert.shape[1]
+
+                # Create state expert map for reward
+                state_action_expert_dict = {}
+                for t in range(expert_episode_len):
+                    pos_tuple = tuple(state_expert[0, t, :].astype(
+                        np.int32).tolist())
+                    state_action_key = (pos_tuple,
+                                        np.argmax(action_expert[0, t, :])) 
+                    state_action_expert_dict[state_action_key] = 1
 
                 # Generate c from trained VAE
                 c_gen, expert_goal = self.get_c_for_traj(state_expert,
@@ -656,7 +669,9 @@ class CausalGAILMLP(BaseGAIL):
 
 
                 # TODO: Make this a separate function. Can be parallelized.
-                ep_reward, ep_true_reward, expert_true_reward = 0, 0, 0
+                ep_reward, expert_true_reward = 0, 0
+                env_reward_dict = {'linear_traj_reward': 0.0,
+                                    'map_traj_reward': 0.0,}
                 true_traj = {'state': [], 'action': []}
                 gen_traj = {'state': [], 'action': []}
                 gen_traj_dict = {'features': [],
@@ -739,10 +754,19 @@ class CausalGAILMLP(BaseGAIL):
                     if self.args.env_type == 'grid_room':
                         curr_position = curr_state_arr.reshape(-1).astype(
                                 np.int32).tolist()
-                        expert_position = state_expert[0, t, :].astype(np.int32).tolist()
+                        expert_position = state_expert[0, t, :].astype(
+                                np.int32).tolist()
                         if curr_position == expert_position:
-                            ep_true_reward += 1.0
+                            env_reward_dict['linear_traj_reward'] += 1.0
                         expert_true_reward += 1.0
+                    
+                        # Map reward. Each state should only be counted once
+                        # only.
+                        gen_state_action_key = (tuple(curr_position), action)
+                        if state_action_expert_dict.get(
+                                gen_state_action_key) is not None:
+                            env_reward_dict['map_traj_reward'] += 1.0
+                            del state_action_expert_dict[gen_state_action_key]
                     else:
                         pass
                         '''
@@ -850,7 +874,11 @@ class CausalGAILMLP(BaseGAIL):
                 #ep_memory.push(memory)
                 num_steps += (t-1)
                 reward_batch.append(ep_reward)
-                true_reward_batch.append(ep_true_reward)
+                env_reward_batch_dict['linear_traj_reward'].append(
+                        env_reward_dict['linear_traj_reward'])
+                env_reward_batch_dict['map_traj_reward'].append(
+                        env_reward_dict['map_traj_reward'])
+
                 expert_true_reward_batch.append(expert_true_reward)
                 results['episode_reward'].append(ep_reward)
 
@@ -870,12 +898,17 @@ class CausalGAILMLP(BaseGAIL):
                         'min': np.min(reward_batch)
                     },
                     self.train_step_count)
+            linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
+            map_traj_reward = env_reward_batch_dict['map_traj_reward']
             self.logger.summary_writer.add_scalars(
                     'gen_traj/true_reward', {
-                        'average': np.mean(true_reward_batch),
-                        'max': np.max(true_reward_batch),
-                        'min': np.min(true_reward_batch),
-                        'expert_true': np.mean(expert_true_reward_batch)
+                        'average': np.mean(linear_traj_reward),
+                        'max': np.max(linear_traj_reward),
+                        'min': np.min(linear_traj_reward),
+                        'expert_true': np.mean(expert_true_reward_batch),
+                        'map_average': np.mean(map_traj_reward),
+                        'map_max': np.max(map_traj_reward),
+                        'map_min': np.min(map_traj_reward),
                     },
                     self.train_step_count)
 
@@ -905,11 +938,14 @@ class CausalGAILMLP(BaseGAIL):
             if ep_idx > 0 and  ep_idx % args.log_interval == 0:
                 print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
                       'True Avg {:.2f}   True Max R: {:.2f}   ' \
-                      'Expert (Avg): {:.2f}'.format(
+                      'Expert (Avg): {:.2f}   ' \
+                      'Dict(Avg): {:.2f}    Dict(Max): {:.2f}'.format(
                       ep_idx, args.num_epochs, np.mean(reward_batch),
-                      np.max(reward_batch), np.mean(true_reward_batch),
-                      np.max(true_reward_batch),
-                      np.mean(expert_true_reward_batch)))
+                      np.max(reward_batch), np.mean(linear_traj_reward),
+                      np.max(linear_traj_reward),
+                      np.mean(expert_true_reward_batch),
+                      np.mean(map_traj_reward),
+                      np.max(map_traj_reward)))
 
             results_path = os.path.join(args.results_dir, 'results.pkl')
             with open(results_path, 'wb') as results_f:
@@ -1011,6 +1047,7 @@ def main(args):
             dtype=dtype)
 
     if args.init_from_vae:
+        print("Will load generator and posterior from pretrianed VAE.")
         causal_gail_mlp.load_weights_from_vae()
 
     causal_gail_mlp.set_expert(expert) # not implemented?
