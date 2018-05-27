@@ -257,10 +257,11 @@ class CausalGAILMLP(BaseGAIL):
         self.value_net.load_state_dict(checkpoint_data['value'])
 
     def load_weights_from_vae(self):
+        ipdb.set_trace()
         # deepcopy from vae
-        self.policy = copy.deepcopy(self.vae_train.policy)
-        self.old_policy = copy.deepcopy(self.vae_train.policy)
-        self.posterior = copy.deepcopy(self.vae_train.posterior)
+        self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
         self.opt_policy = optim.Adam(self.policy_net.parameters(), lr=0.0003)
