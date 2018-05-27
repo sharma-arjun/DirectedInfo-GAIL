@@ -137,7 +137,6 @@ class CausalGAILMLP(BaseGAIL):
 
   def select_action(self, inp):
       """Select action using policy net."""
-      # TODO: Policy net could output discrete action or continuous action
       action_mean, _, _ = self.policy_net(inp)
       return action_mean
 
@@ -171,7 +170,7 @@ class CausalGAILMLP(BaseGAIL):
         x_state_obj = StateVector(state_arr[:, 0, :], self.obstacles)
         x_feat = self.vae_train.get_state_features(
                 x_state_obj,
-                self.args.use_state_features)
+                self.vae_train.args.use_state_features)
     elif self.args.env_type == 'mujoco':
         x_feat = state_arr[:, 0, :]
         dummy_state = self.env.reset()
@@ -192,7 +191,6 @@ class CausalGAILMLP(BaseGAIL):
         x = self.get_history_features(x_hist,
                                       self.args.use_velocity_features)
 
-    curr_state_arr = state_arr[:, 0, :]
     for t in range(episode_len):
         c = pred_c_arr[:, t, :]
         x_var = Variable(torch.from_numpy(
@@ -231,9 +229,6 @@ class CausalGAILMLP(BaseGAIL):
             else:
                 x[:] = self.vae_train.get_state_features(
                         next_state, self.args.use_state_features)
-                # Update current state
-                curr_state_arr = np.array(
-                        next_state.coordinates, dtype=np.float32)
         else:
             raise ValueError("Not implemented yet.")
 
@@ -633,9 +628,8 @@ class CausalGAILMLP(BaseGAIL):
 
         # Add history to state
         if args.history_size > 1:
-          x_hist = -1 * np.ones(
-                  (x.shape[0], args.history_size, x.shape[1]),
-                  dtype=np.float32)
+          x_hist = -1 * np.ones((x.shape[0], args.history_size, x.shape[1]),
+                                dtype=np.float32)
           x_hist[:, (args.history_size-1), :] = x_feat
           x = self.vae_train.get_history_features(
                   x_hist, self.args.use_velocity_features)
@@ -652,8 +646,7 @@ class CausalGAILMLP(BaseGAIL):
         memory_list = []
         curr_state_arr = state_expert[:, 0, :]
         for t in range(expert_episode_len):
-          ct = c_gen[:, t, :]
-          next_ct = c_gen[:, t+1, :]
+          ct, next_ct = c_gen[:, t, :], c_gen[:, t+1, :]
 
           x_var = Variable(torch.from_numpy(
               x.reshape((batch_size, -1))).type(self.dtype))
@@ -907,6 +900,10 @@ class CausalGAILMLP(BaseGAIL):
         if self.dtype != torch.FloatTensor:
             self.convert_models_to_type(self.dtype)
 
+def check_args(saved_args, new_args):
+    assert saved_args.use_state_features == new_args.use_state_features, \
+            'Args do not match - use_state_features'
+
 def load_VAE_model(model_checkpoint_path, new_args):
     '''Load pre-trained VAE model.'''
 
@@ -918,6 +915,9 @@ def load_VAE_model(model_checkpoint_path, new_args):
     with open(saved_args_filepath, 'rb') as saved_args_f:
         saved_args = pickle.load(saved_args_f)
         print('Did load saved args {}'.format(saved_args_filepath))
+
+    # check args
+    check_args(saved_args, new_args)
 
     dtype = torch.FloatTensor
     # Use new args to load the previously saved models as well
