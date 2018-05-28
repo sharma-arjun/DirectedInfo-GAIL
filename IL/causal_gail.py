@@ -41,6 +41,7 @@ from utils.rl_utils import greedy, oned_to_onehot
 from utils.rl_utils import get_advantage_for_rewards
 from utils.torch_utils import get_weight_norm_for_network
 from utils.torch_utils import normal_log_density
+from utils.torch_utils import add_scalars_to_summary_writer
 
 class CausalGAILMLP(BaseGAIL):
     def __init__(self,
@@ -258,13 +259,13 @@ class CausalGAILMLP(BaseGAIL):
 
     def load_weights_from_vae(self):
         # deepcopy from vae
-        self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
-        self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        # self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        # self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
-        self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=self.args.learning_rate)
+        # self.opt_policy = optim.Adam(self.policy_net.parameters(),
+        #                             lr=self.args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
@@ -406,7 +407,8 @@ class CausalGAILMLP(BaseGAIL):
             gen_disc_loss.backward()
 
             # Add loss scalars.
-            self.logger.summary_writer.add_scalars(
+            add_scalars_to_summary_writer(
+                self.logger.summary_writer,
                 'loss/discriminator',
                 {
                   'total': expert_disc_loss.data[0] + gen_disc_loss.data[0],
@@ -898,16 +900,17 @@ class CausalGAILMLP(BaseGAIL):
                     memory_t[4] += (goal_reward / expert_episode_len)
                     memory.push(*memory_t)
 
-                self.logger.summary_writer.add_scalars(
-                    'gen_traj/gen_reward',
-                    {
-                      'discriminator': disc_reward,
-                      'discriminator_per_step': disc_reward/expert_episode_len,
-                      'posterior': posterior_reward,
-                      'posterior_per_step': posterior_reward/expert_episode_len,
-                      'goal': goal_reward,
-                    },
-                    gen_traj_step_count,
+                add_scalars_to_summary_writer(
+                        self.logger.summary_writer, 
+                        'gen_traj/gen_reward',
+                        {
+                            'discriminator': disc_reward,
+                            'discriminator_per_step': disc_reward/expert_episode_len,
+                            'posterior': posterior_reward,
+                            'posterior_per_step': posterior_reward/expert_episode_len,
+                            'goal': goal_reward,
+                        },
+                        gen_traj_step_count,
                 )
 
                 num_steps += expert_episode_len
@@ -935,7 +938,8 @@ class CausalGAILMLP(BaseGAIL):
             results['average_reward'].append(np.mean(reward_batch))
 
             # Add to tensorboard
-            self.logger.summary_writer.add_scalars(
+            add_scalars_to_summary_writer(
+                    self.logger.summary_writer,
                     'gen_traj/reward', {
                         'average': np.mean(reward_batch),
                         'max': np.max(reward_batch),
@@ -944,7 +948,8 @@ class CausalGAILMLP(BaseGAIL):
                     self.train_step_count)
             linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
             map_traj_reward = env_reward_batch_dict['map_traj_reward']
-            self.logger.summary_writer.add_scalars(
+            add_scalars_to_summary_writer(
+                    self.logger.summary_writer,
                     'gen_traj/true_reward', {
                         'average': np.mean(linear_traj_reward),
                         'max': np.max(linear_traj_reward),

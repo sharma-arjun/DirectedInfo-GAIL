@@ -75,3 +75,15 @@ def get_weight_norm_for_network(model):
           grad_l2_norm, get_norm_inf_scalar_for_layer(param.grad))
 
   return wt_l2_norm, grad_l2_norm
+
+def add_scalars_to_summary_writer(summary_writer, 
+                                  tags_prefix,
+                                  tags_dict,
+                                  step_count):
+    '''Add dictionary of scalars to summary writer.'''
+    for tag_key, tag_value in tags_dict.items():
+        tag = tags_prefix + '/' + tag_key
+        summary_writer.add_scalar(
+                tag,
+                tag_value,
+                step_count)
