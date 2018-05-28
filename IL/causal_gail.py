@@ -109,7 +109,7 @@ class CausalGAILMLP(BaseGAIL):
         self.opt_reward = optim.Adam(self.reward_net.parameters(),
                                      lr=args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
-                                        lr=args.learning_rate)
+                                        lr=args.posterior_learning_rate)
         if args.use_value_net:
             self.opt_value = optim.Adam(self.value_net.parameters(),
                                         lr=args.learning_rate)
@@ -266,7 +266,7 @@ class CausalGAILMLP(BaseGAIL):
         self.opt_policy = optim.Adam(self.policy_net.parameters(),
                                      lr=self.args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
-                                        lr=self.args.learning_rate)
+                                        lr=self.args.posterior_learning_rate)
 
 
     def set_expert(self, expert):
@@ -319,7 +319,7 @@ class CausalGAILMLP(BaseGAIL):
             # use fixed std if not using reparameterize otherwise use sigma.
             posterior_reward_t = reward_func(next_ct, loc=mu, scale=0.1)[0]
 
-        return posterior_reward_t.data.cpu().numpy()
+        return posterior_reward_t.data.cpu().numpy()[0]
 
 
     def update_posterior_net(self, state_var, c_var, next_c_var, goal_var=None):
@@ -426,11 +426,13 @@ class CausalGAILMLP(BaseGAIL):
                                                   reward_grad_l2_norm,
                                                   self.gail_step_count)
 
+            self.opt_posterior.zero_grad()
             posterior_loss = self.update_posterior_net(state_var,
                                                        latent_c_var,
                                                        latent_next_c_var,
                                                        goal_var=goal_var)
             posterior_loss.backward()
+            self.opt_posterior.step()
             self.logger.summary_writer.add_scalar('loss/posterior',
                                                   posterior_loss.data[0],
                                                   self.gail_step_count)
@@ -1127,6 +1129,8 @@ if __name__ == '__main__':
     # Training parameters
     parser.add_argument('--learning_rate', type=float, default=3e-4,
                         help='gae (default: 3e-4)')
+    parser.add_argument('--posterior_learning_rate', type=float, default=3e-4,
+                        help='VAE posterior lr (default: 3e-4)')
     parser.add_argument('--batch_size', type=int, default=2048,
                         help='batch size (default: 2048)')
     parser.add_argument('--num_epochs', type=int, default=500,
