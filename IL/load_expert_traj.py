@@ -244,7 +244,7 @@ class SeparateRoomTrajExpert(ExpertHDF5):
         while last_state_idx < episode_len:
             curr_state_idx = last_state_idx + 1
             while curr_state_idx < episode_len:
-                if (context_arr_int[last_state_idx].tolist() !=
+                if (context_arr_int[last_state_idx].tolist() ==
                         context_arr_int[curr_state_idx].tolist()):
                     curr_state_idx += 1
                 else:
