@@ -904,7 +904,9 @@ class CausalGAILMLP(BaseGAIL):
                     'gen_traj/gen_reward',
                     {
                       'discriminator': disc_reward,
+                      'discriminator_per_step': disc_reward/expert_episode_len,
                       'posterior': posterior_reward,
+                      'posterior_per_step': posterior_reward/expert_episode_len,
                       'goal': goal_reward,
                     },
                     self.train_step_count
