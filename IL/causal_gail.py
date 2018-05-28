@@ -468,8 +468,7 @@ class CausalGAILMLP(BaseGAIL):
             if args.use_value_net:
                 # update value net
                 self.opt_value.zero_grad()
-                value_var = self.value_net(
-                        torch.cat((state_var, latent_next_c_var), 1))
+                value_var = self.value_net(torch.cat((state_var, goal_var), 1))
                 value_loss = (value_var - \
                         targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
                 value_loss.backward()
@@ -531,7 +530,7 @@ class CausalGAILMLP(BaseGAIL):
         latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
         latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
         if args.use_value_net:
-            values = self.value_net(Variable(torch.cat((states, latent_c), 1)))
+            values = self.value_net(Variable(torch.cat((states, goal), 1)))
         else:
             values = None
 
@@ -639,6 +638,7 @@ class CausalGAILMLP(BaseGAIL):
                    'pred_traj_state': {}, 'pred_traj_action': {}}
 
         self.train_step_count, self.gail_step_count = 0, 0
+        gen_traj_step_count = 0
         self.convert_models_to_type(self.dtype)
 
         for ep_idx in range(args.num_epochs):
@@ -772,8 +772,8 @@ class CausalGAILMLP(BaseGAIL):
                                                          args.num_epochs * 0.5,
                                                          ep_idx,
                                                          self.action_size,
-                                                         low=0.05,
-                                                         high=0.3)
+                                                         low=0.1,
+                                                         high=0.5)
 
                     # Get the discriminator reward
                     disc_reward_t = self.get_discriminator_reward(
@@ -909,7 +909,7 @@ class CausalGAILMLP(BaseGAIL):
                       'posterior_per_step': posterior_reward/expert_episode_len,
                       'goal': goal_reward,
                     },
-                    self.train_step_count
+                    gen_traj_step_count,
                 )
 
                 num_steps += expert_episode_len
@@ -930,6 +930,9 @@ class CausalGAILMLP(BaseGAIL):
                 true_traj_curr_episode['action'].append(true_traj['action'])
                 gen_traj_curr_episode['state'].append(gen_traj['state'])
                 gen_traj_curr_episode['action'].append(gen_traj['action'])
+
+                # Increment generated trajectory step count.
+                gen_traj_step_count += 1
 
             results['average_reward'].append(np.mean(reward_batch))
 
