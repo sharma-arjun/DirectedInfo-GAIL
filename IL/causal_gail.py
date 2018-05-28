@@ -88,7 +88,7 @@ class CausalGAILMLP(BaseGAIL):
         # Reward net is the discriminator network.
         self.reward_net = Reward(state_size * history_size,
                                  action_size,
-                                 context_size + 4,
+                                 context_size,
                                  hidden_size=64)
 
         if vae_train.args.use_discrete_vae:
@@ -286,7 +286,7 @@ class CausalGAILMLP(BaseGAIL):
             (x,
              Variable(torch.from_numpy(oned_to_onehot(
                  a, self.action_size)).unsqueeze(0)).type(self.dtype),
-             next_c), 1)).data.cpu().numpy()[0,0])
+             goal_var), 1)).data.cpu().numpy()[0,0])
 
         if disc_reward < 1e-6:
             disc_reward += 1e-6
@@ -387,8 +387,7 @@ class CausalGAILMLP(BaseGAIL):
             expert_output = self.reward_net(
                     torch.cat((expert_state_var,
                                expert_action_var,
-                               expert_goal_var,
-                               expert_latent_c_var), 1))
+                               expert_goal_var), 1))
             expert_disc_loss = F.binary_cross_entropy(
                     expert_output, 
                     Variable(torch.zeros(expert_action_var.size(0), 1)).type(
@@ -400,8 +399,7 @@ class CausalGAILMLP(BaseGAIL):
             gen_output = self.reward_net(
                     torch.cat((state_var,
                                action_var,
-                               goal_var,
-                               latent_next_c_var), 1))
+                               goal_var), 1))
             gen_disc_loss = F.binary_cross_entropy(
                     gen_output,
                     Variable(torch.ones(action_var.size(0), 1)).type(dtype))
