@@ -644,7 +644,8 @@ class CausalGAILMLP(BaseGAIL):
                 goal=goal[perm],
                 expert_goal=expert_goals[perm_exp])
 
-    def train_gail(self, batch_size=1):
+    def train_gail(self, num_epochs, results_pkl_path,
+                   batch_size=1, train=True):
         '''Train GAIL.'''
         args, dtype = self.args, self.dtype
         results = {'average_reward': [], 'episode_reward': [],
@@ -653,15 +654,15 @@ class CausalGAILMLP(BaseGAIL):
 
         self.train_step_count, self.gail_step_count = 0, 0
         gen_traj_step_count = 0
-        self.convert_models_to_type(self.dtype)
+        self.convert_models_to_type(dtype)
 
-        for ep_idx in range(args.num_epochs):
+        for ep_idx in range(num_epochs):
             memory = Memory()
 
             num_steps = 0
             reward_batch, expert_true_reward_batch = [], []
-            true_traj_curr_episode = {'state':[], 'action': []}
-            gen_traj_curr_episode = {'state': [], 'action': []}
+            true_traj_curr_epoch = {'state':[], 'action': []}
+            gen_traj_curr_epoch = {'state': [], 'action': []}
             env_reward_batch_dict = {'linear_traj_reward': [],
                                      'map_traj_reward': []}
 
@@ -783,12 +784,15 @@ class CausalGAILMLP(BaseGAIL):
                     gen_traj_dict['c'].append(ct)
                     # ==== END ====
 
-                    action = epsilon_greedy_linear_decay(action_numpy,
-                                                         args.num_epochs * 0.5,
-                                                         ep_idx,
-                                                         self.action_size,
-                                                         low=0.1,
-                                                         high=0.9)
+                    # Take epsilon-greedy action only during training.
+                    if train:
+                        action = epsilon_greedy_linear_decay(
+                                action_numpy,
+                                args.num_epochs * 0.5,
+                                ep_idx,
+                                self.action_size,
+                                low=0.1,
+                                high=0.9)
 
                     # Get the discriminator reward
                     disc_reward_t = self.get_discriminator_reward(
@@ -915,18 +919,19 @@ class CausalGAILMLP(BaseGAIL):
                     memory_t[4] += (goal_reward / expert_episode_len)
                     memory.push(*memory_t)
 
-                add_scalars_to_summary_writer(
-                        self.logger.summary_writer, 
-                        'gen_traj/gen_reward',
-                        {
-                            'discriminator': disc_reward,
-                            'discriminator_per_step': disc_reward/expert_episode_len,
-                            'posterior': posterior_reward,
-                            'posterior_per_step': posterior_reward/expert_episode_len,
-                            'goal': goal_reward,
-                        },
-                        gen_traj_step_count,
-                )
+                if train:
+                    add_scalars_to_summary_writer(
+                            self.logger.summary_writer, 
+                            'gen_traj/gen_reward',
+                            {
+                                'discriminator': disc_reward,
+                                'discriminator_per_step': disc_reward/expert_episode_len,
+                                'posterior': posterior_reward,
+                                'posterior_per_step': posterior_reward/expert_episode_len,
+                                'goal': goal_reward,
+                            },
+                            gen_traj_step_count,
+                    )
 
                 num_steps += expert_episode_len
                 
@@ -943,61 +948,63 @@ class CausalGAILMLP(BaseGAIL):
 
                 # Append trajectories
                 true_traj_curr_episode['state'].append(true_traj['state'])
-                true_traj_curr_episode['action'].append(true_traj['action'])
-                gen_traj_curr_episode['state'].append(gen_traj['state'])
-                gen_traj_curr_episode['action'].append(gen_traj['action'])
+                true_traj_curr_epoch['action'].append(true_traj['action'])
+                gen_traj_curr_epoch['state'].append(gen_traj['state'])
+                gen_traj_curr_epoch['action'].append(gen_traj['action'])
 
                 # Increment generated trajectory step count.
                 gen_traj_step_count += 1
 
             results['average_reward'].append(np.mean(reward_batch))
 
-            # Add to tensorboard
-            add_scalars_to_summary_writer(
-                    self.logger.summary_writer,
-                    'gen_traj/reward', {
-                        'average': np.mean(reward_batch),
-                        'max': np.max(reward_batch),
-                        'min': np.min(reward_batch)
-                    },
-                    self.train_step_count)
-            linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
-            map_traj_reward = env_reward_batch_dict['map_traj_reward']
-            add_scalars_to_summary_writer(
-                    self.logger.summary_writer,
-                    'gen_traj/true_reward', {
-                        'average': np.mean(linear_traj_reward),
-                        'max': np.max(linear_traj_reward),
-                        'min': np.min(linear_traj_reward),
-                        'expert_true': np.mean(expert_true_reward_batch),
-                        'map_average': np.mean(map_traj_reward),
-                        'map_max': np.max(map_traj_reward),
-                        'map_min': np.min(map_traj_reward),
-                    },
-                    self.train_step_count)
+            # Add to tensorboard if training.
+            if train:
+                add_scalars_to_summary_writer(
+                        self.logger.summary_writer,
+                        'gen_traj/reward', {
+                            'average': np.mean(reward_batch),
+                            'max': np.max(reward_batch),
+                            'min': np.min(reward_batch)
+                        },
+                        self.train_step_count)
+                linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
+                map_traj_reward = env_reward_batch_dict['map_traj_reward']
+                add_scalars_to_summary_writer(
+                        self.logger.summary_writer,
+                        'gen_traj/true_reward', {
+                            'average': np.mean(linear_traj_reward),
+                            'max': np.max(linear_traj_reward),
+                            'min': np.min(linear_traj_reward),
+                            'expert_true': np.mean(expert_true_reward_batch),
+                            'map_average': np.mean(map_traj_reward),
+                            'map_max': np.max(map_traj_reward),
+                            'map_min': np.min(map_traj_reward),
+                        },
+                        self.train_step_count)
 
             # Add predicted and generated trajectories to results
-            if ep_idx % self.args.save_interval == 0:
+            if not train or ep_idx % self.args.save_interval == 0:
                 results['true_traj_state'][ep_idx] = copy.deepcopy(
-                        true_traj_curr_episode['state'])
+                        true_traj_curr_epoch['state'])
                 results['true_traj_action'][ep_idx] = copy.deepcopy(
-                        true_traj_curr_episode['action'])
+                        true_traj_curr_epoch['action'])
                 results['pred_traj_state'][ep_idx] = copy.deepcopy(
-                        gen_traj_curr_episode['state'])
+                        gen_traj_curr_epoch['state'])
                 results['pred_traj_action'][ep_idx] = copy.deepcopy(
-                        gen_traj_curr_episode['action'])
+                        gen_traj_curr_epoch['action'])
 
-            # ==== Update parameters ====
-            gen_batch = memory.sample()
+            if train:
+                # ==== Update parameters ====
+                gen_batch = memory.sample()
 
-            # We do not get the context variable from expert trajectories.
-            # Hence we need to fill it in later.
-            expert_batch = self.expert.sample(size=args.num_expert_trajs)
+                # We do not get the context variable from expert trajectories.
+                # Hence we need to fill it in later.
+                expert_batch = self.expert.sample(size=args.num_expert_trajs)
 
-            self.update_params(gen_batch, expert_batch, ep_idx,
-                               args.optim_epochs, args.optim_batch_size)
+                self.update_params(gen_batch, expert_batch, ep_idx,
+                                   args.optim_epochs, args.optim_batch_size)
 
-            self.train_step_count += 1
+                self.train_step_count += 1
 
             if ep_idx > 0 and  ep_idx % args.log_interval == 0:
                 print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
@@ -1011,12 +1018,10 @@ class CausalGAILMLP(BaseGAIL):
                       np.mean(map_traj_reward),
                       np.max(map_traj_reward)))
 
-            results_path = os.path.join(args.results_dir, 'results.pkl')
-            with open(results_path, 'wb') as results_f:
+            with open(results_pkl_path, 'wb') as results_f:
                 pickle.dump((results), results_f, protocol=2)
-                # print("Did save results to {}".format(results_path))
 
-            if ep_idx % args.save_interval == 0:
+            if train and ep_idx > 0 and ep_idx % args.save_interval == 0:
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(torch.FloatTensor)
                 checkpoint_filepath = self.model_checkpoint_filepath(ep_idx)
@@ -1024,6 +1029,7 @@ class CausalGAILMLP(BaseGAIL):
                 print("Did save checkpoint: {}".format(checkpoint_filepath))
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(self.dtype)
+
 
 def check_args(saved_args, new_args):
     assert saved_args.use_state_features == new_args.use_state_features, \
@@ -1109,13 +1115,31 @@ def main(args):
             num_goals=vae_train.args.vae_goal_size,
             history_size=vae_train.args.vae_history_size,
             dtype=dtype)
+    causal_gail_mlp.set_expert(expert)
+
+    if len(args.checkpoint_path) > 0:
+        causal_gail_mlp.load_checkpoint_data(args.checkpoint_path)    
+        results_pkl_path = os.path.join(
+                args.results_dir, 
+                'results_' + os.path.basename(args.checkpoint_path))
+        causal_gail_mlp.train_gail(
+                1,
+                results_pkl_path,
+                batch_size=512,
+                train=False)
+        print("Did save results to: {}".format(results_pkl_path))
+        return
 
     if args.init_from_vae:
         print("Will load generator and posterior from pretrianed VAE.")
         causal_gail_mlp.load_weights_from_vae()
 
-    causal_gail_mlp.set_expert(expert) # not implemented?
-    causal_gail_mlp.train_gail()
+
+    results_path = os.path.join(args.results_dir, 'results.pkl')
+    causal_gail_mlp.train_gail(
+            args.num_epochs,
+            os.path.join(args.results_dir, 'results.pkl')
+            )
 
 
 if __name__ == '__main__':
@@ -1183,6 +1207,8 @@ if __name__ == '__main__':
     # Path to store training results in
     parser.add_argument('--results_dir', type=str, required=True,
                         help='Path to store results in.')
+    parser.add_argument('--checkpoint_path', type=str, default='',
+                        help='Checkpoint path to load pre-trained models.')
 
     parser.add_argument('--cuda', dest='cuda', action='store_true',
                         help='enables CUDA training')
