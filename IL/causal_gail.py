@@ -645,7 +645,7 @@ class CausalGAILMLP(BaseGAIL):
                 expert_goal=expert_goals[perm_exp])
 
     def train_gail(self, num_epochs, results_pkl_path,
-                   batch_size=1, train=True):
+                   gen_batch_size=1, train=True):
         '''Train GAIL.'''
         args, dtype = self.args, self.dtype
         results = {'average_reward': [], 'episode_reward': [],
@@ -659,14 +659,14 @@ class CausalGAILMLP(BaseGAIL):
         for ep_idx in range(num_epochs):
             memory = Memory()
 
-            num_steps = 0
+            num_steps, batch_size = 0, 1
             reward_batch, expert_true_reward_batch = [], []
             true_traj_curr_epoch = {'state':[], 'action': []}
             gen_traj_curr_epoch = {'state': [], 'action': []}
             env_reward_batch_dict = {'linear_traj_reward': [],
                                      'map_traj_reward': []}
 
-            while num_steps < args.batch_size:
+            while num_steps < gen_batch_size:
                 traj_expert = self.expert.sample(size=batch_size)
                 state_expert, action_expert, c_expert, _ = traj_expert
                 state_expert = np.array(state_expert, dtype=np.float32)
@@ -785,14 +785,16 @@ class CausalGAILMLP(BaseGAIL):
                     # ==== END ====
 
                     # Take epsilon-greedy action only during training.
-                    if train:
-                        action = epsilon_greedy_linear_decay(
-                                action_numpy,
-                                args.num_epochs * 0.5,
-                                ep_idx,
-                                self.action_size,
-                                low=0.1,
-                                high=0.9)
+                    eps_low, eps_high = 0.1, 0.9
+                    if not train:
+                        eps_low, eps_high = 0.0, 0.0
+                    action = epsilon_greedy_linear_decay(
+                            action_numpy,
+                            args.num_epochs * 0.5,
+                            ep_idx,
+                            self.action_size,
+                            low=eps_low,
+                            high=eps_high)
 
                     # Get the discriminator reward
                     disc_reward_t = self.get_discriminator_reward(
@@ -947,7 +949,7 @@ class CausalGAILMLP(BaseGAIL):
                 # ==== END ====
 
                 # Append trajectories
-                true_traj_curr_episode['state'].append(true_traj['state'])
+                true_traj_curr_epoch['state'].append(true_traj['state'])
                 true_traj_curr_epoch['action'].append(true_traj['action'])
                 gen_traj_curr_epoch['state'].append(gen_traj['state'])
                 gen_traj_curr_epoch['action'].append(gen_traj['action'])
@@ -1125,7 +1127,7 @@ def main(args):
         causal_gail_mlp.train_gail(
                 1,
                 results_pkl_path,
-                batch_size=512,
+                gen_batch_size=512,
                 train=False)
         print("Did save results to: {}".format(results_pkl_path))
         return
@@ -1138,7 +1140,8 @@ def main(args):
     results_path = os.path.join(args.results_dir, 'results.pkl')
     causal_gail_mlp.train_gail(
             args.num_epochs,
-            os.path.join(args.results_dir, 'results.pkl')
+            os.path.join(args.results_dir, 'results.pkl'),
+            gen_batch_size=args.batch_size,
             )
 
 
