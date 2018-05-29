@@ -381,7 +381,7 @@ class CausalGAILMLP(BaseGAIL):
             if expert_goal is not None:
                 expert_goal_var = Variable(expert_goal[start_idx:end_idx])
 
-            # Update reward net
+            # ==== Update reward net ====
             self.opt_reward.zero_grad()
 
             # Backprop with expert demonstrations
@@ -406,6 +406,9 @@ class CausalGAILMLP(BaseGAIL):
                     Variable(torch.ones(action_var.size(0), 1)).type(dtype))
             gen_disc_loss.backward()
 
+            self.opt_reward.step()
+            # ==== END ====
+
             # Add loss scalars.
             add_scalars_to_summary_writer(
                 self.logger.summary_writer,
@@ -416,7 +419,6 @@ class CausalGAILMLP(BaseGAIL):
                   'gen': gen_disc_loss.data[0],
                   },
                 self.gail_step_count)
-            self.opt_reward.step()
             reward_l2_norm, reward_grad_l2_norm = \
                               get_weight_norm_for_network(self.reward_net)
             self.logger.summary_writer.add_scalar('weight/discriminator/param',
@@ -426,6 +428,7 @@ class CausalGAILMLP(BaseGAIL):
                                                   reward_grad_l2_norm,
                                                   self.gail_step_count)
 
+            # ==== Update posterior net ====
             self.opt_posterior.zero_grad()
             posterior_loss = self.update_posterior_net(state_var,
                                                        latent_c_var,
@@ -436,7 +439,7 @@ class CausalGAILMLP(BaseGAIL):
             self.logger.summary_writer.add_scalar('loss/posterior',
                                                   posterior_loss.data[0],
                                                   self.gail_step_count)
-
+            # ==== END ====
 
             # compute old and new action probabilities
             use_goal_in_policy = True
@@ -473,16 +476,21 @@ class CausalGAILMLP(BaseGAIL):
                                                   action_log_stds_old,
                                                   action_stds_old)
 
+            # ==== Update value net ====
             if args.use_value_net:
-                # update value net
                 self.opt_value.zero_grad()
                 value_var = self.value_net(torch.cat((state_var, goal_var), 1))
                 value_loss = (value_var - \
                         targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
                 value_loss.backward()
                 self.opt_value.step()
+                self.logger.summary_writer.add_scalar(
+                        'loss/value',
+                        value_loss.data.cpu().numpy()[0],
+                        self.gail_step_count)
+            # ==== END ====
 
-            # Update policy net (PPO step)
+            # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
             surr1 = ratio * advantages_var[:, 0]
@@ -494,9 +502,11 @@ class CausalGAILMLP(BaseGAIL):
             policy_surr.backward()
             # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
             self.opt_policy.step()
+            # ==== END ====
+
             self.logger.summary_writer.add_scalar('loss/policy',
                                                   policy_surr.data[0],
-                                                 self.gail_step_count)
+                                                  self.gail_step_count)
 
             policy_l2_norm, policy_grad_l2_norm = \
                               get_weight_norm_for_network(self.policy_net)
