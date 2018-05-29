@@ -358,7 +358,7 @@ class CausalGAILMLP(BaseGAIL):
         '''
         args, dtype = self.args, self.dtype
         curr_id, curr_id_exp = 0, 0
-        for _ in range(optim_iters):
+        for optim_idx in range(optim_iters):
             curr_batch_size = min(optim_batch_size, actions.size(0) - curr_id)
             curr_batch_size_exp = min(optim_batch_size_exp,
                                       expert_actions.size(0) - curr_id_exp)
@@ -381,33 +381,34 @@ class CausalGAILMLP(BaseGAIL):
             if expert_goal is not None:
                 expert_goal_var = Variable(expert_goal[start_idx:end_idx])
 
-            # ==== Update reward net ====
-            self.opt_reward.zero_grad()
+            if optim_idx % 2 == 0:
+                # ==== Update reward net ====
+                self.opt_reward.zero_grad()
 
-            # Backprop with expert demonstrations
-            expert_output = self.reward_net(
-                    torch.cat((expert_state_var,
-                               expert_action_var,
-                               expert_goal_var), 1))
-            expert_disc_loss = F.binary_cross_entropy(
-                    expert_output, 
-                    Variable(torch.zeros(expert_action_var.size(0), 1)).type(
-                        dtype))
-            expert_disc_loss.backward()
+                # Backprop with expert demonstrations
+                expert_output = self.reward_net(
+                        torch.cat((expert_state_var,
+                                   expert_action_var,
+                                   expert_goal_var), 1))
+                expert_disc_loss = F.binary_cross_entropy(
+                        expert_output, 
+                        Variable(torch.zeros(expert_action_var.size(0), 1)).type(
+                            dtype))
+                expert_disc_loss.backward()
 
-            # Backprop with generated demonstrations
-            # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
-            gen_output = self.reward_net(
-                    torch.cat((state_var,
-                               action_var,
-                               goal_var), 1))
-            gen_disc_loss = F.binary_cross_entropy(
-                    gen_output,
-                    Variable(torch.ones(action_var.size(0), 1)).type(dtype))
-            gen_disc_loss.backward()
+                # Backprop with generated demonstrations
+                # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
+                gen_output = self.reward_net(
+                        torch.cat((state_var,
+                                   action_var,
+                                   goal_var), 1))
+                gen_disc_loss = F.binary_cross_entropy(
+                        gen_output,
+                        Variable(torch.ones(action_var.size(0), 1)).type(dtype))
+                gen_disc_loss.backward()
 
-            self.opt_reward.step()
-            # ==== END ====
+                self.opt_reward.step()
+                # ==== END ====
 
             # Add loss scalars.
             add_scalars_to_summary_writer(
@@ -1123,7 +1124,8 @@ def main(args):
         causal_gail_mlp.load_checkpoint_data(args.checkpoint_path)    
         results_pkl_path = os.path.join(
                 args.results_dir, 
-                'results_' + os.path.basename(args.checkpoint_path))
+                'results_' + os.path.basename(args.checkpoint_path)[:-3] \
+                        + 'pkl')
         causal_gail_mlp.train_gail(
                 1,
                 results_pkl_path,
