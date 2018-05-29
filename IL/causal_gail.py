@@ -439,11 +439,19 @@ class CausalGAILMLP(BaseGAIL):
 
 
             # compute old and new action probabilities
-            action_means, action_log_stds, action_stds = self.policy_net(
-                    torch.cat((state_var, latent_next_c_var), 1))
-            action_means_old, action_log_stds_old, action_stds_old = \
-                    self.old_policy_net(
-                            torch.cat((state_var, latent_next_c_var), 1))
+            use_goal_in_policy = True
+            if use_goal_in_policy:
+                action_means, action_log_stds, action_stds = self.policy_net(
+                        torch.cat((state_var, goal_var), 1))
+                action_means_old, action_log_stds_old, action_stds_old = \
+                        self.old_policy_net(
+                                torch.cat((state_var, goal_var), 1))
+            else:
+                action_means, action_log_stds, action_stds = self.policy_net(
+                        torch.cat((state_var, latent_next_c_var), 1))
+                action_means_old, action_log_stds_old, action_stds_old = \
+                        self.old_policy_net(
+                                torch.cat((state_var, latent_next_c_var), 1))
 
             if self.vae_train.args.discrete_action:
                 # action_probs is (N, A)
@@ -511,17 +519,14 @@ class CausalGAILMLP(BaseGAIL):
         '''
         args, dtype = self.args, self.dtype
 
-        self.opt_policy.lr = self.args.learning_rate \
-                * max(1.0 - float(episode_idx)/args.num_epochs, 0)
-        clip_epsilon = self.args.clip_epsilon \
-                * max(1.0 - float(episode_idx)/args.num_epochs, 0)
+        # self.opt_policy.lr = self.args.learning_rate \
+        #        * max(1.0 - float(episode_idx)/args.num_epochs, 0)
 
         # generated trajectories
         states = torch.Tensor(np.array(gen_batch.state)).type(dtype)
         actions = torch.Tensor(np.array(gen_batch.action)).type(dtype)
         rewards = torch.Tensor(np.array(gen_batch.reward)).type(dtype)
         masks = torch.Tensor(np.array(gen_batch.mask)).type(dtype)
-        # goal can be None
         goal = torch.Tensor(np.array(gen_batch.goal)).type(dtype)
 
         ## Expand states to include history ##
@@ -529,10 +534,9 @@ class CausalGAILMLP(BaseGAIL):
 
         latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
         latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
+        values = None
         if args.use_value_net:
             values = self.value_net(Variable(torch.cat((states, goal), 1)))
-        else:
-            values = None
 
         # expert trajectories
         list_of_expert_states, list_of_expert_actions = [], []
@@ -757,7 +761,8 @@ class CausalGAILMLP(BaseGAIL):
 
 
                     # Generator should predict the action using (x_t, c_t)
-                    action = self.select_action(torch.cat((x_var, c_var), dim=1))
+                    # action = self.select_action(torch.cat((x_var, c_var), dim=1))
+                    action = self.select_action(torch.cat((x_var, goal_var), dim=1))
                     action_numpy = action.data.cpu().numpy()
 
                     # ==== Save generated and true trajectories ====
@@ -972,7 +977,7 @@ class CausalGAILMLP(BaseGAIL):
                 results['pred_traj_action'][ep_idx] = copy.deepcopy(
                         gen_traj_curr_episode['action'])
 
-            # Update parameters
+            # ==== Update parameters ====
             gen_batch = memory.sample()
 
             # We do not get the context variable from expert trajectories.
