@@ -81,9 +81,12 @@ def add_scalars_to_summary_writer(summary_writer,
                                   tags_dict,
                                   step_count):
     '''Add dictionary of scalars to summary writer.'''
+    '''
     for tag_key, tag_value in tags_dict.items():
         tag = tags_prefix + '/' + tag_key
         summary_writer.add_scalar(
                 tag,
                 tag_value,
                 step_count)
+    '''
+    summary_writer.add_scalars(tags_prefix, tags_dict, step_count)
