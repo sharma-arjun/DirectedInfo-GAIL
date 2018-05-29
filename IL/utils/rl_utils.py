@@ -3,6 +3,7 @@ import numpy as np
 import math
 import torch
 from torch.autograd import Variable
+import pdb, ipdb
 
 def epsilon_greedy_linear_decay(action_vector,
                                 num_episodes,
@@ -41,25 +42,28 @@ def get_advantage_for_rewards(rewards,
                               values=None,
                               dtype=torch.FloatTensor):
 
-  returns = torch.Tensor(rewards.size(0), 1).type(dtype)
-  deltas = torch.Tensor(rewards.size(0), 1).type(dtype)
-  advantages = torch.Tensor(rewards.size(0), 1).type(dtype)
+    returns = torch.Tensor(rewards.size(0), 1).type(dtype)
+    deltas = torch.Tensor(rewards.size(0), 1).type(dtype)
+    advantages = torch.Tensor(rewards.size(0), 1).type(dtype)
 
-  # compute advantages
-  prev_return, prev_value, prev_advantage = 0, 0, 0
+    # compute advantages
+    prev_return, prev_value, prev_advantage = 0, 0, 0
 
-  for i in reversed(range(rewards.size(0))):
-    returns[i] = rewards[i] + gamma * prev_return * masks[i]
+    for i in reversed(range(rewards.size(0))):
+        # This return is a monte-carlo estimate.
+        returns[i] = rewards[i] + gamma * prev_return * masks[i]
+        if values is not None:
+            deltas[i] = rewards[i] + gamma * prev_value * masks[i] \
+                    - values.data[i]
+            advantages[i] = deltas[i] + \
+                    gamma * tau * prev_advantage * masks[i]
+            prev_value = values.data[i, 0]
+        else:
+            advantages[i] = returns[i]
+
+        prev_return = returns[i, 0]
+        prev_advantage = advantages[i, 0]
+
     if values is not None:
-      deltas[i] = rewards[i] + gamma * prev_value * masks[i] \
-                             - values.data[i]
-      advantages[i] = deltas[i] + \
-            gamma * tau * prev_advantage * masks[i]
-      prev_value = values.data[i, 0]
-    else:
-      advantages[i] = returns[i]
-
-    prev_return = returns[i, 0]
-    prev_advantage = advantages[i, 0]
-
-  return returns, advantages
+        returns = advantages + values
+    return returns, advantages

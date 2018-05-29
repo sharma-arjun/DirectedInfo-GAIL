@@ -381,7 +381,7 @@ class CausalGAILMLP(BaseGAIL):
             if expert_goal is not None:
                 expert_goal_var = Variable(expert_goal[start_idx:end_idx])
 
-            if optim_idx % 2 == 0:
+            if optim_idx % 1 == 0:
                 # ==== Update reward net ====
                 self.opt_reward.zero_grad()
 
@@ -600,7 +600,8 @@ class CausalGAILMLP(BaseGAIL):
         returns, advantages = get_advantage_for_rewards(rewards,
                                                         masks,
                                                         self.args.gamma,
-                                                        values,
+                                                        self.args.tau,
+                                                        values=values,
                                                         dtype=dtype)
         targets = Variable(returns)
         advantages = (advantages - advantages.mean()) / advantages.std()
