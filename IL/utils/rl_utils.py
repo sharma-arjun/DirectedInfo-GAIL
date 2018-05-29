@@ -65,5 +65,5 @@ def get_advantage_for_rewards(rewards,
         prev_advantage = advantages[i, 0]
 
     if values is not None:
-        returns = advantages + values
+        returns = advantages + values.data
     return returns, advantages
