@@ -778,7 +778,7 @@ class CausalGAILMLP(BaseGAIL):
                                                          ep_idx,
                                                          self.action_size,
                                                          low=0.1,
-                                                         high=0.5)
+                                                         high=0.9)
 
                     # Get the discriminator reward
                     disc_reward_t = self.get_discriminator_reward(
