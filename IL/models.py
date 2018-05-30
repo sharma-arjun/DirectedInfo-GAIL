@@ -38,11 +38,10 @@ class Policy(nn.Module):
 
 
     def forward(self, x, old=False):
-
-        #x = F.relu(self.affine1(x))
-        #x = F.relu(self.affine2(x))
-        x = F.tanh(self.affine1(x))
-        x = F.tanh(self.affine2(x))
+        x = F.relu(self.affine1(x))
+        x = F.relu(self.affine2(x))
+        # x = F.tanh(self.affine1(x))
+        # x = F.tanh(self.affine2(x))
 
         action_mean = self.action_mean(x)
         if self.output_activation == 'sigmoid':
@@ -113,10 +112,10 @@ class Value(nn.Module):
         self.value_head.bias.data.mul_(0.0)
 
     def forward(self, x):
-        #x = F.relu(self.affine1(x))
-        #x = F.relu(self.affine2(x))
-        x = F.tanh(self.affine1(x))
-        x = F.tanh(self.affine2(x))
+        x = F.relu(self.affine1(x))
+        x = F.relu(self.affine2(x))
+        # x = F.tanh(self.affine1(x))
+        # x = F.tanh(self.affine2(x))
 
         state_values = self.value_head(x)
         return state_values

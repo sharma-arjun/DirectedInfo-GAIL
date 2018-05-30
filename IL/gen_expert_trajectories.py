@@ -514,8 +514,11 @@ def gen_room_trajs(grid_width, grid_height, room_size):
             'num_goals': 4,
             }
 
-    obstacles, rooms, room_centres = create_obstacles(grid_width, grid_height, env_name='room',
-                                        room_size=room_size)
+    obstacles, rooms, room_centres = create_obstacles(
+            grid_width,
+            grid_height,
+            env_name='room',
+            room_size=room_size)
     #T = TransitionFunction(grid_width, grid_height, obstacle_movement)
     set_diff = list(set(product(tuple(range(0, grid_width)),tuple(range(0, grid_height)))) \
                     - set(obstacles))
