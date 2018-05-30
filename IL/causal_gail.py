@@ -124,7 +124,8 @@ class CausalGAILMLP(BaseGAIL):
         self.vae_train.convert_models_to_type(dtype)
         self.policy_net = self.policy_net.type(dtype)
         self.old_policy_net = self.old_policy_net.type(dtype)
-        self.value_net = self.value_net.type(dtype)
+        if self.value_net is not None:
+            self.value_net = self.value_net.type(dtype)
         self.reward_net = self.reward_net.type(dtype)
         self.posterior_net = self.posterior_net.type(dtype)
 
@@ -241,11 +242,13 @@ class CausalGAILMLP(BaseGAIL):
         return pred_c_arr, pred_goal
 
     def checkpoint_data_to_save(self):
+        value_net_state_dict = None if self.value_net is None else \
+                self.value_net.state_dict()
         return {
                 'policy': self.policy_net.state_dict(),
                 'posterior': self.posterior_net.state_dict(),
                 'reward': self.reward_net.state_dict(),
-                'value': self.value_net.state_dict(),
+                'value': value_net_state_dict,
         }
 
     def load_checkpoint_data(self, checkpoint_path):
@@ -255,7 +258,8 @@ class CausalGAILMLP(BaseGAIL):
         self.policy_net.load_state_dict(checkpoint_data['policy'])
         self.posterior_net.load_state_dict(checkpoint_data['posterior'])
         self.reward_net.load_state_dict(checkpoint_data['reward'])
-        self.value_net.load_state_dict(checkpoint_data['value'])
+        if checkpoint_data.get('value') is not None:
+            self.value_net.load_state_dict(checkpoint_data['value'])
 
     def load_weights_from_vae(self):
         # deepcopy from vae
