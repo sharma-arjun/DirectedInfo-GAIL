@@ -193,8 +193,7 @@ class CausalGAILMLP(BaseGAIL):
             x_hist = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                   dtype=np.float32)
             x_hist[:, history_size - 1, :] = x_feat
-            x = self.get_history_features(
-                    x_hist, self.args.use_velocity_features)
+            x = self.vae_train.get_history_features(x_hist)
 
         for t in range(episode_len):
             c = pred_c_arr[:, t, :]
@@ -231,8 +230,7 @@ class CausalGAILMLP(BaseGAIL):
                 if history_size > 1:
                     x_hist[:, history_size-1] = self.vae_train.get_state_features(
                             next_state, self.args.use_state_features)
-                    x = self.get_history_features(
-                            x_hist, self.args.use_velocity_features)
+                    x = self.vae_train.get_history_features(x_hist)
                 else:
                     x[:] = self.vae_train.get_state_features(
                             next_state, self.args.use_state_features)
@@ -293,13 +291,20 @@ class CausalGAILMLP(BaseGAIL):
                  a, self.action_size)).unsqueeze(0)).type(self.dtype),
              goal_var), 1)).data.cpu().numpy()[0,0])
 
-        if disc_reward < 1e-6:
-            disc_reward += 1e-6
 
-        if self.args.use_log_rewards:
+        if self.args.disc_reward == 'log_d':
+            if disc_reward < 1e-8:
+                disc_reward += 1e-8
             disc_reward = -math.log(disc_reward)
-        else:
+        elif self.args.disc_reward == 'log_1-d':
+            if disc_reward >= 1.0:
+                disc_reward = 1.0 - 1e-8
+            disc_reward = math.log(1 - disc_reward)
+        elif self.args.disc_reward == 'no_log':
             disc_reward = -disc_reward
+        else:
+            raise ValueError("Incorrect Disc reward type: {}".format(
+                self.args.disc_reward))
         return disc_reward
 
     def get_posterior_reward(self, x, c, next_ct, goal_var=None):
@@ -318,14 +323,45 @@ class CausalGAILMLP(BaseGAIL):
 
             # TODO: should ideally be logpdf, but pdf may work better. Try both.
             # use norm.logpdf if flag else use norm.pdf
-            reward_func = norm.logpdf if self.args.use_log_rewards else \
-                    norm.pdf
+            use_log_rewards = True
+            reward_func = norm.logpdf if use_log_rewards else norm.pdf
             scale = sigma if self.args.use_reparameterize else 0.1
             # use fixed std if not using reparameterize otherwise use sigma.
             posterior_reward_t = reward_func(next_ct, loc=mu, scale=0.1)[0]
 
         return posterior_reward_t.data.cpu().numpy()[0]
 
+    def get_value_function_for_grid(self):
+        from grid_world import create_obstacles, obstacle_movement, sample_start
+        '''Get value function for different locations in grid.'''
+        grid_width, grid_height = self.vae_train.width, self.vae_train.height
+        obstacles, rooms, room_centres = create_obstacles(
+                grid_width,
+                grid_height,
+                env_name='room',
+                room_size=3)
+        valid_positions = list(set(product(tuple(range(0, grid_width)),
+                                    tuple(range(0, grid_height))))
+                                    - set(obstacles))
+        values_for_goal = -1*np.ones((4, grid_height, grid_width))
+        for pos in valid_positions:
+            # hardcode number of goals
+            for goal_idx in range(4):
+                goal_arr = np.zeros((4))
+                goal_arr[goal_idx] = 1
+                print(goal_arr)
+                value_tensor = torch.Tensor(np.hstack(
+                    [np.array(pos), goal_arr])[np.newaxis, :])
+                value_var = self.value_net(Variable(value_tensor))
+                print(value_var.data.cpu().numpy()[0, 0])
+                values_for_goal[goal_idx, grid_height-pos[1], pos[0]] = \
+                        value_var.data.cpu().numpy()[0, 0]
+        for g in range(4):
+            value_g = values_for_goal[g]
+            print("Value for goal: {}".format(g))
+            print(np.array_str(
+                value_g, precision=2, suppress_small=True, max_line_width=200))
+        print(type(values_for_goal_dict))
 
     def update_posterior_net(self, state_var, c_var, next_c_var, goal_var=None):
         if goal_var is not None:
@@ -395,7 +431,7 @@ class CausalGAILMLP(BaseGAIL):
                                    expert_action_var,
                                    expert_goal_var), 1))
                 expert_disc_loss = F.binary_cross_entropy(
-                        expert_output, 
+                        expert_output,
                         Variable(torch.zeros(expert_action_var.size(0), 1)).type(
                             dtype))
                 expert_disc_loss.backward()
@@ -688,10 +724,10 @@ class CausalGAILMLP(BaseGAIL):
                     pos_tuple = tuple(state_expert[0, t, :].astype(
                         np.int32).tolist())
                     state_action_key = (pos_tuple,
-                                        np.argmax(action_expert[0, t, :])) 
+                                        np.argmax(action_expert[0, t, :]))
                     state_action_expert_dict[state_action_key] = 1
                 # ==== END  ====
-                
+
 
                 # Generate c from trained VAE
                 c_gen, expert_goal = self.get_c_for_traj(state_expert,
@@ -732,8 +768,7 @@ class CausalGAILMLP(BaseGAIL):
                             (x.shape[0], args.history_size, x.shape[1]),
                             dtype=np.float32)
                     x_hist[:, (args.history_size-1), :] = x_feat
-                    x = self.vae_train.get_history_features(
-                            x_hist, self.args.use_velocity_features)
+                    x = self.vae_train.get_history_features(x_hist)
 
 
                 # TODO: Make this a separate function. Can be parallelized.
@@ -762,7 +797,7 @@ class CausalGAILMLP(BaseGAIL):
                         ct.reshape((batch_size, -1))).type(self.dtype))
                     next_c_var = Variable(torch.from_numpy(
                         next_ct.reshape((batch_size, -1))).type(self.dtype))
-        
+
                     # Get the goal variable (either true or predicted)
                     goal_var = None
                     if self.vae_train.args.use_rnn_goal:
@@ -827,7 +862,7 @@ class CausalGAILMLP(BaseGAIL):
                         if curr_position == expert_position:
                             env_reward_dict['linear_traj_reward'] += 1.0
                         expert_true_reward += 1.0
-                    
+
                         # Map reward. Each state should only be counted once
                         # only.
                         gen_state_action_key = (tuple(curr_position), action)
@@ -867,8 +902,7 @@ class CausalGAILMLP(BaseGAIL):
                                     self.vae_train.get_state_features(
                                             next_state,
                                             self.args.use_state_features)
-                            x = self.vae_train.get_history_features(
-                                    x_hist, self.args.use_velocity_features)
+                            x = self.vae_train.get_history_features(x_hist)
                         else:
                             x[:] = self.vae_train.get_state_features(
                                     next_state, self.args.use_state_features)
@@ -929,7 +963,7 @@ class CausalGAILMLP(BaseGAIL):
 
                 if train:
                     add_scalars_to_summary_writer(
-                            self.logger.summary_writer, 
+                            self.logger.summary_writer,
                             'gen_traj/gen_reward',
                             {
                                 'discriminator': disc_reward,
@@ -942,7 +976,7 @@ class CausalGAILMLP(BaseGAIL):
                     )
 
                 num_steps += expert_episode_len
-                
+
                 # ==== Log rewards ====
                 reward_batch.append(ep_reward)
                 env_reward_batch_dict['linear_traj_reward'].append(
@@ -1087,11 +1121,28 @@ def load_VAE_model(model_checkpoint_path, new_args):
     print("Did load models at: {}".format(model_checkpoint_path))
     return vae_train
 
+def create_result_dirs(results_dir):
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+        # Directory for TF logs
+        os.makedirs(os.path.join(results_dir, 'log'))
+        # Directory for model checkpoints
+        os.makedirs(os.path.join(results_dir, 'checkpoint'))
+
 def main(args):
     # Create Logger
     if not os.path.exists(os.path.join(args.results_dir, 'log')):
         os.makedirs(os.path.join(args.results_dir, 'log'))
     logger = TensorboardXLogger(os.path.join(args.results_dir, 'log'))
+
+    # Load finetune args.
+    finetune_args = None
+    if len(args.finetune_path) > 0:
+        finetune_args_path = os.path.dirname(os.path.dirname(args.finetune_path))
+        finetune_args_path = os.path.join(finetune_args_path, 'args.pkl')
+        assert os.path.exists(finetune_args_path), "Finetune args does not exist."
+        with open(finetune_args_path, 'rb') as finetune_args_f:
+            finetune_args = pickle.load(finetune_args_f)
 
     print('Loading expert trajectories ...')
     if 'grid' in args.env_type:
@@ -1126,11 +1177,14 @@ def main(args):
     causal_gail_mlp.set_expert(expert)
 
     if len(args.checkpoint_path) > 0:
-        causal_gail_mlp.load_checkpoint_data(args.checkpoint_path)    
+        print("Test checkpoint: {}".format(args.checkpoint_path))
+        causal_gail_mlp.load_checkpoint_data(args.checkpoint_path)
         results_pkl_path = os.path.join(
-                args.results_dir, 
+                args.results_dir,
                 'results_' + os.path.basename(args.checkpoint_path)[:-3] \
                         + 'pkl')
+        causal_gail_mlp.get_value_function_for_grid()
+
         causal_gail_mlp.train_gail(
                 1,
                 results_pkl_path,
@@ -1139,10 +1193,30 @@ def main(args):
         print("Did save results to: {}".format(results_pkl_path))
         return
 
+    if len(args.finetune_path) > 0:
+        # -4 removes .pth from finetune path
+        checkpoint_name = os.path.basename(args.finetune_path)[:-4]
+        # Create results directory for finetune results.
+        results_dir = os.path.join(args.results_dir,
+                                   'finetune_' + checkpoint_name)
+        create_result_dirs(results_dir)
+        # Set new Tensorboard logger for finetune results.
+        logger = TensorboardXLogger(os.path.join(results_dir, 'log'))
+        causal_gail_mlp.logger = logger
+
+        print("Finetune checkpoint: {}".format(args.finetune_path))
+        causal_gail_mlp.load_checkpoint_data(args.finetune_path)
+        causal_gail_mlp.get_value_function_for_grid()
+        causal_gail_mlp.train_gail(
+                args.num_epochs,
+                os.path.join(results_dir, 'results.pkl'),
+                gen_batch_size=args.batch_size,
+                train=True)
+        return
+
     if args.init_from_vae:
         print("Will load generator and posterior from pretrianed VAE.")
         causal_gail_mlp.load_weights_from_vae()
-
 
     results_path = os.path.join(args.results_dir, 'results.pkl')
     causal_gail_mlp.train_gail(
@@ -1219,6 +1293,8 @@ if __name__ == '__main__':
                         help='Path to store results in.')
     parser.add_argument('--checkpoint_path', type=str, default='',
                         help='Checkpoint path to load pre-trained models.')
+    parser.add_argument('--finetune_path', type=str, default='',
+                        help='pre-trained models to finetune.')
 
     parser.add_argument('--cuda', dest='cuda', action='store_true',
                         help='enables CUDA training')
@@ -1250,14 +1326,9 @@ if __name__ == '__main__':
     parser.add_argument('--flag_true_reward', type=str, default='grid_reward',
                         choices=['grid_reward', 'action_reward'],
                         help='True reward type to use.')
-
-    parser.add_argument('--use_log_rewards', dest='use_log_rewards',
-                        action='store_true',
-                        help='Use log with rewards.')
-    parser.add_argument('--no-use_log_rewards', dest='use_log_rewards',
-                        action='store_false',
-                        help='Don\'t Use log with rewards.')
-    parser.set_defaults(use_log_rewards=True)
+    parser.add_argument('--disc_reward', choices=['no_log', 'log_d', 'log_1-d'],
+                        default='log_d',
+                        help='Discriminator reward to use.')
 
     parser.add_argument('--use_value_net', dest='use_value_net',
                         action='store_true',
@@ -1285,12 +1356,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     torch.manual_seed(args.seed)
 
-    if not os.path.exists(args.results_dir):
-        os.makedirs(args.results_dir)
-        # Directory for TF logs
-        os.makedirs(os.path.join(args.results_dir, 'log'))
-        # Directory for model checkpoints
-        os.makedirs(os.path.join(args.results_dir, 'checkpoint'))
+    create_result_dirs(args.results_dir)
 
     # Save runtime arguments to pickle file
     args_pkl_filepath = os.path.join(args.results_dir, 'args.pkl')
