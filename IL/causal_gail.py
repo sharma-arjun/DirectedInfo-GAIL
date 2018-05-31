@@ -138,9 +138,13 @@ class CausalGAILMLP(BaseGAIL):
             assert(env_name is not None)
             self.env = gym.make(env_name)
 
-    def select_action(self, inp):
+    def select_action(self, x_var, c_var, goal_var):
         """Select action using policy net."""
-        action_mean, _, _ = self.policy_net(inp)
+        if self.args.use_goal_in_policy:
+            inp_var = torch.cat((x_var, goal_var), dim=1)
+        else:
+            inp_var = torch.cat((x_var, c_var), dim=1)
+        action_mean, _, _ = self.policy_net(inp_var)
         return action_mean
 
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
@@ -564,8 +568,7 @@ class CausalGAILMLP(BaseGAIL):
             # ==== END ====
 
             # compute old and new action probabilities
-            use_goal_in_policy = True
-            if use_goal_in_policy:
+            if self.args.use_goal_in_policy:
                 action_means, action_log_stds, action_stds = self.policy_net(
                         torch.cat((state_var, goal_var), 1))
                 action_means_old, action_log_stds_old, action_stds_old = \
@@ -894,8 +897,7 @@ class CausalGAILMLP(BaseGAIL):
 
 
                     # Generator should predict the action using (x_t, c_t)
-                    # action = self.select_action(torch.cat((x_var, c_var), dim=1))
-                    action = self.select_action(torch.cat((x_var, goal_var), dim=1))
+                    action = self.select_action(x_var, c_var, goal_var)
                     action_numpy = action.data.cpu().numpy()
 
                     # ==== Save generated and true trajectories ====
@@ -1421,6 +1423,14 @@ if __name__ == '__main__':
                         action='store_false',
                         help='Don\'t use value network.')
     parser.set_defaults(use_value_net=True)
+
+    parser.add_argument('--use_goal_in_policy', dest='use_goal_in_policy',
+                        action='store_true',
+                        help='Use goal instead of context in Policy.')
+    parser.add_argument('--no-use_goal_in_policy', dest='use_goal_in_policy',
+                        action='store_false',
+                        help='Use context instead of goal in Policy.')
+    parser.set_defaults(use_goal_in_policy=False)
 
     parser.add_argument('--init_from_vae', dest='init_from_vae',
                         action='store_true',
