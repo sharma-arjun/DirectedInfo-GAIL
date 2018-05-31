@@ -361,7 +361,88 @@ class CausalGAILMLP(BaseGAIL):
             print("Value for goal: {}".format(g))
             print(np.array_str(
                 value_g, precision=2, suppress_small=True, max_line_width=200))
-        print(type(values_for_goal_dict))
+
+    def get_discriminator_reward_for_grid(self):
+        from grid_world import create_obstacles, obstacle_movement, sample_start
+        '''Get value function for different locations in grid.'''
+        grid_width, grid_height = self.vae_train.width, self.vae_train.height
+        obstacles, rooms, room_centres = create_obstacles(
+                grid_width,
+                grid_height,
+                env_name='room',
+                room_size=3)
+        valid_positions = list(set(product(tuple(range(0, grid_width)),
+                                    tuple(range(0, grid_height))))
+                                    - set(obstacles))
+
+        reward_for_goal_action = -1*np.ones((4, 4, grid_height, grid_width))
+        for pos in valid_positions:
+            for action_idx in range(4):
+                action_arr = np.zeros((4))
+                action_arr[action_idx] = 1
+                for goal_idx in range(4):
+                    goal_arr = np.zeros((4))
+                    goal_arr[goal_idx] = 1
+                    inp_tensor = torch.Tensor(np.hstack(
+                        [np.array(pos), action_arr, goal_arr])[np.newaxis, :])
+                    reward = self.reward_net(Variable(inp_tensor))
+                    reward = float(reward.data.cpu().numpy()[0, 0])
+                    if self.args.disc_reward == 'log_d':
+                        reward = -math.log(reward)
+                    elif self.args.disc_reward == 'log_1-d':
+                        reward = math.log(1.0 - reward)
+                    elif self.args.disc_reward == 'no_log':
+                        reward = reward
+                    else:
+                        raise ValueError("Incorrect disc_reward type")
+
+                    reward_for_goal_action[action_idx,
+                                           goal_idx,
+                                           grid_height-pos[1],
+                                           pos[0]] = reward
+
+        for g in range(4):
+            for a in range(4):
+                reward_ag = reward_for_goal_action[a, g]
+                print("Reward for action: {} goal: {}".format(a, g))
+                print(np.array_str(reward_ag,
+                                   precision=2,
+                                   suppress_small=True,
+                                   max_line_width=200))
+
+    def get_action_for_grid(self):
+        from grid_world import create_obstacles, obstacle_movement, sample_start
+        '''Get value function for different locations in grid.'''
+        grid_width, grid_height = self.vae_train.width, self.vae_train.height
+        obstacles, rooms, room_centres = create_obstacles(
+                grid_width,
+                grid_height,
+                env_name='room',
+                room_size=3)
+        valid_positions = list(set(product(tuple(range(0, grid_width)),
+                                    tuple(range(0, grid_height))))
+                                    - set(obstacles))
+
+        action_for_goal = -1*np.ones((4, grid_height, grid_width))
+        for pos in valid_positions:
+            for goal_idx in range(4):
+                goal_arr = np.zeros((4))
+                goal_arr[goal_idx] = 1
+                inp_tensor = torch.Tensor(np.hstack(
+                    [np.array(pos), goal_arr])[np.newaxis, :])
+                action_var, _, _ = self.policy_net(Variable(inp_tensor))
+                print("Pos: {}, action: {}".format(
+                    pos, action_var.data.cpu().numpy()))
+                action = np.argmax(action_var.data.cpu().numpy())
+                action_for_goal[goal_idx,
+                                grid_height-pos[1],
+                                pos[0]] = action
+
+        for g in range(4):
+            action_g = action_for_goal[g].astype(np.int32)
+            print("Action for goal: {}".format(g))
+            print(np.array_str(
+                action_g, suppress_small=True, max_line_width=200))
 
     def update_posterior_net(self, state_var, c_var, next_c_var, goal_var=None):
         if goal_var is not None:
@@ -1207,6 +1288,9 @@ def main(args):
         print("Finetune checkpoint: {}".format(args.finetune_path))
         causal_gail_mlp.load_checkpoint_data(args.finetune_path)
         causal_gail_mlp.get_value_function_for_grid()
+        causal_gail_mlp.get_discriminator_reward_for_grid()
+        causal_gail_mlp.get_action_for_grid()
+
         causal_gail_mlp.train_gail(
                 args.num_epochs,
                 os.path.join(results_dir, 'results.pkl'),
