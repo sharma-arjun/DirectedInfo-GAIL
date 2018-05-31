@@ -43,7 +43,7 @@ from utils.torch_utils import get_weight_norm_for_network
 from utils.torch_utils import normal_log_density
 from utils.torch_utils import add_scalars_to_summary_writer
 
-class CausalGAILMLP(BaseGAIL):
+class GAILMLP(BaseGAIL):
     def __init__(self,
             args,
             vae_train,
@@ -54,7 +54,7 @@ class CausalGAILMLP(BaseGAIL):
             num_goals=4,
             history_size=1,
             dtype=torch.FloatTensor):
-        super(CausalGAILMLP, self).__init__(args,
+        super(GAILMLP, self).__init__(args,
                 logger,
                 state_size=state_size,
                 action_size=action_size,
@@ -68,14 +68,14 @@ class CausalGAILMLP(BaseGAIL):
             if vae_train.vae_model.use_history_in_policy else state_size
 
         self.policy_net = Policy(
-                state_size=policy1_state_size+4,
+                state_size=policy1_state_size + 4,
                 action_size=vae_train.vae_model.policy.action_size,
                 latent_size=vae_train.vae_model.policy.latent_size,
                 output_size=vae_train.vae_model.policy.output_size,
                 output_activation=None)
 
         self.old_policy_net = Policy(
-                state_size=policy1_state_size+4,
+                state_size=policy1_state_size + 4,
                 action_size=vae_train.vae_model.policy.action_size,
                 latent_size=vae_train.vae_model.policy.latent_size,
                 output_size=vae_train.vae_model.policy.output_size,
@@ -143,6 +143,35 @@ class CausalGAILMLP(BaseGAIL):
         action_mean, _, _ = self.policy_net(inp)
         return action_mean
 
+    def get_state_features(self, state_obj, use_state_features):
+        if use_state_features:
+            feat = np.array(state_obj.get_features(), dtype=np.float32)
+        else:
+            feat = np.array(state_obj.coordinates, dtype=np.float32)
+        return feat
+
+    def get_history_features(self, state, use_velocity=False):
+        '''
+        state: Numpy array of shape (N, H, F)
+        '''
+        if use_velocity:
+            _, history_size, state_size = state.shape
+            new_state = np.zeros(state.shape)
+
+            state_int = np.array(state, dtype=np.int32)
+            for t in range(history_size-1):
+                minus_one_idx = state_int[:, t, 0] == -1
+                new_state[minus_one_idx, t, :] = 0.0
+                one_idx = (state_int[:, t, 0] != -1)
+                new_state[one_idx, t, :] = \
+                        state[one_idx, t+1, :] - state[one_idx, t, :]
+
+            new_state[:, history_size-1, :] = state[:, history_size-1, :]
+
+            return new_state
+        else:
+            return state
+
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
         '''Get c[1:T] for given trajectory.'''
         batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
@@ -170,15 +199,11 @@ class CausalGAILMLP(BaseGAIL):
             episode_len + 1,
             self.vae_train.vae_model.posterior_latent_size))
 
-        return pred_c_arr, pred_goal
-
-        raise ValueError("Do not come here")
-
         if 'grid' in self.args.env_type:
             x_state_obj = StateVector(state_arr[:, 0, :], self.obstacles)
             x_feat = self.vae_train.get_state_features(
                     x_state_obj,
-                    self.vae_train.args.use_state_features)
+                    self.args.use_state_features)
         elif self.args.env_type == 'mujoco':
             x_feat = state_arr[:, 0, :]
             dummy_state = self.env.reset()
@@ -232,12 +257,12 @@ class CausalGAILMLP(BaseGAIL):
                     break
 
                 if history_size > 1:
-                    x_hist[:, history_size-1] = self.vae_train.get_state_features(
-                            next_state, self.args.use_state_features)
+                    x_hist[:, history_size-1] = self.get_state_features(
+                            next_state, self.use_state_features)
                     x = self.vae_train.get_history_features(x_hist)
                 else:
-                    x[:] = self.vae_train.get_state_features(
-                            next_state, self.args.use_state_features)
+                    x[:] = self.get_state_features(next_state,
+                                                   self.use_state_features)
             else:
                 raise ValueError("Not implemented yet.")
 
@@ -285,17 +310,13 @@ class CausalGAILMLP(BaseGAIL):
         assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
         self.set_diff = expert.set_diff
 
-    def get_discriminator_reward(self, x, a, c, next_c, goal_var=None):
+    def get_discriminator_reward(self, x, a, goal_var):
         '''Get discriminator reward.'''
-        if goal_var is not None:
-            next_c = torch.cat([goal_var, next_c], dim=1)
-
         disc_reward = float(self.reward_net(torch.cat(
             (x,
              Variable(torch.from_numpy(oned_to_onehot(
                  a, self.action_size)).unsqueeze(0)).type(self.dtype),
              goal_var), 1)).data.cpu().numpy()[0,0])
-
 
         if self.args.disc_reward == 'log_d':
             if disc_reward < 1e-8:
@@ -411,8 +432,6 @@ class CausalGAILMLP(BaseGAIL):
 
             state_var = Variable(states[start_idx:end_idx])
             action_var = Variable(actions[start_idx:end_idx])
-            latent_c_var = Variable(latent_c[start_idx:end_idx])
-            latent_next_c_var = Variable(latent_next_c[start_idx:end_idx])
             advantages_var = Variable(advantages[start_idx:end_idx])
             goal_var = None
             if goal is not None:
@@ -421,7 +440,6 @@ class CausalGAILMLP(BaseGAIL):
             start_idx, end_idx = curr_id_exp, curr_id_exp + curr_batch_size_exp
             expert_state_var = Variable(expert_states[start_idx:end_idx])
             expert_action_var = Variable(expert_actions[start_idx:end_idx])
-            expert_latent_c_var = Variable(expert_latent_c[start_idx:end_idx])
             expert_goal_var = None
             if expert_goal is not None:
                 expert_goal_var = Variable(expert_goal[start_idx:end_idx])
@@ -442,7 +460,6 @@ class CausalGAILMLP(BaseGAIL):
                 expert_disc_loss.backward()
 
                 # Backprop with generated demonstrations
-                # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
                 gen_output = self.reward_net(
                         torch.cat((state_var,
                                    action_var,
@@ -474,33 +491,11 @@ class CausalGAILMLP(BaseGAIL):
                                                   reward_grad_l2_norm,
                                                   self.gail_step_count)
 
-            # ==== Update posterior net ====
-            self.opt_posterior.zero_grad()
-            posterior_loss = self.update_posterior_net(state_var,
-                                                       latent_c_var,
-                                                       latent_next_c_var,
-                                                       goal_var=goal_var)
-            posterior_loss.backward()
-            self.opt_posterior.step()
-            self.logger.summary_writer.add_scalar('loss/posterior',
-                                                  posterior_loss.data[0],
-                                                  self.gail_step_count)
-            # ==== END ====
-
             # compute old and new action probabilities
-            use_goal_in_policy = True
-            if use_goal_in_policy:
-                action_means, action_log_stds, action_stds = self.policy_net(
-                        torch.cat((state_var, goal_var), 1))
-                action_means_old, action_log_stds_old, action_stds_old = \
-                        self.old_policy_net(
-                                torch.cat((state_var, goal_var), 1))
-            else:
-                action_means, action_log_stds, action_stds = self.policy_net(
-                        torch.cat((state_var, latent_next_c_var), 1))
-                action_means_old, action_log_stds_old, action_stds_old = \
-                        self.old_policy_net(
-                                torch.cat((state_var, latent_next_c_var), 1))
+            action_means, action_log_stds, action_stds = self.policy_net(
+                    torch.cat((state_var, goal_var), 1))
+            action_means_old, action_log_stds_old, action_stds_old = \
+                    self.old_policy_net(torch.cat((state_var, goal_var), 1))
 
             if self.vae_train.args.discrete_action:
                 # action_probs is (N, A)
@@ -587,29 +582,14 @@ class CausalGAILMLP(BaseGAIL):
 
         ## Expand states to include history ##
         # Generated trajectories already have history in them.
-
-        latent_c = torch.Tensor(np.array(gen_batch.c)).type(dtype)
-        latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
         values = None
         if args.use_value_net:
             values = self.value_net(Variable(torch.cat((states, goal), 1)))
 
         # expert trajectories
         list_of_expert_states, list_of_expert_actions = [], []
-        list_of_expert_latent_c, list_of_masks = [], []
-        list_of_expert_goals = []
+        list_of_masks, list_of_expert_goals = [], []
         for i in range(len(expert_batch.state)):
-            # c sampled from expert trajectories is incorrect since we don't
-            # have "true c". Hence, we use the trained VAE to get the "true c".
-            expert_c, _ = self.get_c_for_traj(
-                    expert_batch.state[i][np.newaxis, :],
-                    expert_batch.action[i][np.newaxis, :],
-                    expert_batch.c[i][np.newaxis, :])
-
-            # Remove b
-            # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
-            expert_c = expert_c.squeeze(0)[1:, :]
-
             expert_goal = None
             if self.vae_train.use_rnn_goal_predictor:
                 raise ValueError("Not implemented.")
@@ -624,19 +604,15 @@ class CausalGAILMLP(BaseGAIL):
                                                        self.history_size)
             list_of_expert_states.append(torch.Tensor(expanded_states))
             list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
-            list_of_expert_latent_c.append(torch.Tensor(expert_c))
             list_of_expert_goals.append(torch.Tensor(expert_goal))
             list_of_masks.append(torch.Tensor(expert_batch.mask[i]))
 
         expert_states = torch.cat(list_of_expert_states,0).type(dtype)
         expert_actions = torch.cat(list_of_expert_actions, 0).type(dtype)
-        expert_latent_c = torch.cat(list_of_expert_latent_c, 0).type(dtype)
         expert_goals = torch.cat(list_of_expert_goals, 0).type(dtype)
         expert_masks = torch.cat(list_of_masks, 0).type(dtype)
 
         assert expert_states.size(0) == expert_actions.size(0), \
-                "Expert transition size do not match"
-        assert expert_states.size(0) == expert_latent_c.size(0), \
                 "Expert transition size do not match"
         assert expert_states.size(0) == expert_masks.size(0), \
                 "Expert transition size do not match"
@@ -678,13 +654,13 @@ class CausalGAILMLP(BaseGAIL):
             self.update_params_for_batch(
                 states[perm],
                 actions[perm],
-                latent_c[perm],
-                latent_next_c[perm],
+                None,
+                None,
                 targets[perm],
                 advantages[perm],
                 expert_states[perm_exp],
                 expert_actions[perm_exp],
-                expert_latent_c[perm_exp],
+                None,
                 optim_batch_size,
                 optim_batch_size_exp,
                 optim_iters,
@@ -718,7 +694,7 @@ class CausalGAILMLP(BaseGAIL):
                 state_expert, action_expert, c_expert, _ = traj_expert
                 state_expert = np.array(state_expert, dtype=np.float32)
                 action_expert = np.array(action_expert, dtype=np.float32)
-                c_expert = np.array(c_expert, dtype=np.int32)
+                c_expert = np.array(c_expert, dtype=np.float32)
 
                 expert_episode_len = state_expert.shape[1]
 
@@ -733,12 +709,6 @@ class CausalGAILMLP(BaseGAIL):
                     state_action_expert_dict[state_action_key] = 1
                 # ==== END  ====
 
-
-                # Generate c from trained VAE
-                c_gen, expert_goal = self.get_c_for_traj(state_expert,
-                                                         action_expert,
-                                                         c_expert)
-
                 if self.args.env_type == 'grid_room':
                     true_goal_numpy = np.copy(c_expert)
                 else:
@@ -752,19 +722,9 @@ class CausalGAILMLP(BaseGAIL):
 
                 # Sample start state or should we just choose the start state
                 # from the expert trajectory sampled above.
-                if 'grid' in self.args.env_type:
-                    x_state_obj = StateVector(state_expert[:, 0, :],
-                                              self.obstacles)
-                    x_feat = self.vae_train.get_state_features(
-                            x_state_obj, self.vae_train.args.use_state_features)
-                elif self.args.env_type == 'mujoco':
-                    x_feat = ep_state[:, 0, :]
-                    dummy_state = self.env.reset()
-                    self.env.env.set_state(np.concatenate(
-                        (np.array([0.0]), x_feat[0, :8]), axis=0),
-                            x_feat[0, 8:17])
-                    dummy_state = x_feat
-
+                x_state_obj = StateVector(state_expert[:, 0, :], self.obstacles)
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
                 x = x_feat
 
                 # Add history to state
@@ -773,35 +733,23 @@ class CausalGAILMLP(BaseGAIL):
                             (x.shape[0], args.history_size, x.shape[1]),
                             dtype=np.float32)
                     x_hist[:, (args.history_size-1), :] = x_feat
-                    x = self.vae_train.get_history_features(x_hist)
+                    x = self.get_history_features(x_hist)
 
 
                 # TODO: Make this a separate function. Can be parallelized.
                 ep_reward, expert_true_reward = 0, 0
                 env_reward_dict = {'linear_traj_reward': 0.0,
                                     'map_traj_reward': 0.0,}
-                true_traj = {'state': [], 'action': []}
-                gen_traj = {'state': [], 'action': []}
-                gen_traj_dict = {'features': [],
-                                 'actions': [],
-                                 'c': [],
-                                 'mask': []}
                 disc_reward, posterior_reward = 0.0, 0.0
                 # Use a hard-coded list for memory to gather experience since
                 # we need to mutate it before finally creating a memory object.
                 memory_list = []
                 curr_state_arr = state_expert[:, 0, :]
                 for t in range(expert_episode_len):
-                    ct, next_ct = c_gen[:, t, :], c_gen[:, t+1, :]
-
                     # ==== Get variables ====
                     # Get state and context variables
                     x_var = Variable(torch.from_numpy(
                         x.reshape((batch_size, -1))).type(self.dtype))
-                    c_var = Variable(torch.from_numpy(
-                        ct.reshape((batch_size, -1))).type(self.dtype))
-                    next_c_var = Variable(torch.from_numpy(
-                        next_ct.reshape((batch_size, -1))).type(self.dtype))
 
                     # Get the goal variable (either true or predicted)
                     goal_var = None
@@ -816,19 +764,8 @@ class CausalGAILMLP(BaseGAIL):
                             raise ValueError("incorrect true goal size")
                     # ==== END ====
 
-
-                    # Generator should predict the action using (x_t, c_t)
-                    # action = self.select_action(torch.cat((x_var, c_var), dim=1))
                     action = self.select_action(torch.cat((x_var, goal_var), dim=1))
                     action_numpy = action.data.cpu().numpy()
-
-                    # ==== Save generated and true trajectories ====
-                    true_traj['state'].append(state_expert[:, t, :])
-                    true_traj['action'].append(action_expert[:, t, :])
-                    gen_traj['state'].append(curr_state_arr)
-                    gen_traj['action'].append(action_numpy)
-                    gen_traj_dict['c'].append(ct)
-                    # ==== END ====
 
                     # Take epsilon-greedy action only during training.
                     eps_low, eps_high = 0.1, 0.9
@@ -843,19 +780,16 @@ class CausalGAILMLP(BaseGAIL):
                             high=eps_high)
 
                     # Get the discriminator reward
-                    disc_reward_t = self.get_discriminator_reward(
-                            x_var, action, c_var, next_c_var,
-                            goal_var=goal_var)
+                    disc_reward_t = self.get_discriminator_reward(x_var,
+                                                                  action,
+                                                                  goal_var)
                     disc_reward += disc_reward_t
 
-                    # Get posterior reward
-                    posterior_reward_t = self.args.lambda_posterior \
-                            * self.get_posterior_reward(
-                                    x_var, c_var, next_c_var, goal_var=goal_var)
-                    posterior_reward += posterior_reward_t
+                    # Posterior reward
+                    # posterior_reward_t = 0
 
                     # Update Rewards
-                    ep_reward += (disc_reward_t + posterior_reward_t)
+                    ep_reward += (disc_reward_t)
 
                     # Since grid world environments don't have a "true" reward
                     # let us fake the true reward.
@@ -892,47 +826,42 @@ class CausalGAILMLP(BaseGAIL):
                           raise ValueError("Incorrect true reward type")
                         '''
 
-                    # ==== Update next state =====
-                    if 'grid' in self.args.env_type:
-                        action_vec = ActionVector(np.array([action]))
-                        # Get current state
-                        state_vec = StateVector(curr_state_arr, self.obstacles)
-                        # Get next state
-                        next_state = self.transition_func(
-                                state_vec, action_vec, 0)
-                        next_state_feat = next_state.coordinates
 
-                        if self.history_size > 1:
-                            x_hist[:, self.args.history_size-1] = \
-                                    self.vae_train.get_state_features(
-                                            next_state,
-                                            self.args.use_state_features)
-                            x = self.vae_train.get_history_features(x_hist)
-                        else:
-                            x[:] = self.vae_train.get_state_features(
-                                    next_state, self.args.use_state_features)
-                    elif self.args.env_type == 'mujoco':
-                        next_state_feat, true_reward, done, _ = self.env.step(
-                                action)
-                        next_state_feat = np.concatenate(
-                                (next_state_feat,
-                                    np.array([(t+1)/(episode_len+1)])), axis=0)
-                        x[:] = next_state_feat.copy()
+                    # ==== Update next state =====
+                    action_vec = ActionVector(np.array([action]))
+                    # Get current state
+                    state_vec = StateVector(curr_state_arr, self.obstacles)
+                    # Get next state
+                    next_state = self.transition_func(
+                        state_vec, action_vec, 0)
+                    next_state_feat = self.get_state_features(
+                            next_state, self.args.use_state_features)
                     # ==== END ====
+
 
                     #next_state = running_state(next_state)
                     mask = 0 if t == expert_episode_len - 1 else 1
 
-                    # Push to memory
+                    # ==== Push to memory ====
                     memory_list.append([
-                        curr_state_arr.reshape(-1),
+                        x.copy().reshape(-1),
                         np.array([oned_to_onehot(action, self.action_size)]),
                         mask,
-                        next_state_feat,
-                        disc_reward_t + posterior_reward_t,
-                        ct.reshape(-1),
-                        next_ct.reshape(-1),
-                        goal_var.data.cpu().numpy().reshape(-1)])
+                        next_state.coordinates,
+                        disc_reward_t,
+                        0, # c_t
+                        0, # c_{t+1}
+                        np.copy(goal_var.data.cpu().numpy()).reshape(-1)])
+                    # ==== END ====
+
+                    # ==== Set curr_state = next_state ====
+                    if self.history_size > 1:
+                        x_hist[:, :-1, :] = x_hist[:, 1:, :]
+                        x_hist[:, self.args.history_size-1] = next_state_feat
+                        x = self.get_history_features(x_hist)
+                    else:
+                        x[:] = next_state_feat
+                    # ==== END ====
 
                     if args.render:
                         env.render()
@@ -941,43 +870,26 @@ class CausalGAILMLP(BaseGAIL):
                         break
 
                     # Update current state
-                    curr_state_arr = np.array(next_state_feat, dtype=np.float32)
+                    curr_state_arr = np.array(next_state.coordinates,
+                                              dtype=np.float32)
 
 
-                # Add RNN goal reward, i.e. compare the goal generated by
-                # Q-network for the generated trajectory and the predicted goal
-                # for expert trajectory.
-                goal_reward = 0
-                if self.vae_train.use_rnn_goal_predictor:
-                    gen_goal, _ = self.vae_train.predict_goal(
-                        np.array(gen_traj_dict['features']),
-                        np.array(gen_traj_dict['actions']).reshape(
-                            (-1, self.action_size)),
-                        gen_traj_dict['c'],
-                        None,
-                        self.num_goals)
-                    # Goal reward is sum(p*log(p_hat))
-                    gen_goal_numpy = gen_goal.data.cpu().numpy().reshape((-1))
-                    goal_reward = np.sum(np.log(gen_goal_numpy)
-                        * expert_goal.data.cpu().numpy().reshape((-1)))
-                # Add goal_reward to memory
-                assert memory_list[-1][2] == 0, "Mask for final end state is not 0."
+                assert memory_list[-1][2] == 0, \
+                        "Mask for final end state is not 0."
+                # Useless loop - remains here since we converted
                 for memory_t in memory_list:
-                    memory_t[4] += (goal_reward / expert_episode_len)
                     memory.push(*memory_t)
 
                 if train:
+                    reward_dict_stats = {
+                        'discriminator': disc_reward,
+                        'discriminator_per_step': disc_reward/expert_episode_len,
+                    }
                     add_scalars_to_summary_writer(
-                            self.logger.summary_writer,
-                            'gen_traj/gen_reward',
-                            {
-                                'discriminator': disc_reward,
-                                'discriminator_per_step': disc_reward/expert_episode_len,
-                                'posterior': posterior_reward,
-                                'posterior_per_step': posterior_reward/expert_episode_len,
-                                'goal': goal_reward,
-                            },
-                            gen_traj_step_count,
+                        self.logger.summary_writer,
+                        'gen_traj/gen_reward',
+                        reward_dict_stats,
+                        gen_traj_step_count,
                     )
 
                 num_steps += expert_episode_len
@@ -992,12 +904,6 @@ class CausalGAILMLP(BaseGAIL):
                 expert_true_reward_batch.append(expert_true_reward)
                 results['episode_reward'].append(ep_reward)
                 # ==== END ====
-
-                # Append trajectories
-                true_traj_curr_epoch['state'].append(true_traj['state'])
-                true_traj_curr_epoch['action'].append(true_traj['action'])
-                gen_traj_curr_epoch['state'].append(gen_traj['state'])
-                gen_traj_curr_epoch['action'].append(gen_traj['action'])
 
                 # Increment generated trajectory step count.
                 gen_traj_step_count += 1
@@ -1028,17 +934,6 @@ class CausalGAILMLP(BaseGAIL):
                             'map_min': np.min(map_traj_reward),
                         },
                         self.train_step_count)
-
-            # Add predicted and generated trajectories to results
-            if not train or ep_idx % self.args.save_interval == 0:
-                results['true_traj_state'][ep_idx] = copy.deepcopy(
-                        true_traj_curr_epoch['state'])
-                results['true_traj_action'][ep_idx] = copy.deepcopy(
-                        true_traj_curr_epoch['action'])
-                results['pred_traj_state'][ep_idx] = copy.deepcopy(
-                        gen_traj_curr_epoch['state'])
-                results['pred_traj_action'][ep_idx] = copy.deepcopy(
-                        gen_traj_curr_epoch['action'])
 
             if train:
                 # ==== Update parameters ====
@@ -1169,28 +1064,28 @@ def main(args):
     if args.cuda:
         dtype = torch.cuda.FloatTensor
 
-    causal_gail_mlp = CausalGAILMLP(
+    gail_mlp = GAILMLP(
             args,
             vae_train,
             logger,
             state_size=args.state_size,
-            action_size=vae_train.args.vae_action_size,
-            context_size=vae_train.args.vae_context_size,
-            num_goals=vae_train.args.vae_goal_size,
+            action_size=args.action_size,
+            context_size=args.context_size,
+            num_goals=args.goal_size,
             history_size=args.history_size,
             dtype=dtype)
-    causal_gail_mlp.set_expert(expert)
+    gail_mlp.set_expert(expert)
 
     if len(args.checkpoint_path) > 0:
         print("Test checkpoint: {}".format(args.checkpoint_path))
-        causal_gail_mlp.load_checkpoint_data(args.checkpoint_path)
+        gail_mlp.load_checkpoint_data(args.checkpoint_path)
         results_pkl_path = os.path.join(
                 args.results_dir,
                 'results_' + os.path.basename(args.checkpoint_path)[:-3] \
                         + 'pkl')
-        causal_gail_mlp.get_value_function_for_grid()
+        gail_mlp.get_value_function_for_grid()
 
-        causal_gail_mlp.train_gail(
+        gail_mlp.train_gail(
                 1,
                 results_pkl_path,
                 gen_batch_size=512,
@@ -1207,12 +1102,12 @@ def main(args):
         create_result_dirs(results_dir)
         # Set new Tensorboard logger for finetune results.
         logger = TensorboardXLogger(os.path.join(results_dir, 'log'))
-        causal_gail_mlp.logger = logger
+        gail_mlp.logger = logger
 
         print("Finetune checkpoint: {}".format(args.finetune_path))
-        causal_gail_mlp.load_checkpoint_data(args.finetune_path)
-        causal_gail_mlp.get_value_function_for_grid()
-        causal_gail_mlp.train_gail(
+        gail_mlp.load_checkpoint_data(args.finetune_path)
+        gail_mlp.get_value_function_for_grid()
+        gail_mlp.train_gail(
                 args.num_epochs,
                 os.path.join(results_dir, 'results.pkl'),
                 gen_batch_size=args.batch_size,
@@ -1221,10 +1116,10 @@ def main(args):
 
     if args.init_from_vae:
         print("Will load generator and posterior from pretrianed VAE.")
-        causal_gail_mlp.load_weights_from_vae()
+        gail_mlp.load_weights_from_vae()
 
     results_path = os.path.join(args.results_dir, 'results.pkl')
-    causal_gail_mlp.train_gail(
+    gail_mlp.train_gail(
             args.num_epochs,
             os.path.join(args.results_dir, 'results.pkl'),
             gen_batch_size=args.batch_size,
@@ -1248,6 +1143,8 @@ if __name__ == '__main__':
                         help='State history size to use in VAE.')
     parser.add_argument('--context_size', type=int, default=1,
                         help='Context size for VAE.')
+    parser.add_argument('--goal_size', type=int, default=1,
+                        help='Goal size for VAE.')
 
     # RL parameters
     parser.add_argument('--gamma', type=float, default=0.99,

@@ -713,7 +713,7 @@ class CausalGAILMLP(BaseGAIL):
                 state_expert, action_expert, c_expert, _ = traj_expert
                 state_expert = np.array(state_expert, dtype=np.float32)
                 action_expert = np.array(action_expert, dtype=np.float32)
-                c_expert = np.array(c_expert, dtype=np.int32)
+                c_expert = np.array(c_expert, dtype=np.float32)
 
                 expert_episode_len = state_expert.shape[1]
 
@@ -920,14 +920,14 @@ class CausalGAILMLP(BaseGAIL):
 
                     # Push to memory
                     memory_list.append([
-                        curr_state_arr.reshape(-1),
+                        curr_state_arr.copy().reshape(-1),
                         np.array([oned_to_onehot(action, self.action_size)]),
                         mask,
                         next_state_feat,
                         disc_reward_t + posterior_reward_t,
                         ct.reshape(-1),
                         next_ct.reshape(-1),
-                        goal_var.data.cpu().numpy().reshape(-1)])
+                        goal_var.data.cpu().numpy().copy().reshape(-1)])
 
                     if args.render:
                         env.render()
