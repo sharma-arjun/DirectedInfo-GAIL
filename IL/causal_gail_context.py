@@ -87,7 +87,7 @@ class CausalGAILMLP(BaseGAIL):
                                    hidden_size=64)
 
         # Reward net is the discriminator network.
-        self.reward_net = Reward(state_size * history_size,
+        self.reward_net = Reward(state_size * history_size+4,
                                  action_size,
                                  context_size,
                                  hidden_size=64)
