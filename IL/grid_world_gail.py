@@ -22,7 +22,8 @@ import torch.optim as optim
 import torchvision.transforms as T
 from torch.autograd import Variable
 
-from models import DiscretePosterior, Policy, Posterior, Reward, Value
+from models import DiscretePolicy, Policy
+from models import DiscretePosterior, Posterior, Reward, Value
 from grid_world import State, Action, TransitionFunction
 from grid_world import StateVector, ActionVector
 from grid_world import RewardFunction, RewardFunction_SR2, GridWorldReward
@@ -67,20 +68,21 @@ class GAILMLP(BaseGAIL):
         policy1_state_size = state_size * history_size \
             if vae_train.vae_model.use_history_in_policy else state_size
 
-        self.policy_net = Policy(
-                state_size=policy1_state_size + 4,
+        policy_klass = DiscretePolicy if args.discrete_action else Policy
+        self.policy_net = policy_klass(
+                state_size=policy1_state_size+4,
                 action_size=vae_train.vae_model.policy.action_size,
-                latent_size=vae_train.vae_model.policy.latent_size,
+                latent_size=0,
                 output_size=vae_train.vae_model.policy.output_size,
                 output_activation=None)
 
-        self.old_policy_net = Policy(
+        self.old_policy_net = policy_klass(
                 state_size=policy1_state_size + 4,
                 action_size=vae_train.vae_model.policy.action_size,
-                latent_size=vae_train.vae_model.policy.latent_size,
+                latent_size=0,
                 output_size=vae_train.vae_model.policy.output_size,
                 output_activation=None)
-
+        
         if args.use_value_net:
             # context_size contains num_goals
             self.value_net = Value(state_size * history_size + context_size,
@@ -138,10 +140,11 @@ class GAILMLP(BaseGAIL):
             assert(env_name is not None)
             self.env = gym.make(env_name)
 
-    def select_action(self, inp):
+    def select_action(self, x_var, goal_var):
         """Select action using policy net."""
-        action_mean, _, _ = self.policy_net(inp)
-        return action_mean
+        assert self.args.discrete_action, "Only implements discrete action."
+        inp = torch.cat((x_var, goal_var), dim=1)
+        return self.policy_net.select_action(inp)
 
     def get_state_features(self, state_obj, use_state_features):
         if use_state_features:
@@ -375,11 +378,9 @@ class GAILMLP(BaseGAIL):
             for goal_idx in range(4):
                 goal_arr = np.zeros((4))
                 goal_arr[goal_idx] = 1
-                print(goal_arr)
                 value_tensor = torch.Tensor(np.hstack(
                     [np.array(pos), goal_arr])[np.newaxis, :])
                 value_var = self.value_net(Variable(value_tensor))
-                print(value_var.data.cpu().numpy()[0, 0])
                 values_for_goal[goal_idx, grid_height-pos[1], pos[0]] = \
                         value_var.data.cpu().numpy()[0, 0]
         for g in range(4):
@@ -387,7 +388,55 @@ class GAILMLP(BaseGAIL):
             print("Value for goal: {}".format(g))
             print(np.array_str(
                 value_g, precision=2, suppress_small=True, max_line_width=200))
-        print(type(values_for_goal_dict))
+
+    def get_discriminator_reward_for_grid(self):
+        from grid_world import create_obstacles, obstacle_movement, sample_start
+        '''Get value function for different locations in grid.'''
+        grid_width, grid_height = self.vae_train.width, self.vae_train.height
+        obstacles, rooms, room_centres = create_obstacles(
+                grid_width,
+                grid_height,
+                env_name='room',
+                room_size=3)
+        valid_positions = list(set(product(tuple(range(0, grid_width)),
+                                    tuple(range(0, grid_height))))
+                                    - set(obstacles))
+
+        reward_for_goal_action = -1*np.ones((4, 4, grid_height, grid_width))
+        for pos in valid_positions:
+            for action_idx in range(4):
+                action_arr = np.zeros((4))
+                action_arr[action_idx] = 1
+                for goal_idx in range(4):
+                    goal_arr = np.zeros((4))
+                    goal_arr[goal_idx] = 1
+                    inp_tensor = torch.Tensor(np.hstack(
+                        [np.array(pos), action_arr, goal_arr])[np.newaxis, :])
+                    reward = self.reward_net(Variable(inp_tensor))
+                    reward = float(reward.data.cpu().numpy()[0, 0])
+                    if self.args.disc_reward == 'log_d':
+                        reward = -math.log(reward)
+                    elif self.args.disc_reward == 'log_1-d':
+                        reward = math.log(1.0 - reward)
+                    elif self.args.disc_reward == 'no_log':
+                        reward = reward
+                    else:
+                        raise ValueError("Incorrect disc_reward type")
+                    
+                    reward_for_goal_action[action_idx,
+                                           goal_idx,
+                                           grid_height-pos[1],
+                                           pos[0]] = reward
+
+        for g in range(4):
+            for a in range(4):
+                reward_ag = reward_for_goal_action[a, g]
+                print("Reward for action: {} goal: {}".format(a, g))
+                print(np.array_str(reward_ag,
+                                   precision=2,
+                                   suppress_small=True,
+                                   max_line_width=200))
+
 
     def update_posterior_net(self, state_var, c_var, next_c_var, goal_var=None):
         if goal_var is not None:
@@ -491,32 +540,6 @@ class GAILMLP(BaseGAIL):
                                                   reward_grad_l2_norm,
                                                   self.gail_step_count)
 
-            # compute old and new action probabilities
-            action_means, action_log_stds, action_stds = self.policy_net(
-                    torch.cat((state_var, goal_var), 1))
-            action_means_old, action_log_stds_old, action_stds_old = \
-                    self.old_policy_net(torch.cat((state_var, goal_var), 1))
-
-            if self.vae_train.args.discrete_action:
-                # action_probs is (N, A)
-                action_softmax = F.softmax(action_means, dim=1)
-                action_probs = (action_var * action_softmax).sum(dim=1)
-                action_old_softmax = F.softmax(action_means_old, dim=1)
-                action_old_probs = (action_var * action_old_softmax).sum(dim=1)
-
-                log_prob_cur = action_probs.log()
-                log_prob_old = action_old_probs.log()
-            else:
-                log_prob_cur = normal_log_density(action_var,
-                                                  action_means,
-                                                  action_log_stds,
-                                                  action_stds)
-
-                log_prob_old = normal_log_density(action_var,
-                                                  action_means_old,
-                                                  action_log_stds_old,
-                                                  action_stds_old)
-
             # ==== Update value net ====
             if args.use_value_net:
                 self.opt_value.zero_grad()
@@ -531,6 +554,14 @@ class GAILMLP(BaseGAIL):
                         self.gail_step_count)
             # ==== END ====
 
+            # compute old and new action probabilities
+            policy_inp_var = torch.cat((state_var, goal_var), dim=1)
+            _, policy_action_var = torch.max(action_var, dim=1)
+            log_prob_cur = self.policy_net.get_log_prob(policy_inp_var,
+                                                        policy_action_var)
+            log_prob_old = self.old_policy_net.get_log_prob(policy_inp_var,
+                                                            policy_action_var)
+
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
@@ -541,7 +572,7 @@ class GAILMLP(BaseGAIL):
                     1.0 + self.args.clip_epsilon) * advantages_var[:,0]
             policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
-            # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
+            torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
             self.opt_policy.step()
             # ==== END ====
 
@@ -764,10 +795,10 @@ class GAILMLP(BaseGAIL):
                             raise ValueError("incorrect true goal size")
                     # ==== END ====
 
-                    action = self.select_action(torch.cat((x_var, goal_var), dim=1))
-                    action_numpy = action.data.cpu().numpy()
+                    action = self.select_action(x_var, goal_var).cpu().numpy()[0,0]
 
                     # Take epsilon-greedy action only during training.
+                    '''
                     eps_low, eps_high = 0.1, 0.9
                     if not train:
                         eps_low, eps_high = 0.0, 0.0
@@ -778,6 +809,7 @@ class GAILMLP(BaseGAIL):
                             self.action_size,
                             low=eps_low,
                             high=eps_high)
+                    '''
 
                     # Get the discriminator reward
                     disc_reward_t = self.get_discriminator_reward(x_var,
@@ -1254,6 +1286,15 @@ if __name__ == '__main__':
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')
+
+    # Action - discrete or continuous
+    parser.add_argument('--discrete_action', dest='discrete_action',
+                        action='store_true',
+                        help='actions are discrete, use BCE loss')
+    parser.add_argument('--continuous_action', dest='discrete_action',
+                        action='store_false',
+                        help='actions are continuous, use MSE loss')
+    parser.set_defaults(discrete_action=False)
 
     args = parser.parse_args()
     torch.manual_seed(args.seed)
