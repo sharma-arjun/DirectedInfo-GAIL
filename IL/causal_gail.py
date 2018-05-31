@@ -604,7 +604,12 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update value net ====
             if args.use_value_net:
                 self.opt_value.zero_grad()
-                value_var = self.value_net(torch.cat((state_var, goal_var), 1))
+                value_inp_var = None
+                if self.args.use_goal_in_value:
+                    value_inp_var = torch.cat((state_var, goal_var), 1)
+                else:
+                    value_inp_var = torch.cat((state_var, latent_next_c_var), 1)
+                value_var = self.value_net(value_inp_var)
                 value_loss = (value_var - \
                         targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
                 value_loss.backward()
@@ -671,7 +676,12 @@ class CausalGAILMLP(BaseGAIL):
         latent_next_c = torch.Tensor(np.array(gen_batch.next_c)).type(dtype)
         values = None
         if args.use_value_net:
-            values = self.value_net(Variable(torch.cat((states, goal), 1)))
+            value_net_inp = None
+            if self.args.use_goal_in_value:
+                value_net_inp = torch.cat((states, goal), 1)
+            else:
+                value_net_inp = torch.cat((states, latent_next_c), 1)
+            values = self.value_net(Variable(value_net_inp))
 
         # expert trajectories
         list_of_expert_states, list_of_expert_actions = [], []
@@ -1431,6 +1441,14 @@ if __name__ == '__main__':
                         action='store_false',
                         help='Use context instead of goal in Policy.')
     parser.set_defaults(use_goal_in_policy=False)
+
+    parser.add_argument('--use_goal_in_value', dest='use_goal_in_value',
+                        action='store_true',
+                        help='Use goal instead of context in Value net.')
+    parser.add_argument('--no-use_goal_in_value', dest='use_goal_in_value',
+                        action='store_false',
+                        help='Use context instead of goal in Value.')
+    parser.set_defaults(use_goal_in_value=False)
 
     parser.add_argument('--init_from_vae', dest='init_from_vae',
                         action='store_true',
