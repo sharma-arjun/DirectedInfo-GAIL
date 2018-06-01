@@ -106,7 +106,7 @@ class CausalGAILMLP(BaseGAIL):
                                            hidden_size=64)
 
         self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=args.learning_rate)
+                                     lr=args.gen_learning_rate)
         self.opt_reward = optim.Adam(self.reward_net.parameters(),
                                      lr=args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
@@ -265,13 +265,13 @@ class CausalGAILMLP(BaseGAIL):
 
     def load_weights_from_vae(self):
         # deepcopy from vae
-        # self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
-        # self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
-        # self.opt_policy = optim.Adam(self.policy_net.parameters(),
-        #                             lr=self.args.learning_rate)
+        self.opt_policy = optim.Adam(self.policy_net.parameters(),
+                                     lr=self.args.gen_learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
@@ -1355,6 +1355,8 @@ if __name__ == '__main__':
                         help='gae (default: 3e-4)')
     parser.add_argument('--posterior_learning_rate', type=float, default=3e-4,
                         help='VAE posterior lr (default: 3e-4)')
+    parser.add_argument('--gen_learning_rate', type=float, default=3e-4,
+                        help='Generator lr (default: 3e-4)')
     parser.add_argument('--batch_size', type=int, default=2048,
                         help='batch size (default: 2048)')
     parser.add_argument('--num_epochs', type=int, default=500,
