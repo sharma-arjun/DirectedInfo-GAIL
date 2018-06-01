@@ -1092,6 +1092,8 @@ class CausalGAILMLP(BaseGAIL):
             results['average_reward'].append(np.mean(reward_batch))
 
             # Add to tensorboard if training.
+            linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
+            map_traj_reward = env_reward_batch_dict['map_traj_reward']
             if train:
                 add_scalars_to_summary_writer(
                         self.logger.summary_writer,
@@ -1101,8 +1103,6 @@ class CausalGAILMLP(BaseGAIL):
                             'min': np.min(reward_batch)
                         },
                         self.train_step_count)
-                linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
-                map_traj_reward = env_reward_batch_dict['map_traj_reward']
                 add_scalars_to_summary_writer(
                         self.logger.summary_writer,
                         'gen_traj/true_reward', {
@@ -1140,7 +1140,7 @@ class CausalGAILMLP(BaseGAIL):
 
                 self.train_step_count += 1
 
-            if ep_idx > 0 and  ep_idx % args.log_interval == 0:
+            if not train or (ep_idx > 0 and  ep_idx % args.log_interval == 0):
                 print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
                       'True Avg {:.2f}   True Max R: {:.2f}   ' \
                       'Expert (Avg): {:.2f}   ' \
@@ -1275,10 +1275,8 @@ def main(args):
                 args.results_dir,
                 'results_' + os.path.basename(args.checkpoint_path)[:-3] \
                         + 'pkl')
-        causal_gail_mlp.get_value_function_for_grid()
-
         causal_gail_mlp.train_gail(
-                1,
+                5,
                 results_pkl_path,
                 gen_batch_size=512,
                 train=False)

@@ -943,6 +943,8 @@ class GAILMLP(BaseGAIL):
             results['average_reward'].append(np.mean(reward_batch))
 
             # Add to tensorboard if training.
+            linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
+            map_traj_reward = env_reward_batch_dict['map_traj_reward']
             if train:
                 add_scalars_to_summary_writer(
                         self.logger.summary_writer,
@@ -952,8 +954,6 @@ class GAILMLP(BaseGAIL):
                             'min': np.min(reward_batch)
                         },
                         self.train_step_count)
-                linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
-                map_traj_reward = env_reward_batch_dict['map_traj_reward']
                 add_scalars_to_summary_writer(
                         self.logger.summary_writer,
                         'gen_traj/true_reward', {
