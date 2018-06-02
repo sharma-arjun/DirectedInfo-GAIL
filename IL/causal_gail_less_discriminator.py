@@ -578,12 +578,17 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
-            clamp_ratio = torch.clamp(
+            if self.vae_train.args.discrete_action:
+                # This is more stable, since ratio could be a very high number
+                # and if advantage is negative for it the previous way leads to
+                # overflow.
+                ratio = torch.clamp(ratio, 0, 100)
+            surr1 = ratio * advantages_var[:, 0]
+            surr2 = torch.clamp(
                     ratio,
                     1.0 - self.args.clip_epsilon,
-                    1.0 + self.args.clip_epsilon)
-            surr = -torch.min(ratio, clamp_ratio) * advantages_var[:, 0]
-            policy_surr = surr.mean()
+                    1.0 + self.args.clip_epsilon) * advantages_var[:, 0]
+            policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
             clip_grad_value(self.policy_net.parameters(), 50)
             self.opt_policy.step()
