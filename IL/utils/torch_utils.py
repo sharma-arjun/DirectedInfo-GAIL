@@ -72,7 +72,7 @@ def get_weight_norm_for_network(model):
                             get_norm_scalar_for_layer(param, 2))
     if param.grad is not None:
       grad_l2_norm = np.maximum(
-          grad_l2_norm, get_norm_inf_scalar_for_layer(param.grad))
+          grad_l2_norm, get_norm_scalar_for_layer(param.grad, 2))
 
   return wt_l2_norm, grad_l2_norm
 
