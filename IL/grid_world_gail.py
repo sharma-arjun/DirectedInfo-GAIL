@@ -38,6 +38,7 @@ from base_gail import BaseGAIL
 from vae import VAE, VAETrain
 from utils.logger import Logger, TensorboardXLogger
 from utils.rl_utils import epsilon_greedy_linear_decay, epsilon_greedy
+from utils.rl_utils import scalar_epsilon_greedy_linear_decay 
 from utils.rl_utils import greedy, oned_to_onehot
 from utils.rl_utils import get_advantage_for_rewards
 from utils.torch_utils import get_weight_norm_for_network
@@ -108,7 +109,7 @@ class GAILMLP(BaseGAIL):
                                            hidden_size=64)
 
         self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=args.learning_rate)
+                                     lr=args.gen_learning_rate)
         self.opt_reward = optim.Adam(self.reward_net.parameters(),
                                      lr=args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
@@ -144,7 +145,8 @@ class GAILMLP(BaseGAIL):
         """Select action using policy net."""
         assert self.args.discrete_action, "Only implements discrete action."
         inp = torch.cat((x_var, goal_var), dim=1)
-        return self.policy_net.select_action(inp)
+        # return self.policy_net.select_action(inp)
+        return self.policy_net(inp)
 
     def get_state_features(self, state_obj, use_state_features):
         if use_state_features:
@@ -795,21 +797,19 @@ class GAILMLP(BaseGAIL):
                             raise ValueError("incorrect true goal size")
                     # ==== END ====
 
-                    action = self.select_action(x_var, goal_var).cpu().numpy()[0,0]
+                    action = self.select_action(x_var, goal_var).data.cpu().numpy()
 
                     # Take epsilon-greedy action only during training.
-                    '''
                     eps_low, eps_high = 0.1, 0.9
                     if not train:
                         eps_low, eps_high = 0.0, 0.0
                     action = epsilon_greedy_linear_decay(
-                            action_numpy,
+                            action,
                             args.num_epochs * 0.5,
                             ep_idx,
                             self.action_size,
                             low=eps_low,
                             high=eps_high)
-                    '''
 
                     # Get the discriminator reward
                     disc_reward_t = self.get_discriminator_reward(x_var,
@@ -1194,6 +1194,8 @@ if __name__ == '__main__':
                         help='gae (default: 3e-4)')
     parser.add_argument('--posterior_learning_rate', type=float, default=3e-4,
                         help='VAE posterior lr (default: 3e-4)')
+    parser.add_argument('--gen_learning_rate', type=float, default=3e-4,
+                        help='Generator lr (default: 3e-4)')
     parser.add_argument('--batch_size', type=int, default=2048,
                         help='batch size (default: 2048)')
     parser.add_argument('--num_epochs', type=int, default=500,

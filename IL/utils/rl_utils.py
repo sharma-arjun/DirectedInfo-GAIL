@@ -21,6 +21,22 @@ def epsilon_greedy_linear_decay(action_vector,
     else:
         return np.random.randint(low=0, high=num_actions)
 
+def scalar_epsilon_greedy_linear_decay(action,
+                                       num_episodes,
+                                       ep_idx,
+                                       num_actions,
+                                       low=0.1,
+                                       high=0.9):
+    if ep_idx <= num_episodes:
+        eps = ((low-high)/num_episodes)*ep_idx + high
+    else:
+        eps = low
+
+    if np.random.uniform() > eps:
+        return action
+    else:
+        return np.random.randint(low=0, high=num_actions)
+
 def epsilon_greedy(action_vector, eps=0.1):
     if np.random.uniform() > eps:
         return np.argmax(action_vector)
