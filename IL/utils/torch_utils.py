@@ -90,3 +90,21 @@ def add_scalars_to_summary_writer(summary_writer,
                 step_count)
     '''
     summary_writer.add_scalars(tags_prefix, tags_dict, step_count)
+
+# Copied from Pytorch (0.5 unstable)
+def clip_grad_value(parameters, clip_value):
+    r"""Clips gradient of an iterable of parameters at specified value.
+
+    Gradients are modified in-place.
+
+    Arguments:
+    parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
+        single Tensor that will have gradients normalized
+    clip_value (float or int): maximum allowed value of the gradients
+        The gradients are clipped in the range [-clip_value, clip_value]
+    """
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    clip_value = float(clip_value)
+    for p in filter(lambda p: p.grad is not None, parameters):
+        p.grad.data.clamp_(min=-clip_value, max=clip_value)

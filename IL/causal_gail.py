@@ -31,7 +31,7 @@ from grid_world import create_obstacles, obstacle_movement, sample_start
 from load_expert_traj import Expert, ExpertHDF5, SeparateRoomTrajExpert
 from utils.replay_memory import Memory
 from utils.running_state import ZFilter
-from utils.torch_utils import clip_grads
+from utils.torch_utils import clip_grads, clip_grad_value
 
 from base_gail import BaseGAIL
 from vae import VAE, VAETrain
@@ -533,7 +533,7 @@ class CausalGAILMLP(BaseGAIL):
                         Variable(torch.ones(action_var.size(0), 1)).type(dtype))
                 gen_disc_loss.backward()
 
-                torch.nn.utils.clip_grad_value_(self.reward_net.parameters(), 50)
+                clip_grad_value(self.reward_net.parameters(), 50)
                 self.opt_reward.step()
                 # ==== END ====
 
@@ -615,7 +615,7 @@ class CausalGAILMLP(BaseGAIL):
                 value_loss = (value_var - \
                         targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
                 value_loss.backward()
-                torch.nn.utils.clip_grad_value_(self.value_net.parameters(), 50)
+                clip_grad_value(self.value_net.parameters(), 50)
                 self.opt_value.step()
                 self.logger.summary_writer.add_scalar(
                         'loss/value',
@@ -635,7 +635,7 @@ class CausalGAILMLP(BaseGAIL):
             policy_surr.backward()
             # This clips the entire norm.
             # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 10)
-            torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 50)
+            clip_grad_value(self.policy_net.parameters(), 50)
             self.opt_policy.step()
             # ==== END ====
 
