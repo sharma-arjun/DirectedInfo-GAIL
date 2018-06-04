@@ -588,9 +588,15 @@ class CausalGAILMLP(BaseGAIL):
                                 torch.cat((state_var, latent_next_c_var), 1))
 
             if self.vae_train.args.discrete_action:
+                discrete_action_eps = 1e-10
+                discrete_action_eps_var = Variable(torch.Tensor(
+                    [discrete_action_eps])).type(self.dtype)
                 # action_probs is (N, A)
+                action_means = action_means + discrete_action_eps
                 action_softmax = F.softmax(action_means, dim=1)
                 action_probs = (action_var * action_softmax).sum(dim=1)
+
+                action_means_old = action_means_old + discrete_action_eps
                 action_old_softmax = F.softmax(action_means_old, dim=1)
                 action_old_probs = (action_var * action_old_softmax).sum(dim=1)
 

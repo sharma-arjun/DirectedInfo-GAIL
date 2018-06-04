@@ -536,9 +536,15 @@ class CausalGAILMLP(BaseGAIL):
                                 torch.cat((state_var, latent_next_c_var), 1))
 
             if self.vae_train.args.discrete_action:
+                discrete_action_eps = 1e-10
+                discrete_action_eps_var = Variable(torch.Tensor(
+                    [discrete_action_eps])).type(self.dtype)
                 # action_probs is (N, A)
+                action_means = action_means + discrete_action_eps
                 action_softmax = F.softmax(action_means, dim=1)
                 action_probs = (action_var * action_softmax).sum(dim=1)
+
+                action_means_old = action_means_old + discrete_action_eps
                 action_old_softmax = F.softmax(action_means_old, dim=1)
                 action_old_probs = (action_var * action_old_softmax).sum(dim=1)
 
@@ -567,7 +573,7 @@ class CausalGAILMLP(BaseGAIL):
                 value_loss = (value_var - \
                         targets[curr_id:curr_id+curr_batch_size]).pow(2.).mean()
                 value_loss.backward()
-                clip_grad_value(self.value_net.parameters(), 50)
+                # clip_grad_value(self.value_net.parameters(), 50)
                 self.opt_value.step()
                 self.logger.summary_writer.add_scalar(
                         'loss/value',
@@ -578,11 +584,6 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
-            if self.vae_train.args.discrete_action:
-                # This is more stable, since ratio could be a very high number
-                # and if advantage is negative for it the previous way leads to
-                # overflow.
-                ratio = torch.clamp(ratio, 0, 100)
             surr1 = ratio * advantages_var[:, 0]
             surr2 = torch.clamp(
                     ratio,
@@ -590,7 +591,7 @@ class CausalGAILMLP(BaseGAIL):
                     1.0 + self.args.clip_epsilon) * advantages_var[:, 0]
             policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
-            clip_grad_value(self.policy_net.parameters(), 50)
+            # clip_grad_value(self.policy_net.parameters(), 50)
             self.opt_policy.step()
             # ==== END ====
 
@@ -741,7 +742,7 @@ class CausalGAILMLP(BaseGAIL):
                     Variable(torch.ones(action.size(0), 1)).type(dtype))
             gen_disc_loss.backward()
             # Clip gradients
-            clip_grad_value(self.reward_net.parameters(), 50)
+            # clip_grad_value(self.reward_net.parameters(), 50)
             self.opt_reward.step()
 
             # Add loss scalars.

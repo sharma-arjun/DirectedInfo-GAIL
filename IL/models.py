@@ -82,6 +82,7 @@ class DiscretePolicy(nn.Module):
     def forward(self, x):
         x = self.h_activation(self.affine1(x))
         x = self.h_activation(self.affine2(x))
+        x = x + Variable(torch.Tensor([1e-10])).type(x.type())
         action = F.softmax(self.action_mean(x), dim=1)
 
         return action

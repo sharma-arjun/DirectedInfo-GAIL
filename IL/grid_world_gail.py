@@ -574,7 +574,7 @@ class GAILMLP(BaseGAIL):
                     1.0 + self.args.clip_epsilon) * advantages_var[:,0]
             policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
-            torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
+            # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 40)
             self.opt_policy.step()
             # ==== END ====
 
