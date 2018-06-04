@@ -284,6 +284,13 @@ class CausalGAILMLP(BaseGAIL):
         assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
         self.set_diff = expert.set_diff
 
+    def get_policy_learning_rate(self, epoch):
+        '''Update policy learning rate schedule.'''
+        if epoch <= self.args.discriminator_pretrain_epochs:
+            return 0.0
+        else:
+            return self.args.gen_learning_rate
+
     def get_discriminator_reward(self, x, a, c, next_c, goal_var=None):
         '''Get discriminator reward.'''
         disc_reward = float(self.reward_net(torch.cat(
@@ -658,9 +665,6 @@ class CausalGAILMLP(BaseGAIL):
         '''
         args, dtype = self.args, self.dtype
 
-        # self.opt_policy.lr = self.args.learning_rate \
-        #        * max(1.0 - float(episode_idx)/args.num_epochs, 0)
-
         # generated trajectories
         states = torch.Tensor(np.array(gen_batch.state)).type(dtype)
         actions = torch.Tensor(np.array(gen_batch.action)).type(dtype)
@@ -801,6 +805,9 @@ class CausalGAILMLP(BaseGAIL):
             env_reward_batch_dict = {'linear_traj_reward': [],
                                      'map_traj_reward': []}
 
+            # Update learning rate schedules (decay etc.)
+            self.opt_policy.lr = self.get_policy_learning_rate(ep_idx)
+
             while num_steps < gen_batch_size:
                 traj_expert = self.expert.sample(size=batch_size)
                 state_expert, action_expert, c_expert, _ = traj_expert
@@ -918,7 +925,9 @@ class CausalGAILMLP(BaseGAIL):
                     # ==== END ====
 
                     # Take epsilon-greedy action only during training.
-                    eps_low, eps_high = 0.1, 0.9
+                    eps_low, eps_high = 0.1, 0.5
+                    if ep_idx < self.args.discriminator_pretrain_epochs:
+                        eps_low, eps_high = 0.0, 0.0
                     if not train:
                         eps_low, eps_high = 0.0, 0.0
                     action = epsilon_greedy_linear_decay(
@@ -1355,6 +1364,8 @@ if __name__ == '__main__':
                         help='VAE posterior lr (default: 3e-4)')
     parser.add_argument('--gen_learning_rate', type=float, default=3e-4,
                         help='Generator lr (default: 3e-4)')
+    parser.add_argument('--discriminator_pretrain_epochs', type=int, default=0,
+                        help='Number of epochs to pre-train discriminator.')
     parser.add_argument('--batch_size', type=int, default=2048,
                         help='batch size (default: 2048)')
     parser.add_argument('--num_epochs', type=int, default=500,
