@@ -177,7 +177,7 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 25e-4
+        r = 33e-4
         self.temperature = max(0.1, self.init_temperature * math.exp(-r*epoch))
 
 
@@ -898,7 +898,7 @@ class VAETrain(object):
 
                     next_state = np.concatenate(
                             (next_state,
-                                np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
+                                np.ones((batch_size,)) * (t+1)/(episode_len+1)), axis=0)
 
                     if history_size > 1:
                         x_hist[:, history_size - 1, :] = next_state
@@ -1041,6 +1041,7 @@ class VAETrain(object):
                 true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
             true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                     self.dtype)
+
 
             if self.use_rnn_goal_predictor:
                 final_goal, pred_goal = self.predict_goal(ep_state,
@@ -1606,12 +1607,14 @@ class VAETrain(object):
         '''Test models by generating expert trajectories.'''
         self.convert_models_to_type(self.dtype)
 
-        #results = self.test_generate_trajectory_variable_length(
-        #        expert,
-        #        num_test_samples=num_test_samples,
-        #        test_goal_policy_only=test_goal_policy_only)
+        if self.env_type == 'grid_room':
+            results = self.test_generate_all_grid_states()
+        else:
+            results = self.test_generate_trajectory_variable_length(
+                    expert,
+                    num_test_samples=num_test_samples,
+                    test_goal_policy_only=test_goal_policy_only)
 
-        results = self.test_generate_all_grid_states()
 
         if self.use_rnn_goal_predictor:
             goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))

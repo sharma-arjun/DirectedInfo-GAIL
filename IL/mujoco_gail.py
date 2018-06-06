@@ -83,13 +83,13 @@ class CausalGAILMLP(BaseGAIL):
 
         if args.use_value_net:
             # context_size contains num_goals
-            self.value_net = Value(state_size * history_size + context_size,
+            self.value_net = Value(state_size * history_size + num_goals,
                                    hidden_size=64)
 
         # Reward net is the discriminator network.
         self.reward_net = Reward(state_size * history_size,
                                  action_size,
-                                 context_size,
+                                 num_goals,
                                  hidden_size=64)
 
         if vae_train.args.use_discrete_vae:
@@ -151,6 +151,7 @@ class CausalGAILMLP(BaseGAIL):
         '''Get c[1:T] for given trajectory.'''
         batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
         history_size = self.history_size
+        c_arr = np.array(c_arr, dtype=np.int32)
 
         # Use the Q-network (RNN) to predict goal.
         pred_goal = None
@@ -290,10 +291,10 @@ class CausalGAILMLP(BaseGAIL):
         if goal_var is not None:
             next_c = torch.cat([goal_var, next_c], dim=1)
 
+
         disc_reward = float(self.reward_net(torch.cat(
             (x,
-             Variable(torch.from_numpy(oned_to_onehot(
-                 a, self.action_size)).unsqueeze(0)).type(self.dtype),
+             Variable(torch.from_numpy(a)).type(self.dtype),
              goal_var), 1)).data.cpu().numpy()[0,0])
 
 
@@ -714,6 +715,10 @@ class CausalGAILMLP(BaseGAIL):
             expert_goal = None
             if self.vae_train.use_rnn_goal_predictor:
                 raise ValueError("Not implemented.")
+            else:
+                batch_goals = expert_batch.c[i].astype(np.int32)
+                expert_goal = np.zeros((batch_goals.shape[0], self.num_goals))
+                expert_goal[np.arange(batch_goals.shape[0]), batch_goals] = 1.0
             #else:
             #    if self.args.env_type == 'grid_room':
             #        expert_goal = expert_batch.c[i]
@@ -820,7 +825,7 @@ class CausalGAILMLP(BaseGAIL):
                 state_expert, action_expert, c_expert, _ = traj_expert
                 state_expert = np.array(state_expert, dtype=np.float32)
                 action_expert = np.array(action_expert, dtype=np.float32)
-                c_expert = np.array(c_expert, dtype=np.float32)
+                c_expert = np.array(c_expert, dtype=np.int32)
 
                 expert_episode_len = state_expert.shape[1]
 
@@ -860,7 +865,7 @@ class CausalGAILMLP(BaseGAIL):
                 #    x_feat = self.vae_train.get_state_features(
                 #            x_state_obj, self.vae_train.args.use_state_features)
                 #elif self.args.env_type == 'mujoco':
-                x_feat = ep_state[:, 0, :]
+                x_feat = state_expert[:, 0, :]
                 dummy_state = self.env.reset()
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[0, :8]), axis=0),
@@ -936,13 +941,14 @@ class CausalGAILMLP(BaseGAIL):
                     eps_low, eps_high = 0.1, 0.9
                     if not train:
                         eps_low, eps_high = 0.0, 0.0
-                    action = epsilon_greedy_linear_decay(
-                            action_numpy,
-                            args.num_epochs * 0.5,
-                            ep_idx,
-                            self.action_size,
-                            low=eps_low,
-                            high=eps_high)
+                    #action = epsilon_greedy_linear_decay(
+                    #        action_numpy,
+                    #        args.num_epochs * 0.5,
+                    #        ep_idx,
+                    #        self.action_size,
+                    #        low=eps_low,
+                    #        high=eps_high)
+                    action = action_numpy # TODO: Add Noise
 
                     # Get the discriminator reward
                     disc_reward_t = self.get_discriminator_reward(
@@ -979,20 +985,20 @@ class CausalGAILMLP(BaseGAIL):
                     #        del state_action_expert_dict[gen_state_action_key]
                     #else:
                     #    pass
-                        '''
-                        true_goal_state = [int(x) for x in state_expert[-1].tolist()]
-                        if self.args.flag_true_reward == 'grid_reward':
-                          ep_true_reward += self.true_reward.reward_at_location(
-                              curr_state_obj.coordinates, goals=[true_goal_state])
-                          expert_true_reward += self.true_reward.reward_at_location(
-                                state_expert[t], goals=[true_goal_state])
-                        elif self.args.flag_true_reward == 'action_reward':
-                          ep_true_reward += self.true_reward.reward_at_location(
-                              np.argmax(action_expert[t]), action)
-                          expert_true_reward += self.true_reward.corret_action_reward
-                        else:
-                          raise ValueError("Incorrect true reward type")
-                        '''
+                    #    
+                    #    true_goal_state = [int(x) for x in state_expert[-1].tolist()]
+                    #    if self.args.flag_true_reward == 'grid_reward':
+                    #      ep_true_reward += self.true_reward.reward_at_location(
+                    #          curr_state_obj.coordinates, goals=[true_goal_state])
+                    #      expert_true_reward += self.true_reward.reward_at_location(
+                    #            state_expert[t], goals=[true_goal_state])
+                    #    elif self.args.flag_true_reward == 'action_reward':
+                    #      ep_true_reward += self.true_reward.reward_at_location(
+                    #          np.argmax(action_expert[t]), action)
+                    #      expert_true_reward += self.true_reward.corret_action_reward
+                    #    else:
+                    #      raise ValueError("Incorrect true reward type")
+                    #    
 
                     # ==== Update next state =====
                     #if 'grid' in self.args.env_type:
@@ -1019,7 +1025,7 @@ class CausalGAILMLP(BaseGAIL):
                     env_reward_dict['true_reward'] += true_reward
                     next_state_feat = np.concatenate(
                             (next_state_feat,
-                                np.array([(t+1)/(episode_len+1)])), axis=0)
+                                np.array([(t+1)/(expert_episode_len+1)])), axis=0)
                     x[:] = next_state_feat.copy()
                     # ==== END ====
 
@@ -1029,7 +1035,7 @@ class CausalGAILMLP(BaseGAIL):
                     # Push to memory
                     memory_list.append([
                         curr_state_arr.copy().reshape(-1),
-                        np.array([oned_to_onehot(action, self.action_size)]),
+                        action,
                         mask,
                         next_state_feat,
                         disc_reward_t + posterior_reward_t,
