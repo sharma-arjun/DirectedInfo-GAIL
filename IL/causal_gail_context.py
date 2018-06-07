@@ -357,11 +357,9 @@ class CausalGAILMLP(BaseGAIL):
             for goal_idx in range(4):
                 goal_arr = np.zeros((4))
                 goal_arr[goal_idx] = 1
-                print(goal_arr)
                 value_tensor = torch.Tensor(np.hstack(
                     [np.array(pos), goal_arr])[np.newaxis, :])
                 value_var = self.value_net(Variable(value_tensor))
-                print(value_var.data.cpu().numpy()[0, 0])
                 values_for_goal[goal_idx, grid_height-pos[1], pos[0]] = \
                         value_var.data.cpu().numpy()[0, 0]
         for g in range(4):
@@ -1289,6 +1287,19 @@ def main(args):
         results_pkl_path = os.path.join(
                 args.results_dir,
                 'results_' + os.path.basename(args.checkpoint_path)[:-3] \
+                        + 'pkl')
+        causal_gail_mlp.train_gail(
+                5,
+                results_pkl_path,
+                gen_batch_size=512,
+                train=False)
+        print("Did save results to: {}".format(results_pkl_path))
+
+        # Check VAE policy
+        causal_gail_mlp.load_weights_from_vae()
+        results_pkl_path = os.path.join(
+                args.results_dir,
+                'results_vae_' + os.path.basename(args.checkpoint_path)[:-3] \
                         + 'pkl')
         causal_gail_mlp.train_gail(
                 5,
