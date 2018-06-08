@@ -845,12 +845,21 @@ class CausalGAILMLP(BaseGAIL):
                 true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                             self.dtype)
 
-                x_feat = state_expert[:, 0, :]
+                #x_feat = running_state(state_expert[:, 0, :][0])[np.newaxis, :]
+
+                ### if using data states ###
+                #x_feat = state_expert[:, 0, :]
+                #dummy_state = self.env.reset()
+                #self.env.env.set_state(np.concatenate(
+                #    (np.array([0.0]), x_feat[0, :8]), axis=0),
+                #        x_feat[0, 8:17])
+                #dummy_state = x_feat
+                ### END ###
+
+                ### if using random states ###
                 dummy_state = self.env.reset()
-                self.env.env.set_state(np.concatenate(
-                    (np.array([0.0]), x_feat[0, :8]), axis=0),
-                        x_feat[0, 8:17])
-                dummy_state = x_feat
+                x_feat = np.concatenate((dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
+                ### END ###
 
                 x = x_feat
 
