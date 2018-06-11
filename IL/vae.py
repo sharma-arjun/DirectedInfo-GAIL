@@ -2,7 +2,7 @@ import numpy as np
 import argparse
 import h5py
 import os
-import pdb
+import pdb, ipdb
 import pickle
 import torch
 import gym
@@ -356,9 +356,11 @@ class VAETrain(object):
             self.transition_func = TransitionFunction(self.width,
                                                       self.height,
                                                       obstacle_movement)
-        elif env_type == 'mujoco':
+        elif env_type == 'mujoco' or env_type == 'gym':
             assert(env_name is not None)
             self.env = gym.make(env_name)
+        else:
+            raise ValueError("Invalid env type: {}".format(env_type))
 
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
@@ -784,6 +786,15 @@ class VAETrain(object):
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 dummy_state = x_feat
+            elif self.env_type == 'gym':
+                x_feat = ep_state[:, 0, :]
+                dummy_state = self.env.reset()
+                theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
+                theta_dot = (x_feat[:, 2])[:, np.newaxis]
+                self.env.env.state = np.concatenate(
+                        (theta, theta_dot), axis=1).reshape(-1)
+                x_feat = np.concatenate(
+                        [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
 
             # x is (N, F)
             x = x_feat
@@ -890,7 +901,7 @@ class VAETrain(object):
                     # Update current state
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
-                elif self.env_type == 'mujoco':
+                elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
                     next_state, _, done, _ = self.env.step(action)
                     if done:
@@ -898,7 +909,7 @@ class VAETrain(object):
 
                     next_state = np.concatenate(
                             (next_state,
-                                np.ones((batch_size,)) * (t+1)/(episode_len+1)), axis=0)
+                             np.ones((batch_size)) * (t+1)/(episode_len+1)), axis=0)
 
                     if history_size > 1:
                         x_hist[:, history_size - 1, :] = next_state
@@ -928,14 +939,14 @@ class VAETrain(object):
             '''
             true_traj_state_arr = np.array([x[0] for x in true_traj])
             true_traj_action_arr = np.array([x[1] for x in true_traj])
-            pred_traj_state_arr = np.array([x[0] for x in pred_traj])
-            pred_traj_action_arr = np.array([x[1] for x in pred_traj])
+            pred_traj_state_arr = np.array([x[0][0] for x in pred_traj])
+            pred_traj_action_arr = np.array([x[1][0] for x in pred_traj])
 
             results['true_traj_state'].append(true_traj_state_arr)
             results['true_traj_action'].append(true_traj_action_arr)
             results['pred_traj_state'].append(pred_traj_state_arr)
             results['pred_traj_action'].append(pred_traj_action_arr)
-            results['pred_traj_goal'].append(np.array(pred_traj_goal))
+            # results['pred_traj_goal'].append(np.array(pred_traj_goal))
             results['pred_context'].append(np.array(pred_context))
 
         return results
@@ -1069,7 +1080,16 @@ class VAETrain(object):
                 self.env.reset()
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            elif self.env_type == 'gym':
+                x_feat = ep_state[:, 0, :]
+                dummy_state = self.env.reset()
+                theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, None]
+                theta_dot = (x_feat[:, 2])[:, None]
+                self.env.env.state = np.concatenate((theta, theta_dot), axis=1)
 
+                x_feat = np.concatenate(
+                        [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
+    
             # x is (N, F)
             x = x_feat
 
@@ -1183,7 +1203,7 @@ class VAETrain(object):
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
 
-                elif self.env_type == 'mujoco':
+                elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
 
                     if ep_c[0, 0] == 0:
@@ -1388,6 +1408,7 @@ class VAETrain(object):
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[:8]), axis=0), x_feat[8:17])
 
+            raise ValueError("Do not use")
             x = np.reshape(x_feat, (1, -1))
 
             # Add history to state
@@ -1469,7 +1490,7 @@ class VAETrain(object):
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
 
-                elif self.env_type == 'mujoco':
+                elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
                     next_state, _, done, _ = self.env.step(action)
                     if done:
@@ -1615,7 +1636,6 @@ class VAETrain(object):
                     num_test_samples=num_test_samples,
                     test_goal_policy_only=test_goal_policy_only)
 
-
         if self.use_rnn_goal_predictor:
             goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
             for i in range(len(results['true_goal'])):
@@ -1666,7 +1686,7 @@ def main(args):
     expert = ExpertHDF5(args.expert_path, args.vae_state_size)
     if 'grid' in args.env_type:
         expert.push(only_coordinates_in_state=True, one_hot_action=True)
-    elif args.env_type == 'mujoco':
+    elif args.env_type == 'mujoco' or args.env_type == 'gym':
         expert.push(only_coordinates_in_state=False, one_hot_action=False)
     vae_train.set_expert(expert)
 
@@ -1832,7 +1852,7 @@ if __name__ == '__main__':
 
     # Environment - Grid or Mujoco
     parser.add_argument('--env-type', default='grid', 
-                        choices=['grid', 'grid_room', 'mujoco'],
+                        choices=['grid', 'grid_room', 'mujoco', 'gym'],
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')
