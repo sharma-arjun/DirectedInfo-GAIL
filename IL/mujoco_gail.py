@@ -72,7 +72,7 @@ class CausalGAILMLP(BaseGAIL):
         else:
             policy_latent_size = vae_train.vae_model.policy.latent_size
 
-        ipdb.set_trace()
+
         self.policy_net = Policy(
                 state_size=policy1_state_size,
                 action_size=vae_train.vae_model.policy.action_size,
@@ -181,14 +181,14 @@ class CausalGAILMLP(BaseGAIL):
                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
             dummy_state = x_feat
         elif self.env_type == 'gym':
-            x_feat = ep_state[:, 0, :]
+            x_feat = state_arr[:, 0, :]
             dummy_state = self.env.reset()
             theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
             theta_dot = (x_feat[:, 2])[:, np.newaxis]
             self.env.env.state = np.concatenate(
                     (theta, theta_dot), axis=1).reshape(-1)
             x_feat = np.concatenate(
-                    [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
+                    [x_feat, np.zeros((state_arr.shape[0], 1))], axis=1)
         else:
             raise ValueError('Incorrect env type: {}'.format(
                 self.args.env_type))
@@ -724,7 +724,14 @@ class CausalGAILMLP(BaseGAIL):
             #        raise ValueError("Not implemented.")
 
             ## Expand expert states ##
-            expanded_states = self.expand_states_numpy(expert_batch.state[i],
+            #np.arange(200)/200
+            expert_state_i = expert_batch.state[i]
+            if self.args.env_type == 'gym':
+                time_arr = np.arange(expert_batch.state[i].shape[0]) \
+                        / (expert_batch.state[i].shape[0])
+                expert_state_i = np.concatenate(
+                        [expert_state_i, time_arr[:, None]], axis=1)
+            expanded_states = self.expand_states_numpy(expert_state_i,
                                                        self.history_size)
             list_of_expert_states.append(torch.Tensor(expanded_states))
             list_of_expert_actions.append(torch.Tensor(expert_batch.action[i]))
@@ -766,8 +773,9 @@ class CausalGAILMLP(BaseGAIL):
 
         # Remove extra 1 array shape from actions, since actions were added as
         # 1-hot vector of shape (1, A).
-        actions = np.squeeze(actions)
-        expert_actions = np.squeeze(expert_actions)
+        actions = actions.view(-1, 1)
+
+        # ipdb.set_trace()
 
         for _ in range(optim_epochs):
             perm = np.random.permutation(np.arange(actions.size(0)))
@@ -830,9 +838,10 @@ class CausalGAILMLP(BaseGAIL):
                 expert_episode_len = state_expert.shape[1]
 
                 # Generate c from trained VAE
-                #c_gen, expert_goal = self.get_c_for_traj(state_expert,
-                #                                         action_expert,
-                #                                         c_expert)
+                if not args.use_goal_in_policy:
+                    c_gen, expert_goal = self.get_c_for_traj(state_expert,
+                                                             action_expert,
+                                                             c_expert)
 
                 true_goal_numpy = np.zeros((c_expert.shape[0],
                                             self.num_goals))
@@ -842,32 +851,35 @@ class CausalGAILMLP(BaseGAIL):
                 true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                             self.dtype)
 
-                ### if using random states ###
-                dummy_state = self.env.reset()
-                x_feat = np.concatenate((dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
-                ### END ###
+                if args.use_random_starts:
+                    ### if using random states ###
+                    dummy_state = self.env.reset()
+                    x_feat = np.concatenate((dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
 
-                if self.env_type == 'mujoco':
-                    x_feat = state_expert[:, 0, :]
-                    dummy_state = self.env.reset()
-                    self.env.env.set_state(np.concatenate(
-                        (np.array([0.0]), x_feat[0, :8]), axis=0),
-                            x_feat[0, 8:17])
-                    dummy_state = x_feat
-                elif self.env_type == 'gym':
-                    x_feat = state_expert[:, 0, :]
-                    dummy_state = self.env.reset()
-                    theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
-                    theta_dot = (x_feat[:, 2])[:, np.newaxis]
-                    self.env.env.state = np.concatenate(
-                            (theta, theta_dot), axis=1).reshape(-1)
-                    x_feat = np.concatenate(
-                            [x_feat, np.zeros((state_expert.shape[0], 1))], axis=1)
                 else:
-                    raise ValueError("Incorrect env type: {}".format(
-                        self.env_type))
+                    ### use start state from data ###
+                    if self.env_type == 'mujoco':
+                        x_feat = state_expert[:, 0, :]
+                        dummy_state = self.env.reset()
+                        self.env.env.set_state(np.concatenate(
+                            (np.array([0.0]), x_feat[0, :8]), axis=0),
+                                x_feat[0, 8:17])
+                        dummy_state = x_feat
+                    elif self.env_type == 'gym':
+                        x_feat = state_expert[:, 0, :]
+                        dummy_state = self.env.reset()
+                        theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
+                        theta_dot = (x_feat[:, 2])[:, np.newaxis]
+                        self.env.env.state = np.concatenate(
+                                (theta, theta_dot), axis=1).reshape(-1)
+                        x_feat = np.concatenate(
+                                [x_feat, np.zeros((state_expert.shape[0], 1))], axis=1)
+                    else:
+                        raise ValueError("Incorrect env type: {}".format(
+                            self.env_type))
 
                 x = x_feat
+                curr_state_arr = x_feat
 
                 # Add history to state
                 if args.history_size > 1:
@@ -892,10 +904,14 @@ class CausalGAILMLP(BaseGAIL):
                 disc_reward, posterior_reward = 0.0, 0.0
                 # Use a hard-coded list for memory to gather experience since
                 # we need to mutate it before finally creating a memory object.
-                curr_state_arr = state_expert[:, 0, :]
+
+
                 for t in range(expert_episode_len):
-                    ct, next_ct = c_gen[:, t, :], c_gen[:, t+1, :]
-                    # ct, next_ct = np.array([0.0]), np.array([0.0])
+
+                    if args.use_goal_in_policy:
+                        ct, next_ct = np.array([0.0]), np.array([0.0])
+                    else:
+                        ct, next_ct = c_gen[:, t, :], c_gen[:, t+1, :]
 
                     # ==== Get variables ====
                     # Get state and context variables
@@ -942,10 +958,11 @@ class CausalGAILMLP(BaseGAIL):
 
                     # Get posterior reward
                     posterior_reward_t = 0.0
-                    #posterior_reward_t = self.args.lambda_posterior \
-                    #        * self.get_posterior_reward(
-                    #                x_var, c_var, next_c_var, goal_var=goal_var)
-                    #posterior_reward += posterior_reward_t
+                    if not args.use_goal_in_policy:
+                        posterior_reward_t = self.args.lambda_posterior \
+                                * self.get_posterior_reward(
+                                        x_var, c_var, next_c_var, goal_var=goal_var)
+                    posterior_reward += posterior_reward_t
 
                     # Update Rewards
                     ep_reward += (disc_reward_t + posterior_reward_t)
@@ -1416,6 +1433,10 @@ if __name__ == '__main__':
                         action='store_false',
                         help='Use context instead of goal in Value.')
     parser.set_defaults(use_goal_in_value=False)
+    parser.add_argument('--use_random_starts', dest='use_random_starts',
+                        action='store_true',
+                        help='Use random start states.')
+    parser.set_defaults(use_random_starts=False)
 
     parser.add_argument('--init_from_vae', dest='init_from_vae',
                         action='store_true',

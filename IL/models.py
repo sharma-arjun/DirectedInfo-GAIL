@@ -21,7 +21,7 @@ class Policy(nn.Module):
                  output_activation=None):
         super(Policy, self).__init__()
 
-        self.input_size = state_size + action_size + latent_size
+        self.input_size = state_size + latent_size
         self.state_size = state_size
         self.action_size = action_size
         self.latent_size = latent_size
