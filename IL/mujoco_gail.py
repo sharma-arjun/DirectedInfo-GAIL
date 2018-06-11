@@ -72,6 +72,7 @@ class CausalGAILMLP(BaseGAIL):
         else:
             policy_latent_size = vae_train.vae_model.policy.latent_size
 
+        ipdb.set_trace()
         self.policy_net = Policy(
                 state_size=policy1_state_size,
                 action_size=vae_train.vae_model.policy.action_size,
@@ -135,11 +136,6 @@ class CausalGAILMLP(BaseGAIL):
         self.posterior_net = self.posterior_net.type(dtype)
 
     def create_environment(self, env_type, env_name=None):
-        #if 'grid' in env_type:
-        #    self.transition_func = TransitionFunction(self.vae_train.width,
-        #                                              self.vae_train.height,
-        #                                              obstacle_movement)
-        #elif env_type == 'mujoco':
         assert(env_name is not None)
         self.env = gym.make(env_name)
 
@@ -165,9 +161,6 @@ class CausalGAILMLP(BaseGAIL):
             pred_goal, _ = self.vae_train.predict_goal(
                 state_arr, action_arr, c_arr, None, self.num_goals)
 
-        #if self.args.env_type == 'grid_room':
-        #    true_goal_numpy = np.copy(c_arr)
-        #else:
         true_goal_numpy = np.zeros((c_arr.shape[0], self.num_goals))
         true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
         true_goal = Variable(torch.from_numpy(true_goal_numpy).type(self.dtype))
@@ -181,20 +174,24 @@ class CausalGAILMLP(BaseGAIL):
             episode_len + 1,
             self.vae_train.vae_model.posterior_latent_size))
 
-        #if 'grid' in self.args.env_type:
-        #    x_state_obj = StateVector(state_arr[:, 0, :], self.obstacles)
-        #    x_feat = self.vae_train.get_state_features(
-        #            x_state_obj,
-        #            self.vae_train.args.use_state_features)
-        #elif self.args.env_type == 'mujoco':
-        x_feat = state_arr[:, 0, :]
-        dummy_state = self.env.reset()
-        self.env.env.set_state(np.concatenate(
-            (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
-        dummy_state = x_feat
-        #else:
-        #    raise ValueError('Incorrect env type: {}'.format(
-        #        self.args.env_type))
+        if self.env_type == 'mujoco':
+            x_feat = state_arr[:, 0, :]
+            dummy_state = self.env.reset()
+            self.env.env.set_state(np.concatenate(
+                (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            dummy_state = x_feat
+        elif self.env_type == 'gym':
+            x_feat = ep_state[:, 0, :]
+            dummy_state = self.env.reset()
+            theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
+            theta_dot = (x_feat[:, 2])[:, np.newaxis]
+            self.env.env.state = np.concatenate(
+                    (theta, theta_dot), axis=1).reshape(-1)
+            x_feat = np.concatenate(
+                    [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
+        else:
+            raise ValueError('Incorrect env type: {}'.format(
+                self.args.env_type))
 
         # x is (N, F)
         x = x_feat
@@ -845,21 +842,30 @@ class CausalGAILMLP(BaseGAIL):
                 true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                             self.dtype)
 
-                #x_feat = running_state(state_expert[:, 0, :][0])[np.newaxis, :]
-
-                ### if using data states ###
-                #x_feat = state_expert[:, 0, :]
-                #dummy_state = self.env.reset()
-                #self.env.env.set_state(np.concatenate(
-                #    (np.array([0.0]), x_feat[0, :8]), axis=0),
-                #        x_feat[0, 8:17])
-                #dummy_state = x_feat
-                ### END ###
-
                 ### if using random states ###
                 dummy_state = self.env.reset()
                 x_feat = np.concatenate((dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
                 ### END ###
+
+                if self.env_type == 'mujoco':
+                    x_feat = state_expert[:, 0, :]
+                    dummy_state = self.env.reset()
+                    self.env.env.set_state(np.concatenate(
+                        (np.array([0.0]), x_feat[0, :8]), axis=0),
+                            x_feat[0, 8:17])
+                    dummy_state = x_feat
+                elif self.env_type == 'gym':
+                    x_feat = state_expert[:, 0, :]
+                    dummy_state = self.env.reset()
+                    theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
+                    theta_dot = (x_feat[:, 2])[:, np.newaxis]
+                    self.env.env.state = np.concatenate(
+                            (theta, theta_dot), axis=1).reshape(-1)
+                    x_feat = np.concatenate(
+                            [x_feat, np.zeros((state_expert.shape[0], 1))], axis=1)
+                else:
+                    raise ValueError("Incorrect env type: {}".format(
+                        self.env_type))
 
                 x = x_feat
 
@@ -888,8 +894,8 @@ class CausalGAILMLP(BaseGAIL):
                 # we need to mutate it before finally creating a memory object.
                 curr_state_arr = state_expert[:, 0, :]
                 for t in range(expert_episode_len):
-                    #ct, next_ct = c_gen[:, t, :], c_gen[:, t+1, :]
-                    ct, next_ct = np.array([0.0]), np.array([0.0])
+                    ct, next_ct = c_gen[:, t, :], c_gen[:, t+1, :]
+                    # ct, next_ct = np.array([0.0]), np.array([0.0])
 
                     # ==== Get variables ====
                     # Get state and context variables
@@ -1206,13 +1212,6 @@ def main(args):
             finetune_args = pickle.load(finetune_args_f)
 
     print('Loading expert trajectories ...')
-    #if 'grid' in args.env_type:
-    #    if args.env_type == 'grid_room':
-    #        expert = SeparateRoomTrajExpert(args.expert_path, args.state_size)
-    #    else:
-    #        expert = ExpertHDF5(args.expert_path, args.state_size)
-    #    expert.push(only_coordinates_in_state=True, one_hot_action=True)
-    #elif args.env_type == 'mujoco':
     expert = ExpertHDF5(args.expert_path, args.state_size)
     expert.push(only_coordinates_in_state=False, one_hot_action=False)
     print('Expert trajectories loaded.')
@@ -1428,7 +1427,7 @@ if __name__ == '__main__':
 
     # Environment - Grid or Mujoco
     parser.add_argument('--env-type', default='grid',
-                        choices=['grid', 'grid_room', 'mujoco'],
+                        choices=['grid', 'grid_room', 'mujoco', 'gym'],
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')

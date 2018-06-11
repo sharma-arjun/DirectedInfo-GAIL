@@ -52,6 +52,7 @@ class BaseGAIL(object):
         self.num_goals = num_goals
         self.dtype = dtype
         self.train_step_count, self.gail_step_count = 0, 0
+        self.env_type = args.env_type
 
         self.policy_net = None
         self.old_policy_net = None
