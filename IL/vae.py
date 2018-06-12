@@ -739,9 +739,12 @@ class VAETrain(object):
                 'pred_traj_goal': [],
                 'pred_context': []}
 
+        true_reward_batch = []
+
         # We need to sample expert trajectories to get (s, a) pairs which
         # are required for goal prediction.
         for e in range(num_test_samples):
+            true_reward = 0.0
             batch = expert.sample(batch_size)
             ep_state, ep_action, ep_c, ep_mask = batch
             ep_state = np.array(ep_state, dtype=np.float32)
@@ -903,7 +906,9 @@ class VAETrain(object):
                                               dtype=np.float32)
                 elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
-                    next_state, _, done, _ = self.env.step(action)
+                    next_state, true_reward_t, done, _ = self.env.step(action)
+                    true_reward += true_reward_t
+
                     if done:
                         break
 
@@ -948,6 +953,12 @@ class VAETrain(object):
             results['pred_traj_action'].append(pred_traj_action_arr)
             # results['pred_traj_goal'].append(np.array(pred_traj_goal))
             results['pred_context'].append(np.array(pred_context))
+
+            true_reward_batch.append(true_reward)
+
+        true_reward_batch = np.array(true_reward_batch)
+        print('Batch reward mean: {:.3f}'.format(true_reward_batch.mean()))
+        print('Batch reward std: {:.3f}'.format(true_reward_batch.std()))
 
         return results
 
