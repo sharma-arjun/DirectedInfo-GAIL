@@ -2,7 +2,7 @@ import numpy as np
 import argparse
 import h5py
 import os
-import pdb, ipdb
+import pdb
 import pickle
 import torch
 import gym
@@ -906,9 +906,10 @@ class VAETrain(object):
                                               dtype=np.float32)
                 elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
-                    next_state, true_reward_t, done, _ = self.env.step(action)
+                    #next_state, true_reward_t, done, _ = self.env.step(action)
+                    next_state, true_reward_t, done, _ = self.env.step(ep_action[:,t,:][0])
                     true_reward += true_reward_t
-
+                    #self.env.render()
                     if done:
                         break
 

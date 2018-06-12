@@ -202,12 +202,12 @@ def train_loop():
                 policy_net.cuda(), value_net.cuda()
 
 def gen_traj_loop():
-    n = 1
+    n = 100
     agent = Agent(env_factory, policy_list[0], running_state=running_state_list[0], render=args.render,
                   num_threads=args.num_threads, mode_list=args.mode_list, state_type=args.state_type,
                   num_steps_per_mode=args.num_steps_per_mode)
     
-    env_data_dict = {'num_goals': 3}
+    env_data_dict = {'num_goals': 1}
     expert_data_dict = {}
     i_iter = 0
     print('Writing to h5 file ...')

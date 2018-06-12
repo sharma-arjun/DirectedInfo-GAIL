@@ -227,10 +227,14 @@ class Agent:
             state = np.concatenate((state, activity_map(self.mode_list[0]),
                                     activity_map(self.mode_list[min(1, N-1)])), axis=0)
 
+
+        state_non_running = state.copy()
+
         if self.running_state is not None:
             state = self.running_state(state, update=False)
 
         save_flag = True # is true when the episode does not end early (agent doesn't die)
+        true_reward = 0.0
     
         for i in range(len(self.mode_list)):
             if save_flag == False:
@@ -243,7 +247,7 @@ class Agent:
                 env_base.mode = mode
 
             for n in range(num_steps_per_policy):
-                print(n)
+                #print(n)
                 state_var = Variable(self.tensor(state).unsqueeze(0), volatile=True)
                 if use_gpu:
                     state_var = state_var.cuda()
@@ -253,6 +257,7 @@ class Agent:
                 else:
                     action = action.data[0].numpy()
                 next_state, reward, done, _ = env.step(action)
+                true_reward += reward
 
                 if self.state_type == 'decayed_context':
                     next_state = np.concatenate((next_state,
@@ -264,19 +269,24 @@ class Agent:
                                                  activity_map(self.mode_list[min(n+1, N * num_steps_per_policy-1) // num_steps_per_policy]),
                                                  activity_map(self.mode_list[min(i+1, N-1)])), axis=0)
 
+                next_state_non_running = next_state.copy()
                 if self.running_state is not None:
                     next_state = self.running_state(next_state, update=False)
                 if self.render:
                     env.render()
                 if done:
-                    if i != len(self.mode_list) - 1 or n != num_steps_per_policy:
+                    #if i != len(self.mode_list) - 1 or n != num_steps_per_policy:
+                    if true_reward < -130.0:
                         save_flag = False
+                    else:
+                        print(true_reward)
                     break
 
-                expert_dict['state'].append(state)
+                expert_dict['state'].append(state_non_running)
                 expert_dict['action'].append(action)
                 expert_dict['goal'].append(0)
 
                 state = next_state
+                state_non_running = next_state_non_running
 
         return expert_dict, save_flag
