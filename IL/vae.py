@@ -796,8 +796,8 @@ class VAETrain(object):
                 theta_dot = (x_feat[:, 2])[:, np.newaxis]
                 self.env.env.state = np.concatenate(
                         (theta, theta_dot), axis=1).reshape(-1)
-                x_feat = np.concatenate(
-                        [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
+                # x_feat = np.concatenate(
+                #        [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
 
             # x is (N, F)
             x = x_feat
@@ -913,9 +913,9 @@ class VAETrain(object):
                     if done:
                         break
 
-                    next_state = np.concatenate(
-                            (next_state,
-                             np.ones((batch_size)) * (t+1)/(episode_len+1)), axis=0)
+                    # next_state = np.concatenate(
+                    #        (next_state,
+                    #         np.ones((batch_size)) * (t+1)/(episode_len+1)), axis=0)
 
                     if history_size > 1:
                         x_hist[:, history_size - 1, :] = next_state
@@ -1098,9 +1098,6 @@ class VAETrain(object):
                 theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, None]
                 theta_dot = (x_feat[:, 2])[:, None]
                 self.env.env.state = np.concatenate((theta, theta_dot), axis=1)
-
-                x_feat = np.concatenate(
-                        [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
     
             # x is (N, F)
             x = x_feat
@@ -1254,9 +1251,10 @@ class VAETrain(object):
                     #if done:
                     #    break
 
-                    next_state = np.concatenate((
-                        next_state,
-                        np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
+                    # No time used
+                    # next_state = np.concatenate((
+                    #    next_state,
+                    #    np.ones((batch_size, 1)) * (t+1)/(episode_len+1)), axis=1)
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = next_state

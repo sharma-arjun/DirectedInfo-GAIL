@@ -270,13 +270,13 @@ class CausalGAILMLP(BaseGAIL):
 
     def load_weights_from_vae(self):
         # deepcopy from vae
-        # self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
-        # self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
-        # self.opt_policy = optim.Adam(self.policy_net.parameters(),
-        #                             lr=self.args.learning_rate)
+        self.opt_policy = optim.Adam(self.policy_net.parameters(),
+                                     lr=self.args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
@@ -298,7 +298,6 @@ class CausalGAILMLP(BaseGAIL):
             (x,
              Variable(torch.from_numpy(a)).type(self.dtype),
              goal_var), 1)).data.cpu().numpy()[0,0])
-
 
         if self.args.disc_reward == 'log_d':
             if disc_reward < 1e-8:
@@ -1260,7 +1259,6 @@ def main(args):
                 args.results_dir,
                 'results_' + os.path.basename(args.checkpoint_path)[:-3] \
                         + 'pkl')
-        #causal_gail_mlp.get_value_function_for_grid()
 
         causal_gail_mlp.train_gail(
                 1,
@@ -1283,10 +1281,6 @@ def main(args):
 
         print("Finetune checkpoint: {}".format(args.finetune_path))
         causal_gail_mlp.load_checkpoint_data(args.finetune_path)
-        #causal_gail_mlp.get_value_function_for_grid()
-        #causal_gail_mlp.get_discriminator_reward_for_grid()
-        #causal_gail_mlp.get_action_for_grid()
-
         causal_gail_mlp.train_gail(
                 args.num_epochs,
                 os.path.join(results_dir, 'results.pkl'),
