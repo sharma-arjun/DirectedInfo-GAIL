@@ -234,6 +234,7 @@ class Agent:
             state = self.running_state(state, update=False)
 
         save_flag = True # is true when the episode does not end early (agent doesn't die)
+        break_flag = False
         true_reward = 0.0
     
         for i in range(len(self.mode_list)):
@@ -280,11 +281,15 @@ class Agent:
                         save_flag = False
                     else:
                         print(true_reward)
-                    break
+
+                    break_flag = True
 
                 expert_dict['state'].append(state_non_running)
                 expert_dict['action'].append(action)
                 expert_dict['goal'].append(0)
+
+                if break_flag:
+                    break
 
                 state = next_state
                 state_non_running = next_state_non_running
