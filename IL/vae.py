@@ -792,7 +792,7 @@ class VAETrain(object):
             elif self.env_type == 'gym':
                 x_feat = ep_state[:, 0, :]
                 dummy_state = self.env.reset()
-                theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
+                theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, np.newaxis]
                 theta_dot = (x_feat[:, 2])[:, np.newaxis]
                 self.env.env.state = np.concatenate(
                         (theta, theta_dot), axis=1).reshape(-1)
@@ -1095,7 +1095,7 @@ class VAETrain(object):
             elif self.env_type == 'gym':
                 x_feat = ep_state[:, 0, :]
                 dummy_state = self.env.reset()
-                theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, None]
+                theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, None]
                 theta_dot = (x_feat[:, 2])[:, None]
                 self.env.env.state = np.concatenate((theta, theta_dot), axis=1)
 

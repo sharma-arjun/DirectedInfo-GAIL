@@ -183,7 +183,7 @@ class CausalGAILMLP(BaseGAIL):
         elif self.env_type == 'gym':
             x_feat = state_arr[:, 0, :]
             dummy_state = self.env.reset()
-            theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
+            theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, np.newaxis]
             theta_dot = (x_feat[:, 2])[:, np.newaxis]
             self.env.env.state = np.concatenate(
                     (theta, theta_dot), axis=1).reshape(-1)
@@ -868,7 +868,7 @@ class CausalGAILMLP(BaseGAIL):
                     elif self.env_type == 'gym':
                         x_feat = state_expert[:, 0, :]
                         dummy_state = self.env.reset()
-                        theta = (np.arctan2(x_feat[:, 0], x_feat[:, 1]))[:, np.newaxis]
+                        theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, np.newaxis]
                         theta_dot = (x_feat[:, 2])[:, np.newaxis]
                         self.env.env.state = np.concatenate(
                                 (theta, theta_dot), axis=1).reshape(-1)
