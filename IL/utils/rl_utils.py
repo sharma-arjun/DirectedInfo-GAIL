@@ -3,7 +3,7 @@ import numpy as np
 import math
 import torch
 from torch.autograd import Variable
-import pdb, ipdb
+import pdb
 
 def epsilon_greedy_linear_decay(action_vector,
                                 num_episodes,

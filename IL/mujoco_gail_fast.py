@@ -2,13 +2,11 @@ import argparse
 import copy
 import sys
 import os
-import pdb, ipdb
+import pdb
 import pickle
 import math
 import random
 import gym
-from collections import namedtuple
-from itertools import count, product
 
 import numpy as np
 import scipy.optimize
@@ -26,11 +24,9 @@ from models import DiscretePosterior, Policy, Posterior, Reward, Value
 from grid_world import State, Action, TransitionFunction
 from grid_world import StateVector, ActionVector
 from grid_world import RewardFunction, RewardFunction_SR2, GridWorldReward
-from grid_world import ActionBasedGridWorldReward
 from grid_world import create_obstacles, obstacle_movement, sample_start
 from load_expert_traj import Expert, ExpertHDF5, SeparateRoomTrajExpert
 from utils.replay_memory import Memory
-from utils.running_state import ZFilter
 from utils.torch_utils import clip_grads, clip_grad_value
 
 from base_gail import BaseGAIL
@@ -42,6 +38,325 @@ from utils.rl_utils import get_advantage_for_rewards
 from utils.torch_utils import get_weight_norm_for_network
 from utils.torch_utils import normal_log_density
 from utils.torch_utils import add_scalars_to_summary_writer
+
+from multiprocessing import Pool
+import time
+
+def unwrap_self_f(arg, **kwarg):
+    return C.f(*arg, **kwarg)
+
+class C:
+    def f(self, name):
+        print('hello {},'.format(name))
+        time.sleep(5)
+        print('nice to meet you.')
+
+    def run(self):
+        pool = Pool(processes=2)
+        names = ('frank', 'justin', 'osi', 'thomas')
+        pool.map(unwrap_self_f, zip([self]*len(names), names))
+
+def get_history_features(state, use_velocity=False):
+    '''
+    state: Numpy array of shape (N, H, F)
+    '''
+    if use_velocity:
+        _, history_size, state_size = state.shape
+        new_state = np.zeros(state.shape)
+
+        state_int = np.array(state, dtype=np.int32)
+        for t in range(history_size-1):
+            minus_one_idx = state_int[:, t, 0] == -1
+            new_state[minus_one_idx, t, :] = 0.0
+            one_idx = (state_int[:, t, 0] != -1)
+            new_state[one_idx, t, :] = state[one_idx, t+1, :] - state[one_idx, t, :]
+
+        new_state[:, history_size-1, :] = state[:, history_size-1, :]
+
+        return new_state
+    else:
+        return state
+
+def get_context_at_state(vae_model, x, c, use_discrete_vae=True):
+    '''Get context variable c_t for given x_t, c_{t-1}.
+
+    x: State at time t. (x_t)
+    c: Context at time t-1. (c_{t-1})
+    '''
+    if use_discrete_vae:
+        logits = vae_model.encode(x, c)
+        return vae_model.reparameterize(logits, vae_model.temperature)
+    else:
+        mu, logvar = vae_model.encode(x, c)
+        return vae_model.reparameterize(mu, logvar)
+
+def select_action(policy_net, x_var, c_var, goal_var, use_goal_in_policy=False):
+    # Select action using policy net.
+    if use_goal_in_policy:
+        inp_var = torch.cat((x_var, goal_var), dim=1)
+    else:
+        inp_var = torch.cat((x_var, c_var), dim=1)
+    action_mean, action_log_std, action_std = policy_net(inp_var)
+    action = torch.normal(action_mean, action_std)
+    return action
+
+def get_discriminator_reward(reward_net, x, a, c, next_c,
+                             dtype=torch.cuda.FloatTensor,
+                             goal_var=None,
+                             disc_reward_type='log_d',
+                            ):
+    '''Get discriminator reward.'''
+    if goal_var is not None:
+        next_c = torch.cat([goal_var, next_c], dim=1)
+
+    disc_reward = float(reward_net(torch.cat(
+        (x,
+        Variable(torch.from_numpy(a)).type(dtype),
+        goal_var), 1)).data.cpu().numpy()[0,0])
+
+    if disc_reward_type == 'log_d':
+        if disc_reward < 1e-8:
+            disc_reward += 1e-8
+        disc_reward = -math.log(disc_reward)
+    elif disc_reward_type == 'log_1-d':
+        if disc_reward >= 1.0:
+            disc_reward = 1.0 - 1e-8
+        disc_reward = math.log(1 - disc_reward)
+    elif disc_reward_type == 'no_log':
+        disc_reward = -disc_reward
+    else:
+        raise ValueError("Incorrect Disc reward type: {}".format(disc_reward_type))
+    return disc_reward
+
+def get_posterior_reward(posterior_net, x, c, next_ct,
+                         use_discrete_vae=True, use_reparameterize=True,
+                         goal_var=None):
+    '''Get posterior reward.'''
+    if goal_var is not None:
+        c = torch.cat([goal_var, c], dim=1)
+
+    if use_discrete_vae:
+        logits = posterior_net(torch.cat((x, c), 1))
+        _, label = torch.max(next_ct, 1)
+        posterior_reward_t = F.cross_entropy(logits, label)
+    else:
+        mu, sigma = posterior_net(torch.cat((x, c), 1))
+        mu = mu.data.cpu().numpy()[0,0]
+        sigma = np.exp(0.5 * sigma.data.cpu().numpy()[0,0])
+        # TODO: should ideally be logpdf, but pdf may work better. Try both.
+        # use norm.logpdf if flag else use norm.pdf
+        use_log_rewards = True
+        reward_func = norm.logpdf if use_log_rewards else norm.pdf
+        scale = sigma if use_reparameterize else 0.1
+        # use fixed std if not using reparameterize otherwise use sigma.
+        posterior_reward_t = reward_func(next_ct, loc=mu, scale=0.1)[0]
+
+    return posterior_reward_t.data.cpu().numpy()[0]
+
+
+def run_agent_worker(run_args,
+                     vae_model,
+                     policy_net,
+                     reward_net,
+                     posterior_net,
+                     expert,
+                     env,
+                     gen_batch_size,
+                     posterior_latent_size,
+                     num_goals,
+                     use_rnn_goal_predictor,
+                     use_discrete_vae,
+                     dtype):
+    '''Collect experience for agent.
+    env: Environment to collect samples from.
+    batch_size: Number of example instances to be collected. Int.
+    max_episode_len: Maximum episode length for each episode. Int.
+    config: Agent config.
+    volatile: True if input state variable should be volatile else False.
+    Return: Dictionary with `memory_list` and `log_list` keys. 
+    '''
+    memory_list, log_list = [], []
+    num_steps, batch_size = 0, 1
+    memory = []
+
+    print("WTF")
+
+    while num_steps < gen_batch_size:
+        # Sample trajectory expert.sample()
+        traj_expert = expert.sample(size=batch_size)
+
+        state_expert, action_expert, c_expert, _ = traj_expert
+        state_expert = np.array(state_expert, dtype=np.float32)
+        action_expert = np.array(action_expert, dtype=np.float32)
+        c_expert = np.array(c_expert, dtype=np.int32)
+
+        expert_episode_len = state_expert.shape[1]
+
+        # Generate c from trained VAE
+        pred_c_tensor = -1 * torch.ones((
+            batch_size,
+            max(expert_episode_len, run_args.max_ep_length) + 1, # + 1 for c[-1]
+            posterior_latent_size)).type(dtype)
+
+        true_goal_numpy = np.zeros((c_expert.shape[0], num_goals))
+        true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
+        true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(dtype)
+
+        if run_args.use_random_starts:
+            ### if using random states ###
+            dummy_state = env.reset()
+            x_feat = np.concatenate((dummy_state, np.array([0.0])),
+                                     axis=0)[np.newaxis, :]
+        else:
+            ### use start state from data ###
+            if run_args.env_type == 'mujoco':
+                x_feat = state_expert[:, 0, :]
+                dummy_state = env.reset()
+                env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                dummy_state = x_feat
+            elif run_args.env_type == 'gym':
+                x_feat = state_expert[:, 0, :]
+                dummy_state = env.reset()
+                theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, np.newaxis]
+                theta_dot = (x_feat[:, 2])[:, np.newaxis]
+                env.env.state = np.concatenate(
+                        (theta, theta_dot), axis=1).reshape(-1)
+                x_feat = np.concatenate(
+                        [x_feat, np.zeros((state_expert.shape[0], 1))], axis=1)
+            else:
+                raise ValueError("Incorrect env type: {}".format(
+                    run_args.env_type))
+
+        x = x_feat
+        curr_state_arr = x_feat
+
+        # Add history to state
+        if run_args.history_size > 1:
+            x_hist = -1 * np.ones((x.shape[0], run_args.history_size, x.shape[1]),
+                                  dtype=np.float32)
+            x_hist[:, (run_args.history_size-1), :] = x_feat
+            x = get_history_features(x_hist)
+
+        ep_reward, expert_true_reward = 0, 0
+        env_reward_dict = {'true_reward': 0.0}
+        disc_reward, posterior_reward = 0.0, 0.0
+
+        for t in range(expert_episode_len):
+            # First predict next ct
+            ct = pred_c_tensor[:, t, :]
+            # Get state and context variables
+            x_var = Variable(torch.from_numpy(x.reshape((batch_size, -1))).type(
+                dtype))
+            # Append 'c' at the end.
+            if use_rnn_goal_predictor:
+                raise ValueError("Do not use this.")
+            else:
+                c_var = Variable(ct)
+                if len(true_goal.size()) == 2:
+                    c_var = torch.cat([true_goal, c_var], dim=1)
+                elif len(true_goal.size()) == 3:
+                    c_var = torch.cat([true_goal[:, t, :], c_var], dim=1)
+                else:
+                    raise ValueError("incorrect true goal size")
+
+            next_ct = get_context_at_state(vae_model, x_var, c_var,
+                                           use_discrete_vae=use_discrete_vae)
+            pred_c_tensor[:, t+1, :] = next_ct.data
+
+            # Reassign correct c_var and next_c_var
+            c_var, next_c_var = Variable(ct), next_ct
+
+            # Get the goal variable (either true or predicted)
+            goal_var = None
+            if len(true_goal.size()) == 2:
+                goal_var = true_goal
+            elif len(true_goal.size()) == 3:
+                goal_var = true_goal[:, t, :]
+            else:
+                raise ValueError("incorrect true goal size")
+            # ==== END ====
+
+
+            # Generator should predict the action using (x_t, c_t)
+            action = select_action(policy_net, x_var, next_c_var, goal_var,
+                                   use_goal_in_policy=run_args.use_goal_in_policy)
+            action_numpy = action.data.cpu().numpy()
+            action = action_numpy
+
+            # Get the discriminator reward
+            disc_reward_t = get_discriminator_reward(
+                            reward_net, x_var, action, c_var, next_c_var,
+                            dtype=dtype,
+                            goal_var=goal_var,
+                            disc_reward_type=run_args.disc_reward)
+            disc_reward += disc_reward_t
+
+            # Get posterior reward
+            posterior_reward_t = 0.0
+            if not run_args.use_goal_in_policy:
+                posterior_reward_t = run_args.lambda_posterior \
+                        * get_posterior_reward(
+                                posterior_net, 
+                                x_var, c_var,
+                                next_c_var, 
+                                use_discrete_vae=use_discrete_vae,
+                                use_reparameterize=args.use_reparameterize,
+                                goal_var=goal_var)
+                posterior_reward += posterior_reward_t
+
+            # Update Rewards
+            ep_reward += (disc_reward_t + posterior_reward_t)
+
+            next_state_feat, true_reward, done, _ = env.step(
+                    action.reshape(-1))
+            env_reward_dict['true_reward'] += true_reward
+            next_state_feat = np.concatenate(
+                    (next_state_feat,
+                    np.array([(t+1)/(expert_episode_len+1)])), axis=0)
+            # next_state_feat = running_state(next_state_feat)
+            x[:] = next_state_feat.copy()
+
+            mask = 0 if t == expert_episode_len - 1 or done else 1
+
+            # Push to memory
+            memory.append([
+                    curr_state_arr.copy().reshape(-1),
+                    action,
+                    mask,
+                    next_state_feat,
+                    disc_reward_t + posterior_reward_t,
+                    ct.cpu().numpy().reshape(-1),
+                    next_ct.data.cpu().numpy().reshape(-1),
+                    goal_var.data.cpu().numpy().copy().reshape(-1)
+                    ])
+
+            num_steps += 1
+
+            if run_args.render:
+                env.render()
+
+            if mask == 0:
+                break
+
+            # Update current state
+            curr_state_arr = np.array(next_state_feat, dtype=np.float32)
+
+        log_list.append({
+            'total_disc_reward': ep_reward,
+            'disc_reward': disc_reward,
+            'posterior_reward': posterior_reward,
+            'true_reward': env_reward_dict['true_reward'],
+            })
+
+    return {
+        'memory': memory,
+        'log_list': log_list,
+    }
+
+def parallel_run_agent_worker(args):
+    return run_agent_worker(*args)
+
 
 class CausalGAILMLP(BaseGAIL):
     def __init__(self,
@@ -122,7 +437,9 @@ class CausalGAILMLP(BaseGAIL):
                                         lr=args.learning_rate)
 
         self.transition_func, self.true_reward = None, None
-        self.create_environment(args.env_type, args.env_name)
+        self.create_environment(args.env_type,
+                                env_name=args.env_name,
+                                num_threads=args.num_threads)
         self.expert = None
         self.obstacles, self.set_diff = None, None
 
@@ -135,9 +452,15 @@ class CausalGAILMLP(BaseGAIL):
         self.reward_net = self.reward_net.type(dtype)
         self.posterior_net = self.posterior_net.type(dtype)
 
-    def create_environment(self, env_type, env_name=None):
+    def create_environment(self, env_type, env_name=None, num_threads=1):
         assert(env_name is not None)
         self.env = gym.make(env_name)
+        self.envs = []
+        for i in range(num_threads):
+            env = gym.make(env_name)
+            env.seed(int(time.time()) + i)
+            self.envs.append(env)
+        self.env_pool = Pool(num_threads)
 
     def select_action(self, x_var, c_var, goal_var):
         """Select action using policy net."""
@@ -150,7 +473,6 @@ class CausalGAILMLP(BaseGAIL):
         return action
 
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
-        '''Get c[1:T] for given trajectory.'''
         batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
         history_size = self.history_size
         c_arr = np.array(c_arr, dtype=np.int32)
@@ -279,7 +601,6 @@ class CausalGAILMLP(BaseGAIL):
                                      lr=self.args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
-        ipdb.set_trace()
 
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
@@ -290,7 +611,7 @@ class CausalGAILMLP(BaseGAIL):
         self.set_diff = expert.set_diff
 
     def get_discriminator_reward(self, x, a, c, next_c, goal_var=None):
-        '''Get discriminator reward.'''
+        # Get discriminator reward.
         if goal_var is not None:
             next_c = torch.cat([goal_var, next_c], dim=1)
 
@@ -315,7 +636,7 @@ class CausalGAILMLP(BaseGAIL):
         return disc_reward
 
     def get_posterior_reward(self, x, c, next_ct, goal_var=None):
-        '''Get posterior reward.'''
+        """Get posterior reward."""
         if goal_var is not None:
             c = torch.cat([goal_var, c], dim=1)
 
@@ -337,120 +658,6 @@ class CausalGAILMLP(BaseGAIL):
             posterior_reward_t = reward_func(next_ct, loc=mu, scale=0.1)[0]
 
         return posterior_reward_t.data.cpu().numpy()[0]
-
-    def get_value_function_for_grid(self):
-        from grid_world import create_obstacles, obstacle_movement, sample_start
-        '''Get value function for different locations in grid.'''
-        grid_width, grid_height = self.vae_train.width, self.vae_train.height
-        obstacles, rooms, room_centres = create_obstacles(
-                grid_width,
-                grid_height,
-                env_name='room',
-                room_size=3)
-        valid_positions = list(set(product(tuple(range(0, grid_width)),
-                                    tuple(range(0, grid_height))))
-                                    - set(obstacles))
-        values_for_goal = -1*np.ones((4, grid_height, grid_width))
-        for pos in valid_positions:
-            # hardcode number of goals
-            for goal_idx in range(4):
-                goal_arr = np.zeros((4))
-                goal_arr[goal_idx] = 1
-                print(goal_arr)
-                value_tensor = torch.Tensor(np.hstack(
-                    [np.array(pos), goal_arr])[np.newaxis, :])
-                value_var = self.value_net(Variable(value_tensor))
-                print(value_var.data.cpu().numpy()[0, 0])
-                values_for_goal[goal_idx, grid_height-pos[1], pos[0]] = \
-                        value_var.data.cpu().numpy()[0, 0]
-        for g in range(4):
-            value_g = values_for_goal[g]
-            print("Value for goal: {}".format(g))
-            print(np.array_str(
-                value_g, precision=2, suppress_small=True, max_line_width=200))
-
-    def get_discriminator_reward_for_grid(self):
-        from grid_world import create_obstacles, obstacle_movement, sample_start
-        '''Get value function for different locations in grid.'''
-        grid_width, grid_height = self.vae_train.width, self.vae_train.height
-        obstacles, rooms, room_centres = create_obstacles(
-                grid_width,
-                grid_height,
-                env_name='room',
-                room_size=3)
-        valid_positions = list(set(product(tuple(range(0, grid_width)),
-                                    tuple(range(0, grid_height))))
-                                    - set(obstacles))
-
-        reward_for_goal_action = -1*np.ones((4, 4, grid_height, grid_width))
-        for pos in valid_positions:
-            for action_idx in range(4):
-                action_arr = np.zeros((4))
-                action_arr[action_idx] = 1
-                for goal_idx in range(4):
-                    goal_arr = np.zeros((4))
-                    goal_arr[goal_idx] = 1
-                    inp_tensor = torch.Tensor(np.hstack(
-                        [np.array(pos), action_arr, goal_arr])[np.newaxis, :])
-                    reward = self.reward_net(Variable(inp_tensor))
-                    reward = float(reward.data.cpu().numpy()[0, 0])
-                    if self.args.disc_reward == 'log_d':
-                        reward = -math.log(reward)
-                    elif self.args.disc_reward == 'log_1-d':
-                        reward = math.log(1.0 - reward)
-                    elif self.args.disc_reward == 'no_log':
-                        reward = reward
-                    else:
-                        raise ValueError("Incorrect disc_reward type")
-
-                    reward_for_goal_action[action_idx,
-                                           goal_idx,
-                                           grid_height-pos[1],
-                                           pos[0]] = reward
-
-        for g in range(4):
-            for a in range(4):
-                reward_ag = reward_for_goal_action[a, g]
-                print("Reward for action: {} goal: {}".format(a, g))
-                print(np.array_str(reward_ag,
-                                   precision=2,
-                                   suppress_small=True,
-                                   max_line_width=200))
-
-    def get_action_for_grid(self):
-        from grid_world import create_obstacles, obstacle_movement, sample_start
-        '''Get value function for different locations in grid.'''
-        grid_width, grid_height = self.vae_train.width, self.vae_train.height
-        obstacles, rooms, room_centres = create_obstacles(
-                grid_width,
-                grid_height,
-                env_name='room',
-                room_size=3)
-        valid_positions = list(set(product(tuple(range(0, grid_width)),
-                                    tuple(range(0, grid_height))))
-                                    - set(obstacles))
-
-        action_for_goal = -1*np.ones((4, grid_height, grid_width))
-        for pos in valid_positions:
-            for goal_idx in range(4):
-                goal_arr = np.zeros((4))
-                goal_arr[goal_idx] = 1
-                inp_tensor = torch.Tensor(np.hstack(
-                    [np.array(pos), goal_arr])[np.newaxis, :])
-                action_var, _, _ = self.policy_net(Variable(inp_tensor))
-                print("Pos: {}, action: {}".format(
-                    pos, action_var.data.cpu().numpy()))
-                action = np.argmax(action_var.data.cpu().numpy())
-                action_for_goal[goal_idx,
-                                grid_height-pos[1],
-                                pos[0]] = action
-
-        for g in range(4):
-            action_g = action_for_goal[g].astype(np.int32)
-
-            print("Action for goal: {}".format(g))
-            print(np.array_str(
-                action_g, suppress_small=True, max_line_width=200))
 
     def update_posterior_net(self, state_var, c_var, next_c_var, goal_var=None):
         if goal_var is not None:
@@ -480,11 +687,6 @@ class CausalGAILMLP(BaseGAIL):
                                 optim_iters,
                                 goal=None,
                                 expert_goal=None):
-        '''Update parameters for one batch of data.
-
-        Update the policy network, discriminator (reward) network and the
-        posterior network here.
-        '''
         args, dtype = self.args, self.dtype
         curr_id, curr_id_exp = 0, 0
         for optim_idx in range(optim_iters):
@@ -668,8 +870,7 @@ class CausalGAILMLP(BaseGAIL):
 
     def update_params(self, gen_batch, expert_batch, episode_idx,
                       optim_epochs, optim_batch_size):
-        '''Update params for Policy (G), Reward (D) and Posterior (q) networks.
-        '''
+        # Update params for Policy (G), Reward (D) and Posterior (q) networks.
         args, dtype = self.args, self.dtype
 
         # generated trajectories
@@ -768,8 +969,6 @@ class CausalGAILMLP(BaseGAIL):
         # 1-hot vector of shape (1, A).
         actions = actions.view(-1, 1)
 
-        # ipdb.set_trace()
-
         for _ in range(optim_epochs):
             perm = np.random.permutation(np.arange(actions.size(0)))
             perm_exp = np.random.permutation(np.arange(expert_actions.size(0)))
@@ -796,9 +995,53 @@ class CausalGAILMLP(BaseGAIL):
                 goal=goal[perm],
                 expert_goal=expert_goals[perm_exp])
 
+    def test_parallel(self, name):
+        print("hello {}".format(name))
+        time.sleep(3.0)
+        print("fuck {}".format(name))
+
+    def collect_samples(self, batch_size, max_episode_len):
+        run_agent_worker_args = {}
+        dtype = self.dtype
+
+        args_list, per_worker_batch_size = [], batch_size // len(self.envs)
+        for i, env in enumerate(self.envs):
+            run_agent_worker_args[i] = (args,
+                                        self.vae_train.vae_model,
+                                        self.policy_net,
+                                        self.reward_net,
+                                        self.posterior_net,
+                                        self.expert,
+                                        env,
+                                        per_worker_batch_size,
+                                        self.vae_train.vae_model.posterior_latent_size,
+                                        self.num_goals,
+                                        self.vae_train.use_rnn_goal_predictor,
+                                        self.vae_train.args.use_discrete_vae,
+                                        self.dtype,
+                                        )
+            args_list.append(run_agent_worker_args[i])
+
+        start_time = time.time()
+        # Get the results by making a BLOCKING call.
+        pdb.set_trace()
+        results = self.env_pool.map(parallel_run_agent_worker, args_list)
+        end_time = time.time()
+        print("END: Blocking call, time: {:.3f}".format(end_time-start_time))
+
+        memory_list, log_list = [], []
+        for i in range(len(self.envs)):
+            m_list = results[i]['memory_list']
+            l_list = results[i]['log_list']
+            memory_list += m_list
+            log_list += l_list
+        total_memory = Memory()
+        total_memory.merge_list(memory_list)
+        return total_memory.sample(), memory_list, log_list
+
     def train_gail(self, num_epochs, results_pkl_path,
                    gen_batch_size=1, train=True):
-        '''Train GAIL.'''
+        # Train GAIL.
         args, dtype = self.args, self.dtype
         results = {'average_reward': [], 'episode_reward': [],
                    'true_traj_state': {}, 'true_traj_action': {},
@@ -811,8 +1054,7 @@ class CausalGAILMLP(BaseGAIL):
         #running_state = ZFilter((self.vae_train.args.vae_state_size), clip=5)
 
         for ep_idx in range(num_epochs):
-            memory = Memory()
-
+            update_start_time = time.time()
             num_steps, batch_size = 0, 1
             reward_batch, expert_true_reward_batch = [], []
             true_traj_curr_epoch = {'state':[], 'action': []}
@@ -821,288 +1063,19 @@ class CausalGAILMLP(BaseGAIL):
             #                         'map_traj_reward': []}
             env_reward_batch_dict = {'true_reward': []}
 
-            while num_steps < gen_batch_size:
-                traj_expert = self.expert.sample(size=batch_size)
-                state_expert, action_expert, c_expert, _ = traj_expert
-                state_expert = np.array(state_expert, dtype=np.float32)
-                action_expert = np.array(action_expert, dtype=np.float32)
-                c_expert = np.array(c_expert, dtype=np.int32)
-
-                expert_episode_len = state_expert.shape[1]
-
-                # Generate c from trained VAE
-                pred_c_arr = -1 * np.ones((
-                    batch_size,
-                    max(expert_episode_len, self.args.max_ep_length) + 1, # + 1 for c[-1]
-                    self.vae_train.vae_model.posterior_latent_size))
-
-                true_goal_numpy = np.zeros((c_expert.shape[0],
-                                            self.num_goals))
-                true_goal_numpy[np.arange(c_expert.shape[0]),
-                                c_expert[:, 0]] = 1
-
-                true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
-                            self.dtype)
-
-                if args.use_random_starts:
-                    ### if using random states ###
-                    dummy_state = self.env.reset()
-                    x_feat = np.concatenate((dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
-
-                else:
-                    ### use start state from data ###
-                    if self.env_type == 'mujoco':
-                        x_feat = state_expert[:, 0, :]
-                        dummy_state = self.env.reset()
-                        self.env.env.set_state(np.concatenate(
-                            (np.array([0.0]), x_feat[0, :8]), axis=0),
-                                x_feat[0, 8:17])
-                        dummy_state = x_feat
-                    elif self.env_type == 'gym':
-                        x_feat = state_expert[:, 0, :]
-                        dummy_state = self.env.reset()
-                        theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, np.newaxis]
-                        theta_dot = (x_feat[:, 2])[:, np.newaxis]
-                        self.env.env.state = np.concatenate(
-                                (theta, theta_dot), axis=1).reshape(-1)
-                        x_feat = np.concatenate(
-                                [x_feat, np.zeros((state_expert.shape[0], 1))], axis=1)
-                    else:
-                        raise ValueError("Incorrect env type: {}".format(
-                            self.env_type))
-
-                x = x_feat
-                curr_state_arr = x_feat
-
-                # Add history to state
-                if args.history_size > 1:
-                    x_hist = -1 * np.ones(
-                            (x.shape[0], args.history_size, x.shape[1]),
-                            dtype=np.float32)
-                    x_hist[:, (args.history_size-1), :] = x_feat
-                    x = self.vae_train.get_history_features(x_hist)
-
-
-                # TODO: Make this a separate function. Can be parallelized.
-                ep_reward, expert_true_reward = 0, 0
-                #env_reward_dict = {'linear_traj_reward': 0.0,
-                #                    'map_traj_reward': 0.0,}
-                env_reward_dict = {'true_reward': 0.0}
-                true_traj = {'state': [], 'action': []}
-                gen_traj = {'state': [], 'action': []}
-                gen_traj_dict = {'features': [],
-                                 'actions': [],
-                                 'c': [],
-                                 'mask': []}
-                disc_reward, posterior_reward = 0.0, 0.0
-                # Use a hard-coded list for memory to gather experience since
-                # we need to mutate it before finally creating a memory object.
-
-                for t in range(expert_episode_len):
-                    # First predict next ct
-                    ct = pred_c_arr[:, t, :]
-                    # Get state and context variables
-                    x_var = Variable(torch.from_numpy(
-                        x.reshape((batch_size, -1))).type(self.dtype))
-                    # Append 'c' at the end.
-                    if self.vae_train.use_rnn_goal_predictor:
-                        raise ValueError("Do not use this.")
-                    else:
-                        c_var = Variable(torch.from_numpy(ct).type(self.dtype))
-                        if len(true_goal.size()) == 2:
-                            c_var = torch.cat([true_goal, c_var], dim=1)
-                        elif len(true_goal.size()) == 3:
-                            c_var = torch.cat([true_goal[:, t, :], c_var], dim=1)
-                        else:
-                            raise ValueError("incorrect true goal size")
-
-                    next_ct = self.vae_train.get_context_at_state(x_var, c_var)
-                    pred_c_arr[:, t+1, :] = next_ct.data.cpu().numpy()
-
-                    # Reassign correct c_var and next_c_var
-                    c_var = Variable(torch.from_numpy(ct).type(self.dtype))
-                    next_c_var = next_ct
-
-                    # Get the goal variable (either true or predicted)
-                    goal_var = None
-                    if self.vae_train.args.use_rnn_goal:
-                        raise ValueError("To be implemented.")
-                    else:
-                        if len(true_goal.size()) == 2:
-                            goal_var = true_goal
-                        elif len(true_goal.size()) == 3:
-                            goal_var = true_goal[:, t, :]
-                        else:
-                            raise ValueError("incorrect true goal size")
-                    # ==== END ====
-
-
-                    # Generator should predict the action using (x_t, c_t)
-                    action = self.select_action(x_var, next_c_var, goal_var)
-                    action_numpy = action.data.cpu().numpy()
-
-                    # ==== Save generated and true trajectories ====
-                    true_traj['state'].append(state_expert[:, t, :])
-                    true_traj['action'].append(action_expert[:, t, :])
-                    gen_traj['state'].append(curr_state_arr)
-                    gen_traj['action'].append(action_numpy)
-                    gen_traj_dict['c'].append(ct)
-                    # ==== END ====
-
-                    action = action_numpy
-
-                    # Get the discriminator reward
-                    disc_reward_t = self.get_discriminator_reward(
-                            x_var, action, c_var, next_c_var,
-                            goal_var=goal_var)
-                    disc_reward += disc_reward_t
-
-                    # Get posterior reward
-                    posterior_reward_t = 0.0
-                    if not args.use_goal_in_policy:
-                        posterior_reward_t = self.args.lambda_posterior \
-                                * self.get_posterior_reward(
-                                        x_var, c_var, next_c_var, goal_var=goal_var)
-                    posterior_reward += posterior_reward_t
-
-                    # Update Rewards
-                    ep_reward += (disc_reward_t + posterior_reward_t)
-
-                    if c_expert[0, 0] == 0:
-                        self.env.env.mode = 'walk'
-                    elif c_expert[0, 0] == 1:
-                        self.env.env.mode = 'walkback'
-                    elif c_expert[0, 0] == 2:
-                        self.env.env.mode = 'jump'
-                    elif c_expert[0, 0] == 3:
-                        if t < expert_episode_len/2:
-                            self.env.env.mode = 'jump'
-                        else:
-                            self.env.env.mode = 'walk'
-                    elif c_expert[0, 0] == 4:
-                        if t < expert_episode_len/2:
-                            self.env.env.mode = 'jump'
-                        else:
-                            self.env.env.mode = 'walkback'
-                    elif c_expert[0, 0] == 5:
-                        if t < expert_episode_len/2:
-                            self.env.env.mode = 'walk'
-                        else:
-                            self.env.env.mode = 'jump'
-                    elif c_expert[0, 0] == 6:
-                        if t < expert_episode_len/2:
-                            self.env.env.mode = 'walkback'
-                        else:
-                            self.env.env.mode = 'jump'
-                    else:
-                        raise ValueError('Incorret c_expert value.')
-
-                    next_state_feat, true_reward, done, _ = self.env.step(
-                            action.reshape(-1))
-                    env_reward_dict['true_reward'] += true_reward
-                    next_state_feat = np.concatenate(
-                            (next_state_feat,
-                                np.array([(t+1)/(expert_episode_len+1)])), axis=0)
-                    #next_state_feat = running_state(next_state_feat)
-                    x[:] = next_state_feat.copy()
-
-                    if t == expert_episode_len - 1 or done:
-                        mask = 0
-                    else:
-                        mask = 1
-
-                    # Push to memory
-                    memory.push(
-                        curr_state_arr.copy().reshape(-1),
-                        action,
-                        mask,
-                        next_state_feat,
-                        disc_reward_t + posterior_reward_t,
-                        c=ct.reshape(-1),
-                        next_c=next_ct.data.cpu().numpy().reshape(-1),
-                        goal=goal_var.data.cpu().numpy().copy().reshape(-1))
-
-                    num_steps += 1
-
-                    if args.render:
-                        env.render()
-
-                    if mask == 0:
-                        break
-
-                    # Update current state
-                    curr_state_arr = np.array(next_state_feat, dtype=np.float32)
-
-
-                # Add RNN goal reward, i.e. compare the goal generated by
-                # Q-network for the generated trajectory and the predicted goal
-                # for expert trajectory.
-                goal_reward = 0
-                if self.vae_train.use_rnn_goal_predictor:
-                    gen_goal, _ = self.vae_train.predict_goal(
-                        np.array(gen_traj_dict['features']),
-                        np.array(gen_traj_dict['actions']).reshape(
-                            (-1, self.action_size)),
-                        gen_traj_dict['c'],
-                        None,
-                        self.num_goals)
-                    # Goal reward is sum(p*log(p_hat))
-                    gen_goal_numpy = gen_goal.data.cpu().numpy().reshape((-1))
-                    goal_reward = np.sum(np.log(gen_goal_numpy)
-                        * expert_goal.data.cpu().numpy().reshape((-1)))
-                # Add goal_reward to memory
-                '''
-                # assert memory_list[-1][2] == 0, "Mask for final end state is not 0."
-                for memory_t in memory_list:
-                    memory_t[4] += (goal_reward / expert_episode_len)
-                    memory.push(*memory_t)
-                '''
-
-                if train:
-                    add_scalars_to_summary_writer(
-                            self.logger.summary_writer,
-                            'gen_traj/gen_reward',
-                            {
-                                'discriminator': disc_reward,
-                                'discriminator_per_step': disc_reward/expert_episode_len,
-                                'posterior': posterior_reward,
-                                'posterior_per_step': posterior_reward/expert_episode_len,
-                                'goal': goal_reward,
-                            },
-                            gen_traj_step_count,
-                    )
-
-                #num_steps += expert_episode_len
-
-                # ==== Log rewards ====
-                reward_batch.append(ep_reward)
-                env_reward_batch_dict['true_reward'].append(
-                        env_reward_dict['true_reward'])
-                results['episode_reward'].append(ep_reward)
-                # ==== END ====
-
-                # Append trajectories
-                true_traj_curr_epoch['state'].append(true_traj['state'])
-                true_traj_curr_epoch['action'].append(true_traj['action'])
-                gen_traj_curr_epoch['state'].append(gen_traj['state'])
-                gen_traj_curr_epoch['action'].append(gen_traj['action'])
-
-                # Increment generated trajectory step count.
-                gen_traj_step_count += 1
-
-            results['average_reward'].append(np.mean(reward_batch))
+            gen_batch, log_list = self.collect_samples(
+                    gen_batch_size, self.args.max_ep_length + 1)
 
             # Add to tensorboard if training.
-            #linear_traj_reward = env_reward_batch_dict['linear_traj_reward']
-            #map_traj_reward = env_reward_batch_dict['map_traj_reward']
-            true_reward = env_reward_batch_dict['true_reward']
+            true_reward = np.sum([log['true_reward'] for log in log_list]) 
+            gen_reward = np.sum([log['total_disc_reward'] for log in log_list])
             if train:
                 add_scalars_to_summary_writer(
                         self.logger.summary_writer,
                         'gen_traj/reward', {
-                            'average': np.mean(reward_batch),
-                            'max': np.max(reward_batch),
-                            'min': np.min(reward_batch)
+                            'average': np.mean(gen_reward),
+                            'max': np.max(gen_reward),
+                            'min': np.min(gen_reward)
                         },
                         self.train_step_count)
                 add_scalars_to_summary_writer(
@@ -1114,21 +1087,7 @@ class CausalGAILMLP(BaseGAIL):
                         },
                         self.train_step_count)
 
-            # Add predicted and generated trajectories to results
-            if not train or ep_idx % self.args.save_interval == 0:
-                results['true_traj_state'][ep_idx] = copy.deepcopy(
-                        true_traj_curr_epoch['state'])
-                results['true_traj_action'][ep_idx] = copy.deepcopy(
-                        true_traj_curr_epoch['action'])
-                results['pred_traj_state'][ep_idx] = copy.deepcopy(
-                        gen_traj_curr_epoch['state'])
-                results['pred_traj_action'][ep_idx] = copy.deepcopy(
-                        gen_traj_curr_epoch['action'])
-
             if train:
-                # ==== Update parameters ====
-                gen_batch = memory.sample()
-
                 # We do not get the context variable from expert trajectories.
                 # Hence we need to fill it in later.
                 expert_batch = self.expert.sample(size=args.num_expert_trajs)
@@ -1138,11 +1097,15 @@ class CausalGAILMLP(BaseGAIL):
 
                 self.train_step_count += 1
 
+            update_end_time = time.time()
+
             if not train or (ep_idx > 0 and  ep_idx % args.log_interval == 0):
-                print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
+                print('Episode [{}/{}]   Time: {:.3f}   Avg R: {:.2f} Max R: {:.2f} \t' \
                       'True Avg {:.2f}   True Max R: {:.2f}'.format(
-                      ep_idx, args.num_epochs, np.mean(reward_batch),
-                      np.max(reward_batch), np.mean(true_reward),
+                      ep_idx, args.num_epochs,
+                      update_end_time - update_start_time,
+                      np.mean(gen_reward),
+                      np.max(gen_reward), np.mean(true_reward),
                       np.max(true_reward)))
 
             with open(results_pkl_path, 'wb') as results_f:
@@ -1156,14 +1119,15 @@ class CausalGAILMLP(BaseGAIL):
                 print("Did save checkpoint: {}".format(checkpoint_filepath))
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(self.dtype)
+'''
 
-
+'''
 def check_args(saved_args, new_args):
     assert saved_args.use_state_features == new_args.use_state_features, \
             'Args do not match - use_state_features'
 
 def load_VAE_model(model_checkpoint_path, new_args):
-    '''Load pre-trained VAE model.'''
+    # Load pre-trained VAE model.
 
     checkpoint_dir_path = os.path.dirname(model_checkpoint_path)
     results_dir_path = os.path.dirname(checkpoint_dir_path)
@@ -1301,8 +1265,12 @@ def main(args):
             gen_batch_size=args.batch_size,
             )
 
-
 if __name__ == '__main__':
+    '''
+    c = C()
+    c.run()
+    '''
+
     parser = argparse.ArgumentParser(description='Causal GAIL using MLP.')
     parser.add_argument('--expert_path', default="L_expert_trajectories/",
                         help='path to the expert trajectory files')
@@ -1448,6 +1416,9 @@ if __name__ == '__main__':
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')
+    parser.add_argument('--num_threads', type=int, default=1,
+                        help='Number of threads to collect train samples.')
+
 
     args = parser.parse_args()
     torch.manual_seed(args.seed)

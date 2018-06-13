@@ -2,13 +2,14 @@ import argparse
 import copy
 import sys
 import os
-import pdb, ipdb
+import pdb
 import pickle
 import math
 import random
 import gym
 from collections import namedtuple
 from itertools import count, product
+import time
 
 import numpy as np
 import scipy.optimize
@@ -187,8 +188,6 @@ class CausalGAILMLP(BaseGAIL):
             theta_dot = (x_feat[:, 2])[:, np.newaxis]
             self.env.env.state = np.concatenate(
                     (theta, theta_dot), axis=1).reshape(-1)
-            x_feat = np.concatenate(
-                    [x_feat, np.zeros((state_arr.shape[0], 1))], axis=1)
         else:
             raise ValueError('Incorrect env type: {}'.format(
                 self.args.env_type))
@@ -725,11 +724,13 @@ class CausalGAILMLP(BaseGAIL):
             ## Expand expert states ##
             #np.arange(200)/200
             expert_state_i = expert_batch.state[i]
+            '''
             if self.args.env_type == 'gym':
                 time_arr = np.arange(expert_batch.state[i].shape[0]) \
                         / (expert_batch.state[i].shape[0])
                 expert_state_i = np.concatenate(
                         [expert_state_i, time_arr[:, None]], axis=1)
+            '''
             expanded_states = self.expand_states_numpy(expert_state_i,
                                                        self.history_size)
             list_of_expert_states.append(torch.Tensor(expanded_states))
@@ -773,8 +774,6 @@ class CausalGAILMLP(BaseGAIL):
         # Remove extra 1 array shape from actions, since actions were added as
         # 1-hot vector of shape (1, A).
         actions = actions.view(-1, 1)
-
-        # ipdb.set_trace()
 
         for _ in range(optim_epochs):
             perm = np.random.permutation(np.arange(actions.size(0)))
@@ -827,6 +826,8 @@ class CausalGAILMLP(BaseGAIL):
             #                         'map_traj_reward': []}
             env_reward_batch_dict = {'true_reward': []}
 
+            collect_sample_start_time = time.time()
+
             while num_steps < gen_batch_size:
                 traj_expert = self.expert.sample(size=batch_size)
                 state_expert, action_expert, c_expert, _ = traj_expert
@@ -853,7 +854,8 @@ class CausalGAILMLP(BaseGAIL):
                 if args.use_random_starts:
                     ### if using random states ###
                     dummy_state = self.env.reset()
-                    x_feat = np.concatenate((dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
+                    x_feat = np.concatenate(
+                            (dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
 
                 else:
                     ### use start state from data ###
@@ -871,8 +873,6 @@ class CausalGAILMLP(BaseGAIL):
                         theta_dot = (x_feat[:, 2])[:, np.newaxis]
                         self.env.env.state = np.concatenate(
                                 (theta, theta_dot), axis=1).reshape(-1)
-                        x_feat = np.concatenate(
-                                [x_feat, np.zeros((state_expert.shape[0], 1))], axis=1)
                     else:
                         raise ValueError("Incorrect env type: {}".format(
                             self.env_type))
@@ -998,9 +998,6 @@ class CausalGAILMLP(BaseGAIL):
                     next_state_feat, true_reward, done, _ = self.env.step(
                             action.reshape(-1))
                     env_reward_dict['true_reward'] += true_reward
-                    next_state_feat = np.concatenate(
-                            (next_state_feat,
-                                np.array([(t+1)/(expert_episode_len+1)])), axis=0)
                     #next_state_feat = running_state(next_state_feat)
                     x[:] = next_state_feat.copy()
 
@@ -1123,7 +1120,12 @@ class CausalGAILMLP(BaseGAIL):
                 results['pred_traj_action'][ep_idx] = copy.deepcopy(
                         gen_traj_curr_epoch['action'])
 
+            collect_sample_end_time = time.time()
+            print("Collect sample time: {:.3f}".format(
+                collect_sample_end_time-collect_sample_start_time))
+
             if train:
+                gail_train_start_time = time.time()
                 # ==== Update parameters ====
                 gen_batch = memory.sample()
 
@@ -1133,6 +1135,9 @@ class CausalGAILMLP(BaseGAIL):
 
                 self.update_params(gen_batch, expert_batch, ep_idx,
                                    args.optim_epochs, args.optim_batch_size)
+                gail_train_end_time = time.time()
+                print("Gail update time: {:.3f}".format(
+                    collect_sample_end_time-collect_sample_start_time))
 
                 self.train_step_count += 1
 

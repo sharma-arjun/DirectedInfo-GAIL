@@ -3,7 +3,7 @@ from collections import namedtuple
 from utils.running_state import ZFilter
 import h5py
 import os
-import pdb, ipdb
+import pdb
 import random
 
 Trajectory = namedtuple('Trajectory', ('state', 'action', 'c', 'mask'))
@@ -125,7 +125,7 @@ class ExpertHDF5(Expert):
     def __init__(self, expert_dir, num_inputs):
         super(ExpertHDF5, self).__init__(expert_dir, num_inputs)
         self.expert_dir = expert_dir
-        self.memory = []
+        self.memory, self.memory_no_tuple = [], []
         self.pointer = 0
         self.list_of_sample_c = []
 
@@ -138,7 +138,7 @@ class ExpertHDF5(Expert):
         assert os.path.exists(h5_file), \
                 "hdf5 file does not exist {}".format(h5_file)
         h5f = h5py.File(h5_file, 'r')
-        memory = []
+        memory, memory_no_tuple = [], []
 
         self.num_goals = int(h5f['env_data']['num_goals'].value)
         self.num_actions = int(h5f['env_data']['num_actions'].value)
@@ -161,8 +161,10 @@ class ExpertHDF5(Expert):
             mask = np.ones((action.shape[0]))
             mask[-1] = 0
             memory.append(Trajectory(state, action, context, mask))
+            memory_no_tuple.append((state, action, context, mask))
 
         self.memory = memory
+        self.memory_no_tuple = memory_no_tuple
 
         self.obstacles = np.array(h5f['obstacles'])
         self.set_diff = np.array(h5f['set_diff'])
