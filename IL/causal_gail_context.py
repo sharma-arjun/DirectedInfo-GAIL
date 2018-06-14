@@ -1154,15 +1154,17 @@ class CausalGAILMLP(BaseGAIL):
                 self.train_step_count += 1
 
             if not train or (ep_idx > 0 and  ep_idx % args.log_interval == 0):
-                print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
-                      'True Avg {:.2f}   True Max R: {:.2f}   ' \
-                      'Expert (Avg): {:.2f}   ' \
-                      'Dict(Avg): {:.2f}    Dict(Max): {:.2f}'.format(
+                print('Episode [{}/{}] \t Gen reward: avg: {:.2f} max: {:.2f} \t' \
+                      'True Linear Reward: Avg {:.2f} std: {:.2f}  max: {:.2f} \t' \
+                      'Expert (Avg): {:.2f} \t ' \
+                      'True Dict Avg: {:.2f} std: {:.2f} Max: {:.2f}'.format(
                       ep_idx, args.num_epochs, np.mean(reward_batch),
                       np.max(reward_batch), np.mean(linear_traj_reward),
+                      np.std(linear_traj_reward),
                       np.max(linear_traj_reward),
                       np.mean(expert_true_reward_batch),
                       np.mean(map_traj_reward),
+                      np.std(map_traj_reward),
                       np.max(map_traj_reward)))
 
             with open(results_pkl_path, 'wb') as results_f:
