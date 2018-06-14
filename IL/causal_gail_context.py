@@ -286,7 +286,7 @@ class CausalGAILMLP(BaseGAIL):
 
     def get_policy_learning_rate(self, epoch):
         '''Update policy learning rate schedule.'''
-        if epoch <= self.args.discriminator_pretrain_epochs:
+        if epoch < self.args.discriminator_pretrain_epochs:
             return 0.0
         else:
             return self.args.gen_learning_rate

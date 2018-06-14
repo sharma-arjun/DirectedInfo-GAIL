@@ -113,7 +113,7 @@ class CausalGAILMLP(BaseGAIL):
                                            hidden_size=64)
 
         self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=args.learning_rate)
+                                     lr=args.gen_learning_rate)
         self.opt_reward = optim.Adam(self.reward_net.parameters(),
                                      lr=args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
@@ -188,6 +188,9 @@ class CausalGAILMLP(BaseGAIL):
             theta_dot = (x_feat[:, 2])[:, np.newaxis]
             self.env.env.state = np.concatenate(
                     (theta, theta_dot), axis=1).reshape(-1)
+            if self.args.use_time_in_state:
+                x_feat = np.concatenate(
+                        [x_feat, np.zeros((state_arr.shape[0], 1))], axis=1)
         else:
             raise ValueError('Incorrect env type: {}'.format(
                 self.args.env_type))
@@ -275,7 +278,7 @@ class CausalGAILMLP(BaseGAIL):
 
         # re-initialize optimizers
         self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=self.args.learning_rate)
+                                     lr=self.args.gen_learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
@@ -287,6 +290,13 @@ class CausalGAILMLP(BaseGAIL):
         self.obstacles = expert.obstacles
         assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
         self.set_diff = expert.set_diff
+
+    def get_policy_learning_rate(self, epoch):
+        '''Update policy learning rate schedule.'''
+        if epoch < self.args.discriminator_pretrain_epochs:
+            return 0.0
+        else:
+            return self.args.gen_learning_rate
 
     def get_discriminator_reward(self, x, a, c, next_c, goal_var=None):
         '''Get discriminator reward.'''
@@ -724,13 +734,11 @@ class CausalGAILMLP(BaseGAIL):
             ## Expand expert states ##
             #np.arange(200)/200
             expert_state_i = expert_batch.state[i]
-            '''
-            if self.args.env_type == 'gym':
+            if self.args.env_type == 'gym' and self.args.use_time_in_state:
                 time_arr = np.arange(expert_batch.state[i].shape[0]) \
                         / (expert_batch.state[i].shape[0])
                 expert_state_i = np.concatenate(
                         [expert_state_i, time_arr[:, None]], axis=1)
-            '''
             expanded_states = self.expand_states_numpy(expert_state_i,
                                                        self.history_size)
             list_of_expert_states.append(torch.Tensor(expanded_states))
@@ -828,6 +836,9 @@ class CausalGAILMLP(BaseGAIL):
 
             collect_sample_start_time = time.time()
 
+            # Update learning rate schedules (decay etc.)
+            self.opt_policy.lr = self.get_policy_learning_rate(ep_idx)
+
             while num_steps < gen_batch_size:
                 traj_expert = self.expert.sample(size=batch_size)
                 state_expert, action_expert, c_expert, _ = traj_expert
@@ -854,9 +865,12 @@ class CausalGAILMLP(BaseGAIL):
                 if args.use_random_starts:
                     ### if using random states ###
                     dummy_state = self.env.reset()
-                    x_feat = np.concatenate(
-                            (dummy_state, np.array([0.0])), axis=0)[np.newaxis, :]
-
+                    if self.args.use_time_in_state:
+                        x_feat = np.concatenate(
+                                (dummy_state, np.array([0.0])),
+                                axis=0)[np.newaxis, :]
+                    else:
+                        x_feat = dummy_state[np.newaxis, :]
                 else:
                     ### use start state from data ###
                     if self.env_type == 'mujoco':
@@ -873,6 +887,11 @@ class CausalGAILMLP(BaseGAIL):
                         theta_dot = (x_feat[:, 2])[:, np.newaxis]
                         self.env.env.state = np.concatenate(
                                 (theta, theta_dot), axis=1).reshape(-1)
+                        if self.args.use_time_in_state:
+                            x_feat = np.concatenate(
+                                    [x_feat, 
+                                     np.zeros((state_expert.shape[0], 1))],
+                                    axis=1)
                     else:
                         raise ValueError("Incorrect env type: {}".format(
                             self.env_type))
@@ -999,6 +1018,12 @@ class CausalGAILMLP(BaseGAIL):
                             action.reshape(-1))
                     env_reward_dict['true_reward'] += true_reward
                     #next_state_feat = running_state(next_state_feat)
+                    if self.args.use_time_in_state:
+                        next_state_feat = np.concatenate(
+                                (next_state_feat,
+                                    np.array([(t+1)/(expert_episode_len+1)])),
+                                axis=0)
+
                     x[:] = next_state_feat.copy()
 
                     if t == expert_episode_len - 1 or done:
@@ -1121,8 +1146,6 @@ class CausalGAILMLP(BaseGAIL):
                         gen_traj_curr_epoch['action'])
 
             collect_sample_end_time = time.time()
-            print("Collect sample time: {:.3f}".format(
-                collect_sample_end_time-collect_sample_start_time))
 
             if train:
                 gail_train_start_time = time.time()
@@ -1136,17 +1159,19 @@ class CausalGAILMLP(BaseGAIL):
                 self.update_params(gen_batch, expert_batch, ep_idx,
                                    args.optim_epochs, args.optim_batch_size)
                 gail_train_end_time = time.time()
-                print("Gail update time: {:.3f}".format(
-                    collect_sample_end_time-collect_sample_start_time))
 
                 self.train_step_count += 1
 
             if not train or (ep_idx > 0 and  ep_idx % args.log_interval == 0):
-                print('Episode [{}/{}]  Avg R: {:.2f}   Max R: {:.2f} \t' \
-                      'True Avg {:.2f}   True Max R: {:.2f}'.format(
-                      ep_idx, args.num_epochs, np.mean(reward_batch),
-                      np.max(reward_batch), np.mean(true_reward),
-                      np.max(true_reward)))
+                update_time =\
+                        (collect_sample_end_time - collect_sample_start_time) \
+                        + (gail_train_end_time - gail_train_start_time)
+                print('Episode [{}/{}] \t Time: {:.3f} \t Avg R: {:.2f}  '
+                      'Max R: {:.2f} \tTrue Avg {:.2f} \t True Max R: {:.2f}'
+                      .format(
+                      ep_idx, args.num_epochs, update_time,
+                      np.mean(reward_batch), np.max(reward_batch),
+                      np.mean(true_reward), np.max(true_reward)))
 
             with open(results_pkl_path, 'wb') as results_f:
                 pickle.dump((results), results_f, protocol=2)
@@ -1339,6 +1364,10 @@ if __name__ == '__main__':
                         help='gae (default: 3e-4)')
     parser.add_argument('--posterior_learning_rate', type=float, default=3e-4,
                         help='VAE posterior lr (default: 3e-4)')
+    parser.add_argument('--gen_learning_rate', type=float, default=3e-4,
+                        help='Generator lr (default: 3e-4)')
+    parser.add_argument('--discriminator_pretrain_epochs', type=int, default=0,
+                        help='Number of epochs to pre-train discriminator.')
     parser.add_argument('--batch_size', type=int, default=2048,
                         help='batch size (default: 2048)')
     parser.add_argument('--num_epochs', type=int, default=500,
@@ -1451,6 +1480,14 @@ if __name__ == '__main__':
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')
+
+    parser.add_argument('--use_time_in_state', dest='use_time_in_state',
+                        action='store_true',
+                        help='Use time to goal completion in state.')
+    parser.add_argument('--no-use_time_in_state', dest='use_time_in_state',
+                        action='store_false',
+                        help='Dont use time to goal completion in state.')
+    parser.set_defaults(use_time_in_state=False)
 
     args = parser.parse_args()
     torch.manual_seed(args.seed)
