@@ -140,14 +140,17 @@ class CausalGAILMLP(BaseGAIL):
         assert(env_name is not None)
         self.env = gym.make(env_name)
 
-    def select_action(self, x_var, c_var, goal_var):
+    def select_action(self, x_var, c_var, goal_var, train=True):
         """Select action using policy net."""
         if self.args.use_goal_in_policy:
             inp_var = torch.cat((x_var, goal_var), dim=1)
         else:
             inp_var = torch.cat((x_var, c_var), dim=1)
         action_mean, action_log_std, action_std = self.policy_net(inp_var)
-        action = torch.normal(action_mean, action_std)
+        if train:
+            action = torch.normal(action_mean, action_std)
+        else:
+            action = action_mean
         return action
 
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
@@ -272,13 +275,13 @@ class CausalGAILMLP(BaseGAIL):
 
     def load_weights_from_vae(self):
         # deepcopy from vae
-        self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
-        self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        # self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        # self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
-        self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=self.args.gen_learning_rate)
+        # self.opt_policy = optim.Adam(self.policy_net.parameters(),
+        #                             lr=self.args.gen_learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
@@ -643,6 +646,8 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
+            if self.vae_train.args.discrete_action:
+                ratio = torch.clamp(ratio, max=100.0)
             surr1 = ratio * advantages_var
             surr2 = torch.clamp(
                     ratio,
@@ -955,7 +960,8 @@ class CausalGAILMLP(BaseGAIL):
 
 
                     # Generator should predict the action using (x_t, c_t)
-                    action = self.select_action(x_var, c_var, goal_var)
+                    action = self.select_action(x_var, c_var, goal_var,
+                                                train=train)
                     action_numpy = action.data.cpu().numpy()
 
                     # ==== Save generated and true trajectories ====
@@ -1146,7 +1152,8 @@ class CausalGAILMLP(BaseGAIL):
                         gen_traj_curr_epoch['action'])
 
             collect_sample_end_time = time.time()
-
+            
+            gail_train_start_time, gail_train_end_time = 0, 0
             if train:
                 gail_train_start_time = time.time()
                 # ==== Update parameters ====
@@ -1166,12 +1173,14 @@ class CausalGAILMLP(BaseGAIL):
                 update_time =\
                         (collect_sample_end_time - collect_sample_start_time) \
                         + (gail_train_end_time - gail_train_start_time)
-                print('Episode [{}/{}] \t Time: {:.3f} \t Avg R: {:.2f}  '
-                      'Max R: {:.2f} \tTrue Avg {:.2f} \t True Max R: {:.2f}'
+                print('Episode [{}/{}] \t Time: {:.3f} \t Gen Reward Avg: {:.2f}  '
+                      'Max: {:.2f} \tTrue Reward => Avg {:.2f} \t std: {:.2f} '
+                      '\t max R: {:.2f}'
                       .format(
                       ep_idx, args.num_epochs, update_time,
                       np.mean(reward_batch), np.max(reward_batch),
-                      np.mean(true_reward), np.max(true_reward)))
+                      np.mean(true_reward), np.std(reward_batch),
+                      np.max(true_reward)))
 
             with open(results_pkl_path, 'wb') as results_f:
                 pickle.dump((results), results_f, protocol=2)
@@ -1291,9 +1300,9 @@ def main(args):
                         + 'pkl')
 
         causal_gail_mlp.train_gail(
-                1,
+                5,
                 results_pkl_path,
-                gen_batch_size=512,
+                gen_batch_size=2048,
                 train=False)
         print("Did save results to: {}".format(results_pkl_path))
         return
