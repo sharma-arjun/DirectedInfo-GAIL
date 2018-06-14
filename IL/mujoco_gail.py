@@ -646,8 +646,8 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
-            if self.vae_train.args.discrete_action:
-                ratio = torch.clamp(ratio, max=100.0)
+            # if not self.vae_train.args.discrete_action:
+            #    ratio = torch.clamp(ratio, max=100.0)
             surr1 = ratio * advantages_var
             surr2 = torch.clamp(
                     ratio,
@@ -657,7 +657,7 @@ class CausalGAILMLP(BaseGAIL):
             policy_surr.backward()
             # This clips the entire norm.
             # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 10)
-            # clip_grad_value(self.policy_net.parameters(), 50)
+            clip_grad_value(self.policy_net.parameters(), 50)
             self.opt_policy.step()
             # ==== END ====
 
@@ -1181,6 +1181,8 @@ class CausalGAILMLP(BaseGAIL):
                       np.mean(reward_batch), np.max(reward_batch),
                       np.mean(true_reward), np.std(reward_batch),
                       np.max(true_reward)))
+                print("Mean param: {}".format(
+                    self.policy_net.action_log_std.data.cpu().numpy()[0]))
 
             with open(results_pkl_path, 'wb') as results_f:
                 pickle.dump((results), results_f, protocol=2)
