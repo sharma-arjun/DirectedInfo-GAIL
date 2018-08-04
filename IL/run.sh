@@ -1,0 +1,21 @@
+# For discrete environment
+python -m pdb vae.py \
+  --use_rnn_goal 0 \
+  --num-epochs 500 \
+  --vae_state_size 2 \
+  --vae_action_size 4 \
+  --vae_history_size 1 \
+  --no-use_state_features \
+  --expert-path ./h5_trajs/room_trajs/traj_room_centre_len_50 \
+  --checkpoint_every_epoch 10 \
+  --results_dir ./results/vae/room_traj/discrete/centre_only_temp_1_0.1_context_4/ \
+  --log-interval 1 \
+  --use_separate_goal_policy 1 \
+  --use_goal_in_policy 0 \
+  --use_discrete_vae \
+  --vae_context_size 4 \
+  --vae_goal_size 4 \
+  --discrete_action \
+  --run_mode test \
+  --checkpoint_path ./results/vae/room_traj/discrete/centre_only_temp_1_0.1_context_4/checkpoint/cp_990.pth \
+  --env-type grid_room
