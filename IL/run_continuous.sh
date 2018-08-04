@@ -1,10 +1,10 @@
 python -m pdb mujoco_gail.py \
-  --expert_path ./h5_trajs/mujoco_trajs/walker_expert_traj_1/ \
-  --state_size 18 \
-  --action_size 6 \
+  --expert_path ./h5_trajs/mujoco_trajs/normal_hopper/rebuttal_hopper_100/ \
+  --state_size 11 \
+  --action_size 3 \
   --history_size 1 \
-  --context_size 1 \
-  --batch_size 9990 \
+  --context_size 4 \
+  --batch_size 1048 \
   --num_epochs 5000 \
   --max_ep_length 999 \
   --num_expert_trajs 10 \

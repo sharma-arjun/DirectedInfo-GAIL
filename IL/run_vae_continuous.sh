@@ -1,0 +1,23 @@
+python -m pdb vae.py \
+  --num-epochs 1000 \
+  --expert-path ../pendulum_long/ \
+  --use_rnn_goal 0 \
+  --use_goal_in_policy 0 \
+  --use_separate_goal_policy 1 \
+  --use_discrete_vae \
+  --vae_state_size 3 \
+  --vae_action_size 1 \
+  --vae_goal_size 1 \
+  --vae_history_size 1 \
+  --vae_context_size 4 \
+  --no-use_state_features \
+  --continuous_action \
+  --env-name Pendulum-v0 
+  --env-type gym \
+  --episode_len 200 \
+  --run_mode test \
+  --cuda \
+  --batch-size 64 \
+  --checkpoint_every_epoch 20 \
+  --checkpoint_path ./results/pendulum/discrete_vae/batch_64_context_4_no_time/checkpoint/cp_1000.pth \
+  --results_dir ./results/pendulum/discrete_vae/batch_64_context_4_no_time/results
