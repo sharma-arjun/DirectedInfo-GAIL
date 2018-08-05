@@ -538,8 +538,10 @@ def gen_room_trajs(grid_width, grid_height, room_size):
         rem_len, path_key = T, str(n)
         expert_data_dict[path_key] = {'state': [], 'action': [], 'goal': []}
 
+        start_state = State(sample_start(set_diff), obstacles)
+
         while rem_len > 0:
-            start_state = State(sample_start(set_diff), obstacles)
+
             apple_state = State(sample_start(
                 list(room_set-set(start_state.coordinates))), obstacles)
 
@@ -571,6 +573,7 @@ def gen_room_trajs(grid_width, grid_height, room_size):
                 goals.append(destination)
 
             rem_len = rem_len - path_len
+            start_state.coordinates = destination
         
         
         expert_data_dict[path_key]['state'] = states

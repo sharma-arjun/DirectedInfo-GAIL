@@ -177,8 +177,8 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 1e-3
-        self.temperature = max(0.5, self.init_temperature * math.exp(-r*epoch))
+        r = 55e-4
+        self.temperature = max(0.1, self.init_temperature * math.exp(-r*epoch))
 
     def encode(self, x, c):
         '''Return the log probability output for the encoder.'''
