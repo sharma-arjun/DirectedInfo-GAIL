@@ -841,8 +841,8 @@ class CausalGAILMLP(BaseGAIL):
                 goal=goal[perm],
                 expert_goal=expert_goals[perm_exp])
 
-    def train_gail(self, num_epochs, results_pkl_path,
-                   gen_batch_size=1, train=True):
+    def train_gail(self, num_epochs, results_pkl_path, gen_batch_size=1,
+                   train=True):
         '''Train GAIL.'''
         args, dtype = self.args, self.dtype
         results = {'average_reward': [], 'episode_reward': [],
@@ -1221,8 +1221,12 @@ class CausalGAILMLP(BaseGAIL):
                       np.mean(reward_batch), np.max(reward_batch),
                       np.mean(true_reward), np.std(reward_batch),
                       np.max(true_reward)))
-                print("Mean param: {}".format(
-                    self.policy_net.action_log_std.data.cpu().numpy()[0]))
+                      print("Gen batch time: {:.3f}, GAIL update time: {:.3f}: Mean param: {}".format(
+                    collect_sample_end_time - collect_sample_start_time,
+                    gail_train_end_time - gail_train_start_time),
+                    np.array_str(
+                        self.policy_net.action_log_std.data.cpu().numpy()[0],
+                        precision=4, suppress_small=True))
 
             with open(results_pkl_path, 'wb') as results_f:
                 pickle.dump((results), results_f, protocol=2)
@@ -1342,7 +1346,7 @@ def main(args):
                         + 'pkl')
 
         causal_gail_mlp.train_gail(
-                5,
+                3,
                 results_pkl_path,
                 gen_batch_size=2048,
                 train=False)

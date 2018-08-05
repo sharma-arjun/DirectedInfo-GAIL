@@ -47,8 +47,9 @@ class Policy(nn.Module):
             action_mean = F.sigmoid(self.action_mean(x))
         elif self.output_activation == 'tanh':
             action_mean = F.tanh(self.action_mean(x))
+
         action_log_std = self.action_log_std.expand_as(action_mean)
-        action_log_std = torch.clamp(action_log_std, 0.0001, 10)
+        action_log_std = torch.clamp(action_log_std, -5, 5)
 
         action_std = torch.exp(action_log_std)
 
