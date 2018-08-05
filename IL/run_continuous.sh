@@ -9,7 +9,7 @@ python -m pdb mujoco_gail.py \
   --max_ep_length 1000 \
   --num_expert_trajs 4 \
   --vae_checkpoint_path ./results/hopper/discrete_vae/batch_64_context_4_no_time/results/checkpoint/cp_640.pth \
-  --results_dir ./results/hopper/gail/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_0.1_time_Aug_5_01_03_AM \
+  --results_dir ./results/hopper/gail/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_0.0001_time_Aug_5_01_30_AM \
   --no-use_state_features \
   --no-use_goal_in_policy \
   --use_goal_in_value \
@@ -17,7 +17,7 @@ python -m pdb mujoco_gail.py \
   --env-type mujoco \
   --env-name Hopper-v2 \
   --posterior_learning_rate 0.0 \
-  --lambda_posterior 0.1 \
+  --lambda_posterior 0.0001 \
   --use_value_net \
   --optim_batch_size 256 \
   # --cuda \
