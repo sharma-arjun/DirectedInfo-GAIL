@@ -1221,7 +1221,7 @@ class CausalGAILMLP(BaseGAIL):
                       np.mean(reward_batch), np.max(reward_batch),
                       np.mean(true_reward), np.std(reward_batch),
                       np.max(true_reward)))
-                      print("Gen batch time: {:.3f}, GAIL update time: {:.3f}: Mean param: {}".format(
+                print("Gen batch time: {:.3f}, GAIL update time: {:.3f}: Mean param: {}".format(
                     collect_sample_end_time - collect_sample_start_time,
                     gail_train_end_time - gail_train_start_time),
                     np.array_str(

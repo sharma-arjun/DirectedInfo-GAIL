@@ -785,7 +785,8 @@ class VAETrain(object):
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
-                x_feat = ep_state[:, 0, :]
+                #x_feat = ep_state[:, 0, :]
+                x_feat = self.env.reset()[None,:]
                 dummy_state = self.env.reset()
                 if 'Hopper' in self.env_name:
                     self.env.env.set_state(np.concatenate(
@@ -1731,7 +1732,7 @@ def main(args):
         test_goal_policy_only = True if args.run_mode == 'test_goal_pred' else \
                 False
         vae_train.test_models(expert, results_pkl_path=results_pkl_path,
-                              num_test_samples=300,
+                              num_test_samples=30,
                               test_goal_policy_only=test_goal_policy_only)
     elif args.run_mode == 'train_goal_pred':
         assert args.use_separate_goal_policy == 1, \
