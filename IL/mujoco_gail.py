@@ -203,8 +203,15 @@ class CausalGAILMLP(BaseGAIL):
         if self.env_type == 'mujoco':
             x_feat = state_arr[:, 0, :]
             dummy_state = self.env.reset()
-            self.env.env.set_state(np.concatenate(
-                (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            if 'Hopper' in self.args.env_name:
+                self.env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
+            elif 'Walker' in self.args.env_name:
+                self.env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            else:
+                raise ValueError("Incorrect env name for mujoco")
+
             dummy_state = x_feat
         elif self.env_type == 'gym':
             x_feat = state_arr[:, 0, :]
@@ -803,7 +810,10 @@ class CausalGAILMLP(BaseGAIL):
 
         # Remove extra 1 array shape from actions, since actions were added as
         # 1-hot vector of shape (1, A).
-        actions = actions.view(-1, 1)
+        if len(actions.shape) == 1:
+            actions = actions.view(-1, 1)
+        elif len(actions.shape) == 3:
+            actions = actions.view(actions.size(0), -1)
 
         for _ in range(optim_epochs):
             perm = np.random.permutation(np.arange(actions.size(0)))
@@ -845,7 +855,11 @@ class CausalGAILMLP(BaseGAIL):
 
         #running_state = ZFilter((self.vae_train.args.vae_state_size), clip=5)
         if train:
+            print("Will get c for all expert trajectories.")
+            t1 = time.time()
             self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
+            print("Time: {:.3f} Did get c for all expert trajectories. ".format(
+                time.time() - t1))
 
         for ep_idx in range(num_epochs):
             memory = Memory()
@@ -900,9 +914,14 @@ class CausalGAILMLP(BaseGAIL):
                     if self.env_type == 'mujoco':
                         x_feat = state_expert[:, 0, :]
                         dummy_state = self.env.reset()
-                        self.env.env.set_state(np.concatenate(
-                            (np.array([0.0]), x_feat[0, :8]), axis=0),
-                                x_feat[0, 8:17])
+                        if 'Hopper' in self.args.env_name:
+                            self.env.env.set_state(np.concatenate(
+                                (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
+                        elif 'Walker' in self.args.env_name:
+                            self.env.env.set_state(np.concatenate(
+                                (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                        else:
+                            raise ValueError("Incorrect env name for mujoco")
                         dummy_state = x_feat
                     elif self.env_type == 'gym':
                         x_feat = state_expert[:, 0, :]
@@ -1176,11 +1195,12 @@ class CausalGAILMLP(BaseGAIL):
             if train:
                 gail_train_start_time = time.time()
                 # ==== Update parameters ====
-                gen_batch, gen_batch_indices = memory.sample(return_indices=True)
+                gen_batch = memory.sample()
 
                 # We do not get the context variable from expert trajectories.
                 # Hence we need to fill it in later.
-                expert_batch = self.expert.sample(size=args.num_expert_trajs)
+                expert_batch, expert_batch_indices = self.expert.sample(
+                        size=args.num_expert_trajs, return_indices=True)
 
                 self.update_params(gen_batch, expert_batch, expert_batch_indices,
                                    ep_idx, args.optim_epochs,
