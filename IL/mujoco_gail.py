@@ -153,6 +153,28 @@ class CausalGAILMLP(BaseGAIL):
             action = action_mean
         return action
 
+    def get_c_for_all_expert_trajs(self, expert):
+        memory = expert.memory
+        expert_c_list = []
+        for i in range(len(memory)):
+            curr_memory = memory[i]
+            expert_c, _ = self.get_c_for_traj(
+                    curr_memory.state[np.newaxis, :],
+                    curr_memory.action[np.newaxis, :],
+                    curr_memory.c[np.newaxis, :])
+            # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
+            expert_c = expert_c.squeeze(0)[1:, :]
+            expert_c_list.append(expert_c)
+        return expert_c_list
+
+    def get_precomputed_c_for_samples(self, size=5):
+        ind = np.random.randint(len(self.cached_expert_c_list), size=size)
+        batch_list = []
+        for i in ind:
+            batch_list.append(self.cached_expert_c_list[i])
+
+        return batch_list
+
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
         '''Get c[1:T] for given trajectory.'''
         batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
@@ -680,8 +702,8 @@ class CausalGAILMLP(BaseGAIL):
 
             self.gail_step_count += 1
 
-    def update_params(self, gen_batch, expert_batch, episode_idx,
-                      optim_epochs, optim_batch_size):
+    def update_params(self, gen_batch, expert_batch, expert_batch_indices,
+                      episode_idx, optim_epochs, optim_batch_size):
         '''Update params for Policy (G), Reward (D) and Posterior (q) networks.
         '''
         args, dtype = self.args, self.dtype
@@ -714,14 +736,9 @@ class CausalGAILMLP(BaseGAIL):
         for i in range(len(expert_batch.state)):
             # c sampled from expert trajectories is incorrect since we don't
             # have "true c". Hence, we use the trained VAE to get the "true c".
-            expert_c, _ = self.get_c_for_traj(
-                    expert_batch.state[i][np.newaxis, :],
-                    expert_batch.action[i][np.newaxis, :],
-                    expert_batch.c[i][np.newaxis, :])
-
-            # Remove b
-            # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
-            expert_c = expert_c.squeeze(0)[1:, :]
+            assert self.cached_expert_c_list is not None
+            expert_batch_index = expert_batch_indices[i]
+            expert_c = self.cached_expert_c_list[expert_batch_index]
 
             expert_goal = None
             if self.vae_train.use_rnn_goal_predictor:
@@ -827,6 +844,8 @@ class CausalGAILMLP(BaseGAIL):
         self.convert_models_to_type(dtype)
 
         #running_state = ZFilter((self.vae_train.args.vae_state_size), clip=5)
+        if train:
+            self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
 
         for ep_idx in range(num_epochs):
             memory = Memory()
@@ -1157,14 +1176,15 @@ class CausalGAILMLP(BaseGAIL):
             if train:
                 gail_train_start_time = time.time()
                 # ==== Update parameters ====
-                gen_batch = memory.sample()
+                gen_batch, gen_batch_indices = memory.sample(return_indices=True)
 
                 # We do not get the context variable from expert trajectories.
                 # Hence we need to fill it in later.
                 expert_batch = self.expert.sample(size=args.num_expert_trajs)
 
-                self.update_params(gen_batch, expert_batch, ep_idx,
-                                   args.optim_epochs, args.optim_batch_size)
+                self.update_params(gen_batch, expert_batch, expert_batch_indices,
+                                   ep_idx, args.optim_epochs,
+                                   args.optim_batch_size)
                 gail_train_end_time = time.time()
 
                 self.train_step_count += 1

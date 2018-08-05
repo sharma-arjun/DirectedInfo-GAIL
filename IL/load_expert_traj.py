@@ -170,13 +170,16 @@ class ExpertHDF5(Expert):
         self.set_diff = np.array(h5f['set_diff'])
         h5f.close()
 
-    def sample(self, size=5):
+    def sample(self, size=5, return_indices=False):
         ind = np.random.randint(len(self.memory), size=size)
         batch_list = []
         for i in ind:
             batch_list.append(self.memory[i])
 
-        return Trajectory(*zip(*batch_list))
+        if return_indices:
+            return Trajectory(*zip(*batch_list)), ind
+        else:
+            return Trajectory(*zip(*batch_list))
 
     def sample_as_list(self, size=5):
         ind = np.random.randint(len(self.memory), size=size)

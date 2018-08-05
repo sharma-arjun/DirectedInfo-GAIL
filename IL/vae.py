@@ -269,6 +269,7 @@ class VAETrain(object):
         self.dtype = dtype
         self.use_rnn_goal_predictor = use_rnn_goal_predictor
         self.env_type = env_type
+        self.env_name = env_name
 
 
         self.train_step_count = 0
@@ -786,8 +787,14 @@ class VAETrain(object):
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[:, 0, :]
                 dummy_state = self.env.reset()
-                self.env.env.set_state(np.concatenate(
-                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                if 'Hopper' in self.env_name:
+                    self.env.env.set_state(np.concatenate(
+                        (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
+                elif 'Walker' in self.env_name:
+                    self.env.env.set_state(np.concatenate(
+                        (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                else:
+                    raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
             elif self.env_type == 'gym':
                 x_feat = ep_state[:, 0, :]
@@ -1090,8 +1097,14 @@ class VAETrain(object):
             elif self.env_type == 'mujoco':
                 x_feat = ep_state[:, 0, :]
                 self.env.reset()
-                self.env.env.set_state(np.concatenate(
-                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                if 'Hopper' in self.env_name:
+                    self.env.env.set_state(np.concatenate(
+                        (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
+                elif 'Walker' in self.env_name:
+                    self.env.env.set_state(np.concatenate(
+                        (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                else:
+                    raise ValueError("Incorrect env name for mujoco")
             elif self.env_type == 'gym':
                 x_feat = ep_state[:, 0, :]
                 dummy_state = self.env.reset()
