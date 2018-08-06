@@ -310,7 +310,7 @@ class CausalGAILMLP(BaseGAIL):
 
         # re-initialize optimizers
         # self.opt_policy = optim.Adam(self.policy_net.parameters(),
-        #                             lr=self.args.gen_learning_rate)
+        #                              lr=self.args.gen_learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
@@ -675,8 +675,6 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
-            # if not self.vae_train.args.discrete_action:
-            #    ratio = torch.clamp(ratio, max=100.0)
             surr1 = ratio * advantages_var
             surr2 = torch.clamp(
                     ratio,
@@ -761,7 +759,6 @@ class CausalGAILMLP(BaseGAIL):
             #        raise ValueError("Not implemented.")
 
             ## Expand expert states ##
-            #np.arange(200)/200
             expert_state_i = expert_batch.state[i]
             if self.args.env_type == 'gym' and self.args.use_time_in_state:
                 time_arr = np.arange(expert_batch.state[i].shape[0]) \

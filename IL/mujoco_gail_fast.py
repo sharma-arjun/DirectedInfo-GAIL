@@ -90,14 +90,18 @@ def get_context_at_state(vae_model, x, c, use_discrete_vae=True):
         mu, logvar = vae_model.encode(x, c)
         return vae_model.reparameterize(mu, logvar)
 
-def select_action(policy_net, x_var, c_var, goal_var, use_goal_in_policy=False):
+def select_action(policy_net, x_var, c_var, goal_var, use_goal_in_policy=False,
+                  train=False):
     # Select action using policy net.
     if use_goal_in_policy:
         inp_var = torch.cat((x_var, goal_var), dim=1)
     else:
         inp_var = torch.cat((x_var, c_var), dim=1)
     action_mean, action_log_std, action_std = policy_net(inp_var)
-    action = torch.normal(action_mean, action_std)
+    if train:
+        action = torch.normal(action_mean, action_std)
+    else:
+        action = action_mean
     return action
 
 def get_discriminator_reward(reward_net, x, a, c, next_c,
@@ -166,7 +170,8 @@ def run_agent_worker(run_args,
                      num_goals,
                      use_rnn_goal_predictor,
                      use_discrete_vae,
-                     dtype):
+                     dtype,
+                     train):
     '''Collect experience for agent.
     env: Environment to collect samples from.
     batch_size: Number of example instances to be collected. Int.
@@ -177,9 +182,6 @@ def run_agent_worker(run_args,
     '''
     memory_list, log_list = [], []
     num_steps, batch_size = 0, 1
-    memory = []
-
-    print("WTF")
 
     while num_steps < gen_batch_size:
         # Sample trajectory expert.sample()
@@ -212,8 +214,14 @@ def run_agent_worker(run_args,
             if run_args.env_type == 'mujoco':
                 x_feat = state_expert[:, 0, :]
                 dummy_state = env.reset()
-                env.env.set_state(np.concatenate(
-                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                if 'Hopper' in run_args.env_name:
+                    env.env.set_state(np.concatenate(
+                                (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
+                elif 'Walker' in run_args.env_name:
+                    env.env.set_state(np.concatenate(
+                                (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                else:
+                    raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
             elif run_args.env_type == 'gym':
                 x_feat = state_expert[:, 0, :]
@@ -242,6 +250,7 @@ def run_agent_worker(run_args,
         env_reward_dict = {'true_reward': 0.0}
         disc_reward, posterior_reward = 0.0, 0.0
 
+        memory = Memory()
         for t in range(expert_episode_len):
             # First predict next ct
             ct = pred_c_tensor[:, t, :]
@@ -280,7 +289,8 @@ def run_agent_worker(run_args,
 
             # Generator should predict the action using (x_t, c_t)
             action = select_action(policy_net, x_var, next_c_var, goal_var,
-                                   use_goal_in_policy=run_args.use_goal_in_policy)
+                                   use_goal_in_policy=run_args.use_goal_in_policy,  
+                                   train=train)
             action_numpy = action.data.cpu().numpy()
             action = action_numpy
 
@@ -303,7 +313,7 @@ def run_agent_worker(run_args,
                                 use_discrete_vae=use_discrete_vae,
                                 use_reparameterize=args.use_reparameterize,
                                 goal_var=goal_var)
-                posterior_reward += posterior_reward_t
+            posterior_reward += posterior_reward_t
 
             # Update Rewards
             ep_reward += (disc_reward_t + posterior_reward_t)
@@ -311,16 +321,17 @@ def run_agent_worker(run_args,
             next_state_feat, true_reward, done, _ = env.step(
                     action.reshape(-1))
             env_reward_dict['true_reward'] += true_reward
-            next_state_feat = np.concatenate(
-                    (next_state_feat,
-                    np.array([(t+1)/(expert_episode_len+1)])), axis=0)
+            if run_args.use_time_in_state:
+                next_state_feat = np.concatenate(
+                        (next_state_feat,
+                        np.array([(t+1)/(expert_episode_len+1)])), axis=0)
             # next_state_feat = running_state(next_state_feat)
             x[:] = next_state_feat.copy()
 
             mask = 0 if t == expert_episode_len - 1 or done else 1
 
             # Push to memory
-            memory.append([
+            memory.push(
                     curr_state_arr.copy().reshape(-1),
                     action,
                     mask,
@@ -329,7 +340,7 @@ def run_agent_worker(run_args,
                     ct.cpu().numpy().reshape(-1),
                     next_ct.data.cpu().numpy().reshape(-1),
                     goal_var.data.cpu().numpy().copy().reshape(-1)
-                    ])
+                    )
 
             num_steps += 1
 
@@ -342,6 +353,7 @@ def run_agent_worker(run_args,
             # Update current state
             curr_state_arr = np.array(next_state_feat, dtype=np.float32)
 
+        memory_list.append(memory)
         log_list.append({
             'total_disc_reward': ep_reward,
             'disc_reward': disc_reward,
@@ -350,7 +362,7 @@ def run_agent_worker(run_args,
             })
 
     return {
-        'memory': memory,
+        'memory_list': memory_list,
         'log_list': log_list,
     }
 
@@ -427,7 +439,7 @@ class CausalGAILMLP(BaseGAIL):
                                            hidden_size=64)
 
         self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=args.learning_rate)
+                                     lr=args.gen_learning_rate)
         self.opt_reward = optim.Adam(self.reward_net.parameters(),
                                      lr=args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
@@ -462,17 +474,43 @@ class CausalGAILMLP(BaseGAIL):
             self.envs.append(env)
         self.env_pool = Pool(num_threads)
 
-    def select_action(self, x_var, c_var, goal_var):
+    def select_action(self, x_var, c_var, goal_var, train=True):
         """Select action using policy net."""
         if self.args.use_goal_in_policy:
             inp_var = torch.cat((x_var, goal_var), dim=1)
         else:
             inp_var = torch.cat((x_var, c_var), dim=1)
         action_mean, action_log_std, action_std = self.policy_net(inp_var)
-        action = torch.normal(action_mean, action_std)
+        if train:
+            action = torch.normal(action_mean, action_std)
+        else:
+            action = action_mean
         return action
 
+    def get_c_for_all_expert_trajs(self, expert):
+        memory = expert.memory
+        expert_c_list = []
+        for i in range(len(memory)):
+            curr_memory = memory[i]
+            expert_c, _ = self.get_c_for_traj(
+                    curr_memory.state[np.newaxis, :],
+                    curr_memory.action[np.newaxis, :],
+                    curr_memory.c[np.newaxis, :])
+            # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
+            expert_c = expert_c.squeeze(0)[1:, :]
+            expert_c_list.append(expert_c)
+        return expert_c_list
+
+    def get_precomputed_c_for_samples(self, size=5):
+        ind = np.random.randint(len(self.cached_expert_c_list), size=size)
+        batch_list = []
+        for i in ind:
+            batch_list.append(self.cached_expert_c_list[i])
+
+        return batch_list
+    
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
+        '''Get c[1:T] for given trajectory.'''
         batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
         history_size = self.history_size
         c_arr = np.array(c_arr, dtype=np.int32)
@@ -499,8 +537,15 @@ class CausalGAILMLP(BaseGAIL):
         if self.env_type == 'mujoco':
             x_feat = state_arr[:, 0, :]
             dummy_state = self.env.reset()
-            self.env.env.set_state(np.concatenate(
-                (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            if 'Hopper' in self.args.env_name:
+                self.env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
+            elif 'Walker' in self.args.env_name:
+                self.env.env.set_state(np.concatenate(
+                    (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            else:
+                raise ValueError("Incorrect env name for mujoco")
+            
             dummy_state = x_feat
         elif self.env_type == 'gym':
             x_feat = state_arr[:, 0, :]
@@ -509,8 +554,9 @@ class CausalGAILMLP(BaseGAIL):
             theta_dot = (x_feat[:, 2])[:, np.newaxis]
             self.env.env.state = np.concatenate(
                     (theta, theta_dot), axis=1).reshape(-1)
-            x_feat = np.concatenate(
-                    [x_feat, np.zeros((state_arr.shape[0], 1))], axis=1)
+            if self.args.use_time_in_state:
+                x_feat = np.concatenate(
+                        [x_feat, np.zeros((state_arr.shape[0], 1))], axis=1)
         else:
             raise ValueError('Incorrect env type: {}'.format(
                 self.args.env_type))
@@ -592,16 +638,17 @@ class CausalGAILMLP(BaseGAIL):
 
     def load_weights_from_vae(self):
         # deepcopy from vae
-        self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
-        self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        # self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        # self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
-        self.opt_policy = optim.Adam(self.policy_net.parameters(),
-                                     lr=self.args.learning_rate)
+        # self.opt_policy = optim.Adam(self.policy_net.parameters(),
+        #                              lr=self.args.gen_learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
+        
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
         self.expert = expert
@@ -609,6 +656,13 @@ class CausalGAILMLP(BaseGAIL):
         self.obstacles = expert.obstacles
         assert expert.set_diff is not None, "set_diff in h5 file cannot be None"
         self.set_diff = expert.set_diff
+
+    def get_policy_learning_rate(self, epoch):
+        '''Update policy learning rate schedule.'''
+        if epoch < self.args.discriminator_pretrain_epochs:
+            return 0.0
+        else:
+            return self.args.gen_learning_rate
 
     def get_discriminator_reward(self, x, a, c, next_c, goal_var=None):
         # Get discriminator reward.
@@ -687,6 +741,11 @@ class CausalGAILMLP(BaseGAIL):
                                 optim_iters,
                                 goal=None,
                                 expert_goal=None):
+        '''Update parameters for one batch of data.
+
+        Update the policy network, discriminator (reward) network and the
+        posterior network here.
+        '''
         args, dtype = self.args, self.dtype
         curr_id, curr_id_exp = 0, 0
         for optim_idx in range(optim_iters):
@@ -845,7 +904,7 @@ class CausalGAILMLP(BaseGAIL):
             policy_surr.backward()
             # This clips the entire norm.
             # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 10)
-            # clip_grad_value(self.policy_net.parameters(), 50)
+            clip_grad_value(self.policy_net.parameters(), 50)
             self.opt_policy.step()
             # ==== END ====
 
@@ -868,9 +927,10 @@ class CausalGAILMLP(BaseGAIL):
 
             self.gail_step_count += 1
 
-    def update_params(self, gen_batch, expert_batch, episode_idx,
-                      optim_epochs, optim_batch_size):
-        # Update params for Policy (G), Reward (D) and Posterior (q) networks.
+    def update_params(self, gen_batch, expert_batch, expert_batch_indices,
+                      episode_idx, optim_epochs, optim_batch_size):
+        '''Update params for Policy (G), Reward (D) and Posterior (q) networks.
+        '''
         args, dtype = self.args, self.dtype
 
         # generated trajectories
@@ -901,14 +961,9 @@ class CausalGAILMLP(BaseGAIL):
         for i in range(len(expert_batch.state)):
             # c sampled from expert trajectories is incorrect since we don't
             # have "true c". Hence, we use the trained VAE to get the "true c".
-            expert_c, _ = self.get_c_for_traj(
-                    expert_batch.state[i][np.newaxis, :],
-                    expert_batch.action[i][np.newaxis, :],
-                    expert_batch.c[i][np.newaxis, :])
-
-            # Remove b
-            # expert_c[0, :] is c_{-1} which does not map to s_0. Hence drop it.
-            expert_c = expert_c.squeeze(0)[1:, :]
+            assert self.cached_expert_c_list is not None
+            expert_batch_index = expert_batch_indices[i]
+            expert_c = self.cached_expert_c_list[expert_batch_index]
 
             expert_goal = None
             if self.vae_train.use_rnn_goal_predictor:
@@ -920,7 +975,7 @@ class CausalGAILMLP(BaseGAIL):
 
             ## Expand expert states ##
             expert_state_i = expert_batch.state[i]
-            if self.args.env_type == 'gym':
+            if self.args.env_type == 'gym' and self.args.use_time_in_state:
                 time_arr = np.arange(expert_batch.state[i].shape[0]) \
                         / (expert_batch.state[i].shape[0])
                 expert_state_i = np.concatenate(
@@ -967,7 +1022,10 @@ class CausalGAILMLP(BaseGAIL):
 
         # Remove extra 1 array shape from actions, since actions were added as
         # 1-hot vector of shape (1, A).
-        actions = actions.view(-1, 1)
+        if len(actions.shape) == 1:
+            actions = actions.view(-1, 1)
+        elif len(actions.shape) == 3:
+            actions = actions.view(actions.size(0), -1)
 
         for _ in range(optim_epochs):
             perm = np.random.permutation(np.arange(actions.size(0)))
@@ -995,12 +1053,7 @@ class CausalGAILMLP(BaseGAIL):
                 goal=goal[perm],
                 expert_goal=expert_goals[perm_exp])
 
-    def test_parallel(self, name):
-        print("hello {}".format(name))
-        time.sleep(3.0)
-        print("fuck {}".format(name))
-
-    def collect_samples(self, batch_size, max_episode_len):
+    def collect_samples(self, batch_size, max_episode_len, train=True):
         run_agent_worker_args = {}
         dtype = self.dtype
 
@@ -1019,12 +1072,12 @@ class CausalGAILMLP(BaseGAIL):
                                         self.vae_train.use_rnn_goal_predictor,
                                         self.vae_train.args.use_discrete_vae,
                                         self.dtype,
+                                        train,
                                         )
             args_list.append(run_agent_worker_args[i])
 
         start_time = time.time()
         # Get the results by making a BLOCKING call.
-        pdb.set_trace()
         results = self.env_pool.map(parallel_run_agent_worker, args_list)
         end_time = time.time()
         print("END: Blocking call, time: {:.3f}".format(end_time-start_time))
@@ -1052,9 +1105,14 @@ class CausalGAILMLP(BaseGAIL):
         self.convert_models_to_type(dtype)
 
         #running_state = ZFilter((self.vae_train.args.vae_state_size), clip=5)
+        if train:
+            print("Will get c for all expert trajectories.")
+            t1 = time.time()
+            self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
+            print("Time: {:.3f} Did get c for all expert trajectories. ".format(
+                time.time() - t1))
 
         for ep_idx in range(num_epochs):
-            update_start_time = time.time()
             num_steps, batch_size = 0, 1
             reward_batch, expert_true_reward_batch = [], []
             true_traj_curr_epoch = {'state':[], 'action': []}
@@ -1063,12 +1121,16 @@ class CausalGAILMLP(BaseGAIL):
             #                         'map_traj_reward': []}
             env_reward_batch_dict = {'true_reward': []}
 
-            gen_batch, log_list = self.collect_samples(
-                    gen_batch_size, self.args.max_ep_length + 1)
+            collect_sample_start_time = time.time()
+            # Update learning rate schedules (decay etc.)
+            self.opt_policy.lr = self.get_policy_learning_rate(ep_idx)
+
+            gen_batch, _, log_list = self.collect_samples(
+                    gen_batch_size, self.args.max_ep_length + 1, train=train)
 
             # Add to tensorboard if training.
-            true_reward = np.sum([log['true_reward'] for log in log_list]) 
-            gen_reward = np.sum([log['total_disc_reward'] for log in log_list])
+            true_reward =[log['true_reward'] for log in log_list] 
+            gen_reward = [log['total_disc_reward'] for log in log_list]
             if train:
                 add_scalars_to_summary_writer(
                         self.logger.summary_writer,
@@ -1087,26 +1149,39 @@ class CausalGAILMLP(BaseGAIL):
                         },
                         self.train_step_count)
 
+            collect_sample_end_time = time.time()
+            
+            gail_train_start_time, gail_train_end_time = 0, 0
             if train:
+                gail_train_start_time = time.time()
                 # We do not get the context variable from expert trajectories.
                 # Hence we need to fill it in later.
-                expert_batch = self.expert.sample(size=args.num_expert_trajs)
+                expert_batch, expert_batch_indices = self.expert.sample(
+                        size=args.num_expert_trajs, return_indices=True)
 
-                self.update_params(gen_batch, expert_batch, ep_idx,
-                                   args.optim_epochs, args.optim_batch_size)
+                self.update_params(gen_batch, expert_batch, expert_batch_indices,
+                                   ep_idx, args.optim_epochs,
+                                   args.optim_batch_size)
+                gail_train_end_time = time.time()
 
                 self.train_step_count += 1
 
-            update_end_time = time.time()
-
             if not train or (ep_idx > 0 and  ep_idx % args.log_interval == 0):
-                print('Episode [{}/{}]   Time: {:.3f}   Avg R: {:.2f} Max R: {:.2f} \t' \
-                      'True Avg {:.2f}   True Max R: {:.2f}'.format(
+                update_time =\
+                        (collect_sample_end_time - collect_sample_start_time) \
+                        + (gail_train_end_time - gail_train_start_time)
+                print('Episode [{}/{}]   Time: {:.3f} \t Gen Reward: Avg R: {:.2f} Max R: {:.2f} \t' \
+                        '\tTrue Reawrd => Avg {:.2f} \t std: {:.2f} \t Max: {:.2f}'.format(
                       ep_idx, args.num_epochs,
-                      update_end_time - update_start_time,
-                      np.mean(gen_reward),
-                      np.max(gen_reward), np.mean(true_reward),
-                      np.max(true_reward)))
+                      update_time,
+                      np.mean(gen_reward), np.max(gen_reward), np.mean(true_reward),
+                      np.std(true_reward), np.max(true_reward)))
+                print("Gen batch time: {:.3f}, GAIL update time: {:.3f}: Mean param: {}".format(
+                    collect_sample_end_time - collect_sample_start_time,
+                    gail_train_end_time - gail_train_start_time,
+                    np.array_str(
+                        self.policy_net.action_log_std.data.cpu().numpy()[0],
+                        precision=4, suppress_small=True)))
 
             with open(results_pkl_path, 'wb') as results_f:
                 pickle.dump((results), results_f, protocol=2)
@@ -1119,9 +1194,8 @@ class CausalGAILMLP(BaseGAIL):
                 print("Did save checkpoint: {}".format(checkpoint_filepath))
                 if self.dtype != torch.FloatTensor:
                     self.convert_models_to_type(self.dtype)
-'''
 
-'''
+
 def check_args(saved_args, new_args):
     assert saved_args.use_state_features == new_args.use_state_features, \
             'Args do not match - use_state_features'
@@ -1266,11 +1340,6 @@ def main(args):
             )
 
 if __name__ == '__main__':
-    '''
-    c = C()
-    c.run()
-    '''
-
     parser = argparse.ArgumentParser(description='Causal GAIL using MLP.')
     parser.add_argument('--expert_path', default="L_expert_trajectories/",
                         help='path to the expert trajectory files')
@@ -1304,6 +1373,10 @@ if __name__ == '__main__':
                         help='gae (default: 3e-4)')
     parser.add_argument('--posterior_learning_rate', type=float, default=3e-4,
                         help='VAE posterior lr (default: 3e-4)')
+    parser.add_argument('--gen_learning_rate', type=float, default=3e-4,
+                        help='Generator lr (default: 3e-4)')
+    parser.add_argument('--discriminator_pretrain_epochs', type=int, default=0,
+                        help='Number of epochs to pre-train discriminator.')
     parser.add_argument('--batch_size', type=int, default=2048,
                         help='batch size (default: 2048)')
     parser.add_argument('--num_epochs', type=int, default=500,
@@ -1419,6 +1492,13 @@ if __name__ == '__main__':
     parser.add_argument('--num_threads', type=int, default=1,
                         help='Number of threads to collect train samples.')
 
+    parser.add_argument('--use_time_in_state', dest='use_time_in_state',
+                        action='store_true',
+                        help='Use time to goal completion in state.')
+    parser.add_argument('--no-use_time_in_state', dest='use_time_in_state',
+                        action='store_false',
+                        help='Dont use time to goal completion in state.')
+    parser.set_defaults(use_time_in_state=False)
 
     args = parser.parse_args()
     torch.manual_seed(args.seed)
