@@ -175,7 +175,9 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 33e-4
+        # r = 33e-4
+        # r = 0.023 # Will become 0.1 after 100 epochs if initial temp is 1.0
+        r = 0.011 # Will become 0.1 after 200 epochs if initial temp is 1.0
         self.temperature = max(0.1, self.init_temperature * math.exp(-r*epoch))
 
 
