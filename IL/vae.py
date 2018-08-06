@@ -12,12 +12,10 @@ from torch import nn, optim
 from torch.autograd import Variable
 from torch.nn import functional as F
 
+import grid_world as gw
+import circle_world as cw
 from load_expert_traj import Expert, ExpertHDF5
 from load_expert_traj import recursively_save_dict_contents_to_group
-from grid_world import State, Action, TransitionFunction
-from grid_world import StateVector, ActionVector
-from grid_world import RewardFunction, RewardFunction_SR2
-from grid_world import create_obstacles, obstacle_movement, sample_start
 from itertools import product
 from models import Policy, Posterior, DiscretePosterior
 
@@ -354,9 +352,11 @@ class VAETrain(object):
 
     def create_environment(self, env_type, env_name=None):
         if 'grid' in env_type:
-            self.transition_func = TransitionFunction(self.width,
-                                                      self.height,
-                                                      obstacle_movement)
+            self.transition_func = gw.TransitionFunction(self.width,
+                                                         self.height,
+                                                         gw.obstacle_movement)
+        elif 'circle' in env_type:
+            self.transition_func = cw.TransitionFunction()
         elif env_type == 'mujoco' or env_type == 'gym':
             assert(env_name is not None)
             self.env = gym.make(env_name)
@@ -669,10 +669,16 @@ class VAETrain(object):
         pred_goal = []
         for t in range(episode_len):
             if 'grid' in self.env_type:
-                state_obj = StateVector(ep_state[:, t, :], self.obstacles)
+                state_obj = gw.StateVector(ep_state[:, t, :], self.obstacles)
                 # state_tensor is (N, F)
                 state_tensor = torch.from_numpy(self.get_state_features(
                     state_obj, self.args.use_state_features)).type(self.dtype)
+            elif 'circle' in self.env_type:
+                state_obj = cw.StateVector(ep_state[:, t, :])
+                # state_tensor is (N, F)
+                state_tensor = torch.from_numpy(self.get_state_features(
+                    state_obj, self.args.use_state_features)).type(self.dtype)
+
             elif self.env_type == 'mujoco':
                 state_tensor = torch.from_numpy(ep_state[:, t, :]).type(self.dtype)
 
@@ -781,9 +787,14 @@ class VAETrain(object):
             c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
             if 'grid' in self.env_type:
-                x_state_obj = StateVector(ep_state[:, 0, :], self.obstacles)
+                x_state_obj = gw.StateVector(ep_state[:, 0, :], self.obstacles)
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
+            elif 'circle' in self.env_type:
+                x_state_obj = cw.StateVector(ep_state[:, 0, :])
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
+
             elif self.env_type == 'mujoco':
                 #x_feat = ep_state[:, 0, :]
                 x_feat = self.env.reset()[None,:]
@@ -891,13 +902,21 @@ class VAETrain(object):
                 if history_size > 1:
                     x_hist[:, :(history_size-1), :] = x_hist[:,1:, :]
 
-                if 'grid' in self.env_type:
-                    # Get next state from action
-                    action = ActionVector(np.argmax(pred_actions_numpy, axis=1))
-                    # Get current state object
-                    state = StateVector(curr_state_arr, self.obstacles)
-                    # Get next state
-                    next_state = self.transition_func(state, action, 0)
+                if 'grid' in self.env_type or 'circle' in self.env_type:
+                    if 'grid'in self.env_type:
+                        # Get next state from action
+                        action = gw.ActionVector(np.argmax(pred_actions_numpy, axis=1))
+                        # Get current state object
+                        state = gw.StateVector(curr_state_arr, self.obstacles)
+                        # Get next state
+                        next_state = self.transition_func(state, action, 0)
+                    elif 'circle' in self.env_type:
+                        # Get next state from action
+                        action = cw.ActionVector(pred_actions_numpy)
+                        # Get current state object
+                        state = cw.StateVector(curr_state_arr)
+                        # Get next state
+                        next_state = self.transition_func(state, action)
 
                     # Update x
                     next_state_features = self.get_state_features(
@@ -912,6 +931,7 @@ class VAETrain(object):
                     # Update current state
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
+
                 elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
                     #next_state, true_reward_t, done, _ = self.env.step(action)
@@ -1005,7 +1025,7 @@ class VAETrain(object):
                                       dtype=np.float32)
                         c[0, context] = 1.0
 
-                        x_state_obj = StateVector(np.array([i, j])[np.newaxis, :], 
+                        x_state_obj = gw.StateVector(np.array([i, j])[np.newaxis, :], 
                                                   self.obstacles)
                         x_feat = self.get_state_features(x_state_obj,
                                                          self.args.use_state_features)
@@ -1092,7 +1112,11 @@ class VAETrain(object):
             c = -1 * np.ones((batch_size, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
             if 'grid' in self.env_type:
-                x_state_obj = StateVector(ep_state[:, 0, :], self.obstacles)
+                x_state_obj = gw.StateVector(ep_state[:, 0, :], self.obstacles)
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
+            elif 'circle' in self.env_type:
+                x_state_obj = cw.StateVector(ep_state[:, 0, :])
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
@@ -1199,18 +1223,23 @@ class VAETrain(object):
                 if history_size > 1:
                     x_hist[:, :(history_size-1), :] = x_hist[:, 1:, :]
 
-                if 'grid' in self.env_type:
+                if 'grid' in self.env_type or 'circle' in self.env_type:
                     # Get next state from action (N,)
-                    # action = ActionVector(np.argmax(pred_actions_numpy, axis=1))
+                    # action = gw.ActionVector(np.argmax(pred_actions_numpy, axis=1))
                     # Get current state
-                    # state = StateVector(curr_state_arr, self.obstacles)
+                    # state = gw.StateVector(curr_state_arr, self.obstacles)
                     # Get next state
                     # next_state = self.transition_func(state, action, 0)
 
                     # Get the next state from expert (supervised learning)
                     if t < episode_len-1:
-                        next_state = StateVector(ep_state[:, t+1, :],
-                                                 self.obstacles)
+                        if 'grid' in self.env_type:
+                            next_state = gw.StateVector(ep_state[:, t+1, :],
+                                                        self.obstacles)
+                        elif 'circle' in self.env_type: 
+                            next_state = cw.StateVector(ep_state[:, t+1, :])
+                        else:
+                            raise ValueError("Incorrect env type")
                     else:
                        break
 
@@ -1423,7 +1452,11 @@ class VAETrain(object):
             c = -1 * np.ones((1, self.vae_model.posterior_latent_size),
                              dtype=np.float32)
             if 'grid' in self.env_type:
-                x_state_obj = State(ep_state[0].tolist(), self.obstacles)
+                x_state_obj = gw.State(ep_state[0].tolist(), self.obstacles)
+                x_feat = self.get_state_features(x_state_obj,
+                                                 self.args.use_state_features)
+            elif 'circle' in self.env_type:
+                x_state_obj = cw.State(ep_state[0].tolist())
                 x_feat = self.get_state_features(x_state_obj,
                                                  self.args.use_state_features)
             elif self.env_type == 'mujoco':
@@ -1494,13 +1527,23 @@ class VAETrain(object):
                 if history_size > 1:
                     x_hist[:,:(history_size-1),:] = x_hist[:,1:,:]
 
-                if 'grid' in self.env_type:
-                    # Get next state from action
-                    action = Action(np.argmax(pred_actions_numpy[0, :]))
-                    # Get current state
-                    state = State(curr_state_arr.tolist(), self.obstacles)
-                    # Get next state
-                    next_state = self.transition_func(state, action, 0)
+                if 'grid' in self.env_type or 'circle' in self.env_type:
+                    if 'grid' in self.env_type:
+                        # Get next state from action
+                        action = gw.Action(np.argmax(pred_actions_numpy[0, :]))
+                        # Get current state
+                        state = gw.State(curr_state_arr.tolist(), self.obstacles)
+                        # Get next state
+                        next_state = self.transition_func(state, action, 0)
+                    elif 'circle' in self.env_type:
+                        # Get next state from action
+                        action = cw.Action(pred_actions_numpy)
+                        # Get current state
+                        state = cw.State(curr_state_arr.tolist())
+                        # Get next state
+                        next_state = self.transition_func(state, action)
+                    else:
+                        raise ValueError("Incorrect env type")
 
                     if history_size > 1:
                         x_hist[:, history_size-1] = self.get_state_features(
@@ -1603,12 +1646,6 @@ class VAETrain(object):
         return train_stats
 
 
-    def sample_start_location(self):
-        set_diff = list(set(product(tuple(range(7, 13)),
-                                    tuple(range(7, 13)))) - set(obstacles))
-
-        return sample_start(set_diff)
-
     def test_goal_prediction(self, expert, num_test_samples=10):
         '''Test Goal prediction, i.e. is the Q-network (RNN) predicting the
         goal correctly.
@@ -1710,8 +1747,13 @@ def main(args):
     expert = ExpertHDF5(args.expert_path, args.vae_state_size)
     if 'grid' in args.env_type:
         expert.push(only_coordinates_in_state=True, one_hot_action=True)
+    elif 'circle' in args.env_type:
+        expert.push(only_coordinates_in_state=False, one_hot_action=False)
     elif args.env_type == 'mujoco' or args.env_type == 'gym':
         expert.push(only_coordinates_in_state=False, one_hot_action=False)
+    else:
+        raise ValueError("Incorrect env type {}. No expert available".format(
+            args.env_type))
     vae_train.set_expert(expert)
 
     # expert = Expert(args.expert_path, 2)
@@ -1876,7 +1918,7 @@ if __name__ == '__main__':
 
     # Environment - Grid or Mujoco
     parser.add_argument('--env-type', default='grid', 
-                        choices=['grid', 'grid_room', 'mujoco', 'gym'],
+                        choices=['grid', 'grid_room', 'mujoco', 'gym', 'circle'],
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')
