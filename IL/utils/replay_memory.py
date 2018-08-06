@@ -35,6 +35,10 @@ class Memory(object):
 
     def append(self, new_memory):
         self.memory += new_memory.memory
+    
+    def merge_list(self, memory_list):
+        for m in memory_list:
+            self.memory += m.memory
 
 class Memory_Ep(object):
     def __init__(self):
