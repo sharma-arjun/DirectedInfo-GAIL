@@ -14,7 +14,7 @@ from torch.nn import functional as F
 
 import grid_world as gw
 import circle_world as cw
-from load_expert_traj import Expert, ExpertHDF5
+from load_expert_traj import Expert, ExpertHDF5, CircleExpertHDF5
 from load_expert_traj import recursively_save_dict_contents_to_group
 from itertools import product
 from models import Policy, Posterior, DiscretePosterior
@@ -755,6 +755,9 @@ class VAETrain(object):
         for e in range(num_test_samples):
             true_reward = 0.0
             batch = expert.sample(batch_size)
+            if 'circle' in self.env_type:
+                batch_radius = expert.sample_radius()
+
             ep_state, ep_action, ep_c, ep_mask = batch
             ep_state = np.array(ep_state, dtype=np.float32)
             ep_action = np.array(ep_action, dtype=np.float32)
@@ -923,7 +926,7 @@ class VAETrain(object):
                         # Get current state object
                         state = cw.StateVector(curr_state_arr)
                         # Get next state
-                        next_state = self.transition_func(state, action)
+                        next_state = self.transition_func(state, action, batch_radius, t)
 
                     # Update x
                     next_state_features = self.get_state_features(
@@ -1083,6 +1086,8 @@ class VAETrain(object):
             ep_timesteps = 0
             true_return = 0.0
             batch = expert.sample(batch_size)
+            if 'circle' in self.env_type:
+                batch_radius = expert.sample_radius()
 
             self.vae_opt.zero_grad()
             if self.use_rnn_goal_predictor:
@@ -1418,6 +1423,8 @@ class VAETrain(object):
             train_KLD_loss, train_policy2_loss = 0.0, 0.0
             ep_timesteps = 0
             batch = expert.sample(batch_size)
+            if 'circle' in self.env_type:
+                batch_radius = expert.sample_radius()
 
             self.vae_opt.zero_grad()
             if self.use_rnn_goal_predictor:
@@ -1549,7 +1556,7 @@ class VAETrain(object):
                         # Get current state
                         state = cw.State(curr_state_arr.tolist())
                         # Get next state
-                        next_state = self.transition_func(state, action)
+                        next_state = self.transition_func(state, action, batch_radius, t)
                     else:
                         raise ValueError("Incorrect env type")
 
@@ -1669,6 +1676,8 @@ class VAETrain(object):
         # are required for goal prediction.
         for e in range(num_test_samples):
             batch = expert.sample(batch_size)
+            if 'circle' in self.env_type:
+                batch_radius = expert.sample_radius()
             ep_state, ep_action, ep_c, ep_mask = batch
             # After below operation ep_state, ep_action will be a tuple of
             # states, tuple of actions
@@ -1756,6 +1765,7 @@ def main(args):
     if 'grid' in args.env_type:
         expert.push(only_coordinates_in_state=True, one_hot_action=True)
     elif 'circle' in args.env_type:
+        expert = CircleExpertHDF5(args.expert_path, args.vae_state_size)
         expert.push(only_coordinates_in_state=False, one_hot_action=False)
     elif args.env_type == 'mujoco' or args.env_type == 'gym':
         expert.push(only_coordinates_in_state=False, one_hot_action=False)

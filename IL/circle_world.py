@@ -75,7 +75,7 @@ class TransitionFunction():
         '''Transition function for the grid world.'''
         pass
 
-    def __call__(self, state, action):
+    def __call__(self, state, action, batch_radius, time):
         if type(state) is StateVector:
             assert state.coordinates_arr.shape[0] == action.delta_arr.shape[0], \
                     "(State, Action) batch sizes do not match"
@@ -83,24 +83,31 @@ class TransitionFunction():
             new_coord_arr = np.zeros(state.coordinates.shape)
             for b in range(batch_size):
                 state_coord = state.coordinates_arr[b, :]
+                radius = batch_radius[b]
                 if type(state_coord) is not type([]):
                     state_coord = state_coord.tolist()
                 action_delta = action.delta_arr[b]
-                new_coord = self.next_state(state_coord, action_delta)
+                new_coord = self.next_state(state_coord, action_delta, radius)
                 new_coord_arr[b, :] = new_coord
 
             new_state = StateVector(new_coord_arr, feat_type=state.feat_type)
         elif type(state) is State:
-            new_coord = self.next_state(state.coordinates, action.delta)
+            new_coord = self.next_state(state.coordinates, action.delta, radius)
             new_state = State(new_coord, feat_type=state.feat_type)
+            radius = batch_radius[0]
         else:
             raise ValueError('Incorrect state type: {}'.format(type(state)))
 
         return new_state
 
-    def next_state(self, state_coord, action_delta):
-        new_state = (state_coord[0] + action_delta[0],
-                     state_coord[1] + action_delta[1])   
+    def next_state(self, state_coord, action_delta, radius, time):
+        radius_idx = time // 120
+        assert radius_idx < 3, "Invalid time input"
+        radius = radius[radius_idx]
+        w = (2 * math.pi) / 120
+        dist = w * radius
+        new_state = (state_coord[0] + action_delta[0] * dist,
+                     state_coord[1] + action_delta[1] * dist)   
         return new_state
 
 

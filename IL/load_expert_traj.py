@@ -126,12 +126,15 @@ class ExpertHDF5(Expert):
         super(ExpertHDF5, self).__init__(expert_dir, num_inputs)
         self.expert_dir = expert_dir
         self.memory, self.memory_no_tuple = [], []
+        # Only used for circle environment
+        self.radius_memory = []
         self.pointer = 0
         self.list_of_sample_c = []
 
         self.obstacles = None
         self.set_diff = None
         self.num_goals, self.num_actions = 0, 0
+        self.last_indices_sampled = None
 
     def push(self, only_coordinates_in_state=False, one_hot_action=True):
         h5_file = os.path.join(self.expert_dir, 'expert_traj.h5')
@@ -155,6 +158,8 @@ class ExpertHDF5(Expert):
                 for a_idx in range(action.shape[0]):
                     action_one_hot[a_idx, int(action[a_idx])] = 1
                 action = action_one_hot
+            if 'radius' in list(h5f['expert_traj'][k].keys()):
+                radius = np.array(h5f['expert_traj'][k]['radius'])
 
             # context = h5f[k]['context']
             context = np.array(h5f['expert_traj'][k]['goal'], dtype=np.float32)
@@ -172,6 +177,7 @@ class ExpertHDF5(Expert):
 
     def sample(self, size=5, return_indices=False):
         ind = np.random.randint(len(self.memory), size=size)
+        self.last_indices_sampled = ind
         batch_list = []
         for i in ind:
             batch_list.append(self.memory[i])
@@ -266,3 +272,26 @@ class SeparateRoomTrajExpert(ExpertHDF5):
             last_state_idx = curr_state_idx
 
         return memory
+
+class CircleExpertHDF5(ExpertHDF5):
+    def __init__(self, expert_dir, num_inputs):
+        super(CircleExpertHDF5, self).__init__(expert_dir, num_inputs)
+        self.radius_memory = []
+
+    def push(self, only_coordinates_in_state=False, one_hot_action=True):
+        super(CircleExpertHDF5, self).push(only_coordinates_in_state=False,
+                                           one_hot_action=one_hot_action) 
+
+        h5_file = os.path.join(self.expert_dir, 'expert_traj.h5')
+        assert os.path.exists(h5_file), \
+            "hdf5 file does not exist {}".format(h5_file)
+        h5f = h5py.File(h5_file, 'r')
+        for k in sorted(h5f['expert_traj'].keys()):
+            radius = np.array(h5f['expert_traj'][k]['radius'])
+            self.radius_memory.append(radius)
+        h5f.close()
+
+    def sample_radius(self):
+        assert self.last_indices_sampled is not None
+        batch_radius = [self.radius_memory[i] for i in self.last_indices_sampled]
+        return batch_radius
