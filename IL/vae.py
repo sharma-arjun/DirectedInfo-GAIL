@@ -175,9 +175,9 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        # r = 33e-4
+        r = 33e-4
         # r = 0.023 # Will become 0.1 after 100 epochs if initial temp is 1.0
-        r = 0.011 # Will become 0.1 after 200 epochs if initial temp is 1.0
+        # r = 0.011 # Will become 0.1 after 200 epochs if initial temp is 1.0
         self.temperature = max(0.1, self.init_temperature * math.exp(-r*epoch))
 
 
@@ -894,6 +894,11 @@ class VAETrain(object):
                 # Store the "true" state
                 true_traj.append((ep_state[:, t, :], ep_action[:, t, :]))
                 pred_traj.append((curr_state_arr, pred_actions_numpy))
+
+                if 'circle' in self.env_type:
+                    true_reward += -np.linalg.norm(
+                            ep_state[:,t,:] - curr_state_arr, ord=2)
+
                 if (not test_goal_policy_only and
                         self.args.use_separate_goal_policy):
                     pred_actions_2_numpy = vae_output[1].data.cpu().numpy()
@@ -933,6 +938,7 @@ class VAETrain(object):
                     # Update current state
                     curr_state_arr = np.array(next_state.coordinates,
                                               dtype=np.float32)
+
 
                 elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
