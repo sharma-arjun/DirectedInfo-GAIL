@@ -87,12 +87,12 @@ class TransitionFunction():
                 if type(state_coord) is not type([]):
                     state_coord = state_coord.tolist()
                 action_delta = action.delta_arr[b]
-                new_coord = self.next_state(state_coord, action_delta, radius)
+                new_coord = self.next_state(state_coord, action_delta, radius, time)
                 new_coord_arr[b, :] = new_coord
 
             new_state = StateVector(new_coord_arr, feat_type=state.feat_type)
         elif type(state) is State:
-            new_coord = self.next_state(state.coordinates, action.delta, radius)
+            new_coord = self.next_state(state.coordinates, action.delta, radius, time)
             new_state = State(new_coord, feat_type=state.feat_type)
             radius = batch_radius[0]
         else:
