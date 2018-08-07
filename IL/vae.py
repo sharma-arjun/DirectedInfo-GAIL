@@ -29,6 +29,7 @@ from utils.torch_utils import get_weight_norm_for_network
 #else:
 #    R = RewardFunction(-1.0,1.0)
 
+global_args = None
 
 class VAE(nn.Module):
     def __init__(self,
@@ -110,11 +111,15 @@ class VAE(nn.Module):
 
     def decode_goal_policy(self, x, g):
         action_mean, _, _ = self.policy_goal(torch.cat((x, g), 1))
+        if 'circle' in global_args.env_type:
+            action_mean = action_mean / torch.norm(action_mean, dim=1).unsqueeze(1)
         return action_mean
 
     def decode(self, x, c):
         action_mean, action_log_std, action_std = self.policy(
                 torch.cat((x, c), 1))
+        if 'circle' in global_args.env_type:
+            action_mean = action_mean / torch.norm(action_mean, dim=1).unsqueeze(1)
 
         return action_mean
 
@@ -1960,4 +1965,5 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
+    global_args = args
     main(args)
