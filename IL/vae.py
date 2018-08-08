@@ -932,7 +932,10 @@ class VAETrain(object):
                         # Get current state object
                         state = cw.StateVector(curr_state_arr)
                         # Get next state
-                        next_state = self.transition_func(state, action, batch_radius, t)
+                        #next_state = self.transition_func(state, action, batch_radius, t)
+                        if t == episode_len - 1:
+                            break
+                        next_state = cw.StateVector(ep_state[:, t+1, :])
 
                     # Update x
                     next_state_features = self.get_state_features(
