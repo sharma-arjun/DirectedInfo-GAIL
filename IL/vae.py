@@ -628,10 +628,11 @@ class VAETrain(object):
                 final_train_stats['temperature'].append(
                         self.vae_model.temperature)
 
-            if epoch % 1 == 0:
-                results_pkl_path = os.path.join(self.args.results_dir,
-                                                'results.pkl')
-                self.test_models(expert, results_pkl_path=None,
+            if epoch % 5 == 0:
+                results_pkl_path = os.path.join(
+                        self.args.results_dir, 
+                        'results_{}.pkl'.format(epoch))
+                self.test_models(expert, results_pkl_path=results_pkl_path,
                                  num_test_samples=5,   
                                  test_goal_policy_only=train_goal_policy_only)
 
@@ -644,7 +645,7 @@ class VAETrain(object):
 
         results_pkl_path = os.path.join(self.args.results_dir, 'results.pkl')
         self.test_models(expert, results_pkl_path=results_pkl_path,
-                         num_test_samples=2,
+                         num_test_samples=5,
                          other_results_dict={'train_stats': final_train_stats},
                          test_goal_policy_only=train_goal_policy_only)
 
