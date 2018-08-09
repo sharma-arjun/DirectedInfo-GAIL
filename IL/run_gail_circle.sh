@@ -1,18 +1,18 @@
 BATCH_SIZE=64
 
 python -m pdb circle_world_gail.py \
-  --expert_path ./h5_trajs/circle_trajs/meta_1_traj_1_len_105_inner_circle_constant_velocity \
+  --expert_path ./h5_trajs/circle_trajs/meta_2_traj_50_multimodal_action/ \
   --state_size 2 \
   --action_size 2 \
-  --history_size 5 \
+  --history_size 4 \
   --context_size 3 \
-  --goal_size 1 \
+  --goal_size 2 \
   --batch_size 1024 \
   --num_epochs 5000 \
-  --max_ep_length 179 \
-  --num_expert_trajs 6 \
-  --vae_checkpoint_path ./results/vae/tmp/meta_1_traj_50_traj_len_180_policy_output_normalized_context_3_goal_1_history_5_epoch_1000_temperature_5_noisy_next_state/checkpoint/cp_1500.pth \
-  --results_dir ./results/circle/gail/tmp/rebuttal_batch_2048_cp_1500_ep_5000_num_expert_6_policy_log_std_clamped_use_posterior_reward_0.1_time_Aug_8_03_30_PM \
+  --max_ep_length 119 \
+  --num_expert_trajs 8 \
+  --vae_checkpoint_path /home/arjun/DirectedInfo-GAIL/IL/results/vae/tmp/meta_2_traj_50_multimodal_action_policy_output_normalized_context_2_goal_2/checkpoint/cp_1000.pth \
+  --results_dir ./results/circle/gail/tmp/meta_2_traj_50_multimodal_action_policy_output_normalized_context_2_goal_2_posterior_lambda_0.1/ \
   --no-use_state_features \
   --no-use_goal_in_policy \
   --use_goal_in_value \
