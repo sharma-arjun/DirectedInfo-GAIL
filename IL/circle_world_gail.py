@@ -149,7 +149,8 @@ class GAILMLP(BaseGAIL):
             action = torch.normal(action_mean, action_std)
         else:
             action = action_mean
-        return action_mean
+        action = action / torch.norm(action, dim=1).unsqueeze(1)
+        return action
 
 
     def get_state_features(self, state_obj, use_state_features):
