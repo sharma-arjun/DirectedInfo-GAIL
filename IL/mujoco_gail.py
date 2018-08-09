@@ -884,10 +884,8 @@ class CausalGAILMLP(BaseGAIL):
                                                              action_expert,
                                                              c_expert)
 
-                true_goal_numpy = np.zeros((c_expert.shape[0],
-                                            self.num_goals))
-                true_goal_numpy[np.arange(c_expert.shape[0]),
-                                c_expert[:, 0]] = 1
+                true_goal_numpy = np.zeros((c_expert.shape[0], self.num_goals))
+                true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
 
                 true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                             self.dtype)

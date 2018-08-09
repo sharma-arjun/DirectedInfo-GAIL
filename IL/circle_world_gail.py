@@ -65,28 +65,28 @@ class GAILMLP(BaseGAIL):
 
         self.vae_train = vae_train
         policy1_state_size = state_size * history_size \
-            if vae_train.vae_model.use_history_in_policy else state_size 
+            if vae_train.vae_model.use_history_in_policy else state_size
 
         if args.use_goal_in_policy:
             policy_latent_size = num_goals
         else:
             policy_latent_size = vae_train.vae_model.policy.latent_size
 
-        policy_klass = DiscretePolicy if args.discrete_action else Policy
-        self.policy_net = policy_klass(
+
+        self.policy_net = Policy(
                 state_size=policy1_state_size,
                 action_size=vae_train.vae_model.policy.action_size,
                 latent_size=policy_latent_size,
                 output_size=vae_train.vae_model.policy.output_size,
                 output_activation=None)
 
-        self.old_policy_net = policy_klass(
+        self.old_policy_net = Policy(
                 state_size=policy1_state_size,
                 action_size=vae_train.vae_model.policy.action_size,
                 latent_size=policy_latent_size,
                 output_size=vae_train.vae_model.policy.output_size,
                 output_activation=None)
-        
+
         if args.use_value_net:
             # context_size contains num_goals
             self.value_net = Value(state_size * history_size + num_goals,
@@ -95,12 +95,12 @@ class GAILMLP(BaseGAIL):
         # Reward net is the discriminator network.
         self.reward_net = Reward(state_size * history_size,
                                  action_size,
-                                 num_goals, 
+                                 num_goals,
                                  hidden_size=64)
 
         if vae_train.args.use_discrete_vae:
             self.posterior_net = DiscretePosterior(
-                    state_size=state_size*history_size,
+                    state_size=vae_train.vae_model.posterior.state_size,
                     action_size=vae_train.vae_model.posterior.action_size,
                     latent_size=vae_train.vae_model.posterior.latent_size,
                     hidden_size=vae_train.vae_model.posterior.hidden_size,
@@ -165,6 +165,7 @@ class GAILMLP(BaseGAIL):
         '''
         state: Numpy array of shape (N, H, F)
         '''
+        assert not use_velocity, "Do not use velocity features for circle world"
         if use_velocity:
             _, history_size, state_size = state.shape
             new_state = np.zeros(state.shape)
@@ -318,7 +319,8 @@ class GAILMLP(BaseGAIL):
         # self.opt_policy = optim.Adam(self.policy_net.parameters(),
         #                             lr=self.args.learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
-                                       lr=self.args.posterior_learning_rate)
+                                        lr=self.args.posterior_learning_rate)
+
 
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
@@ -436,33 +438,32 @@ class GAILMLP(BaseGAIL):
             if expert_goal is not None:
                 expert_goal_var = Variable(expert_goal[start_idx:end_idx])
 
-            if optim_idx % 1 == 0:
-                # ==== Update reward net ====
-                self.opt_reward.zero_grad()
+            # ==== Update reward net ====
+            self.opt_reward.zero_grad()
 
-                # Backprop with expert demonstrations
-                expert_output = self.reward_net(
-                        torch.cat((expert_state_var,
-                                   expert_action_var,
-                                   expert_goal_var), 1))
-                expert_disc_loss = F.binary_cross_entropy(
-                        expert_output,
-                        Variable(torch.zeros(expert_action_var.size(0), 1)).type(
-                            dtype))
-                expert_disc_loss.backward()
+            # Backprop with expert demonstrations
+            expert_output = self.reward_net(
+                    torch.cat((expert_state_var,
+                               expert_action_var,
+                               expert_goal_var), 1))
+            expert_disc_loss = F.binary_cross_entropy(
+                    expert_output,
+                    Variable(torch.zeros(expert_action_var.size(0), 1)).type(
+                        dtype))
+            expert_disc_loss.backward()
 
-                # Backprop with generated demonstrations
-                gen_output = self.reward_net(
-                        torch.cat((state_var,
-                                   action_var,
-                                   goal_var), 1))
-                gen_disc_loss = F.binary_cross_entropy(
-                        gen_output,
-                        Variable(torch.ones(action_var.size(0), 1)).type(dtype))
-                gen_disc_loss.backward()
+            # Backprop with generated demonstrations
+            gen_output = self.reward_net(
+                    torch.cat((state_var,
+                               action_var,
+                               goal_var), 1))
+            gen_disc_loss = F.binary_cross_entropy(
+                    gen_output,
+                    Variable(torch.ones(action_var.size(0), 1)).type(dtype))
+            gen_disc_loss.backward()
 
-                self.opt_reward.step()
-                # ==== END ====
+            self.opt_reward.step()
+            # ==== END ====
 
             # Add loss scalars.
             add_scalars_to_summary_writer(
@@ -520,14 +521,14 @@ class GAILMLP(BaseGAIL):
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
-            surr1 = ratio * advantages_var[:, 0]
+            surr1 = ratio * advantages_var
             surr2 = torch.clamp(
                     ratio,
                     1.0 - self.args.clip_epsilon,
-                    1.0 + self.args.clip_epsilon) * advantages_var[:,0]
+                    1.0 + self.args.clip_epsilon) * advantages_var
             policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
-            clip_grad_value(self.policy_net.parameters(), 40)
+            clip_grad_value(self.policy_net.parameters(), 50)
             self.opt_policy.step()
             # ==== END ====
 
@@ -609,6 +610,8 @@ class GAILMLP(BaseGAIL):
         expert_masks = torch.cat(list_of_masks, 0).type(dtype)
 
         assert expert_states.size(0) == expert_actions.size(0), \
+                "Expert transition size do not match"
+        assert expert_states.size(0) == expert_latent_c.size(0), \
                 "Expert transition size do not match"
         assert expert_states.size(0) == expert_masks.size(0), \
                 "Expert transition size do not match"
@@ -712,13 +715,8 @@ class GAILMLP(BaseGAIL):
                                                              action_expert,
                                                              c_expert)
 
-                if self.args.env_type == 'grid_room':
-                    true_goal_numpy = np.copy(c_expert)
-                else:
-                    true_goal_numpy = np.zeros((c_expert.shape[0],
-                                                self.num_goals))
-                    true_goal_numpy[np.arange(c_expert.shape[0]),
-                                    c_expert[:, 0]] = 1
+                true_goal_numpy = np.zeros((c_expert.shape[0], self.num_goals))
+                true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
 
                 true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                             self.dtype)
@@ -735,6 +733,7 @@ class GAILMLP(BaseGAIL):
                             (x.shape[0], args.history_size, x.shape[1]),
                             dtype=np.float32)
                     x_hist[:, (args.history_size-1), :] = x_feat
+                    # TODO(Mohit): Fix this
                     x = self.get_history_features(x_hist)
 
                 # Posterior might use history while the policy may not? Why?
@@ -790,7 +789,7 @@ class GAILMLP(BaseGAIL):
                             x_var, action, c_var, next_c_var, goal_var=goal_var)
                     disc_reward += disc_reward_t
 
-                    # Posterior reward
+                    # Get posterior reward
                     posterior_reward_t = 0.0
                     posterior_reward_t = self.args.lambda_posterior \
                             * self.get_posterior_reward(
@@ -822,7 +821,6 @@ class GAILMLP(BaseGAIL):
                     # ==== END ====
 
 
-                    #next_state = running_state(next_state)
                     mask = 0 if t == expert_episode_len - 1 else 1
 
                     # ==== Push to memory ====
@@ -934,7 +932,7 @@ class GAILMLP(BaseGAIL):
                 # We do not get the context variable from expert trajectories.
                 # Hence we need to fill it in later.
                 expert_batch, expert_batch_indices = self.expert.sample(
-                        size=args.num_expert_trajs, return_indices=True  )
+                        size=args.num_expert_trajs, return_indices=True)
 
                 self.update_params(gen_batch, expert_batch, expert_batch_indices,
                                    ep_idx, args.optim_epochs, args.optim_batch_size)
@@ -942,7 +940,7 @@ class GAILMLP(BaseGAIL):
                 gail_train_end_time = time.time()
                 self.train_step_count += 1
 
-            if ep_idx > 0 and  ep_idx % args.log_interval == 0:
+            if not train or (ep_idx > 0 and  ep_idx % args.log_interval == 0):
                 update_time =\
                         (collect_sample_end_time - collect_sample_start_time) \
                         + (gail_train_end_time - gail_train_start_time)
@@ -1064,10 +1062,10 @@ def main(args):
             args,
             vae_train,
             logger,
-            state_size=args.state_size,
-            action_size=args.action_size,
-            context_size=args.context_size,
-            num_goals=args.goal_size,
+            state_size=vae_train.args.vae_state_size,
+            action_size=vae_train.args.vae_action_size,
+            context_size=vae_train.args.vae_context_size,
+            num_goals=vae_train.args.vae_goal_size,
             history_size=args.history_size,
             dtype=dtype)
     gail_mlp.set_expert(expert)
@@ -1082,7 +1080,7 @@ def main(args):
         gail_mlp.get_value_function_for_grid()
 
         gail_mlp.train_gail(
-                1,
+                3,
                 results_pkl_path,
                 gen_batch_size=512,
                 train=False)
@@ -1102,7 +1100,6 @@ def main(args):
 
         print("Finetune checkpoint: {}".format(args.finetune_path))
         gail_mlp.load_checkpoint_data(args.finetune_path)
-        gail_mlp.get_value_function_for_grid()
         gail_mlp.train_gail(
                 args.num_epochs,
                 os.path.join(results_dir, 'results.pkl'),
