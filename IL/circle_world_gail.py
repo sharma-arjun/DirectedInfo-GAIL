@@ -65,7 +65,7 @@ class GAILMLP(BaseGAIL):
 
         self.vae_train = vae_train
         policy1_state_size = state_size * history_size \
-            if vae_train.vae_model.use_history_in_policy else state_size * history_size
+            if vae_train.vae_model.use_history_in_policy else state_size 
 
         if args.use_goal_in_policy:
             policy_latent_size = num_goals
@@ -207,7 +207,6 @@ class GAILMLP(BaseGAIL):
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
         '''Get c[1:T] for given trajectory.'''
         batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
-        history_size = self.history_size
 
         # Use the Q-network (RNN) to predict goal.
         pred_goal = None
@@ -238,8 +237,9 @@ class GAILMLP(BaseGAIL):
         # x is (N, F)
         x = x_feat
 
+        history_size = self.vae_train.args.vae_history_size
         # Add history to state
-        if self.history_size > 1:
+        if history_size > 1:
             x_hist = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
                                   dtype=np.float32)
             x_hist[:, history_size - 1, :] = x_feat
@@ -311,15 +311,13 @@ class GAILMLP(BaseGAIL):
         # deepcopy from vae
         # self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         # self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
-        # self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
+        self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
         # self.opt_policy = optim.Adam(self.policy_net.parameters(),
         #                             lr=self.args.learning_rate)
-        # self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
-        #                                lr=self.args.posterior_learning_rate)
-        pass
-
+        self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
+                                       lr=self.args.posterior_learning_rate)
 
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
@@ -738,6 +736,14 @@ class GAILMLP(BaseGAIL):
                     x_hist[:, (args.history_size-1), :] = x_feat
                     x = self.get_history_features(x_hist)
 
+                # Posterior might use history while the policy may not? Why?
+                if self.vae_train.args.vae_history_size > 1:
+                    posterior_x_hist = -1 * np.ones(
+                            (x.shape[0], self.vae_train.args.vae_history_size, x.shape[1]),
+                            dtype=np.float32)
+                    posterior_x_hist[:, (self.vae_train.args.vae_history_size-1), :] = x_feat
+                    posterior_x = self.get_history_features(posterior_x_hist)
+
 
                 # TODO: Make this a separate function. Can be parallelized.
                 ep_reward, expert_true_reward = 0, 0
@@ -757,6 +763,8 @@ class GAILMLP(BaseGAIL):
                         ct.reshape((batch_size, -1))).type(self.dtype))
                     next_c_var = Variable(torch.from_numpy(
                         next_ct.reshape((batch_size, -1))).type(self.dtype))
+                    posterior_x_var = Variable(torch.from_numpy(
+                        posterior_x.reshape((batch_size, -1))).type(self.dtype))
 
                     # Get the goal variable (either true or predicted)
                     goal_var = None
@@ -785,7 +793,7 @@ class GAILMLP(BaseGAIL):
                     posterior_reward_t = 0.0
                     posterior_reward_t = self.args.lambda_posterior \
                             * self.get_posterior_reward(
-                                    x_var, c_var, next_c_var, goal_var=goal_var)
+                                    posterior_x_var, c_var, next_c_var, goal_var=goal_var)
                     posterior_reward += posterior_reward_t
 
                     # Update Rewards
@@ -837,6 +845,15 @@ class GAILMLP(BaseGAIL):
                         x = self.get_history_features(x_hist)
                     else:
                         x[:] = next_state_feat
+
+                    if self.vae_train.args.vae_history_size > 1:
+                        posterior_x_hist[:, :-1, :] = posterior_x_hist[:, 1:, :]
+                        posterior_x_hist[:, self.vae_train.args.vae_history_size-1] = \
+                                next_state_feat
+                        posterior_x = self.get_history_features(posterior_x_hist)
+                    else:
+                        posterior_x[:] = next_state_feat
+
                     # ==== END ====
 
                     if args.render:

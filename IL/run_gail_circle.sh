@@ -4,7 +4,7 @@ python -m pdb circle_world_gail.py \
   --expert_path ./h5_trajs/circle_trajs/meta_2_traj_50_multimodal_action/ \
   --state_size 2 \
   --action_size 2 \
-  --history_size 4 \
+  --history_size 1 \
   --context_size 3 \
   --goal_size 2 \
   --batch_size 1024 \
@@ -12,11 +12,11 @@ python -m pdb circle_world_gail.py \
   --max_ep_length 119 \
   --num_expert_trajs 8 \
   --vae_checkpoint_path /home/arjun/DirectedInfo-GAIL/IL/results/vae/tmp/meta_2_traj_50_multimodal_action_policy_output_normalized_context_2_goal_2/checkpoint/cp_1000.pth \
-  --results_dir ./results/circle/gail/tmp/meta_2_traj_50_multimodal_action_policy_output_normalized_context_2_goal_2_posterior_lambda_0.1/ \
+  --results_dir ./results/circle/gail/tmp/meta_2_traj_50_multimodal_action_policy_output_normalized_context_2_goal_2_posterior_lambda_0.1_history_1/ \
   --no-use_state_features \
   --no-use_goal_in_policy \
   --use_goal_in_value \
-  --no-init_from_vae \
+  --init_from_vae \
   --env-type circle \
   --posterior_learning_rate 0.0 \
   --lambda_posterior 0.1 \
