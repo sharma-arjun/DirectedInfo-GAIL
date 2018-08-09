@@ -323,13 +323,13 @@ class VAETrain(object):
 
         if args.run_mode == 'train':
             if use_rnn_goal_predictor:
-                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
+                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-4)
                 self.Q_model_opt = optim.Adam([
                         {'params': self.Q_model.parameters()},
                         {'params': self.Q_2_model.parameters()},
                         {'params': self.Q_model_linear.parameters()},
                     ],
-                    lr=1e-3)
+                    lr=1e-4)
             else:
                 self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
         elif args.run_mode == 'train_goal_pred':
@@ -752,7 +752,7 @@ class VAETrain(object):
                 'true_traj_state': [], 'true_traj_action': [],
                 'pred_traj_state': [], 'pred_traj_action': [],
                 'pred_traj_goal': [],
-                'pred_context': []}
+                'pred_context': [], 'true_traj_pred_context': []}
 
         true_reward_batch = []
 
@@ -932,7 +932,11 @@ class VAETrain(object):
                         # Get current state object
                         state = cw.StateVector(curr_state_arr)
                         # Get next state
-                        next_state = self.transition_func(state, action, batch_radius, t)
+                        # MOHIT DEBUGGING
+                        # next_state = self.transition_func(state, action, batch_radius, t)
+                        if t+1 >= ep_state.shape[1]:
+                            break
+                        next_state = cw.StateVector(ep_state[:, t+1, :])
 
                     # Update x
                     next_state_features = self.get_state_features(
@@ -1256,7 +1260,14 @@ class VAETrain(object):
                             next_state = gw.StateVector(ep_state[:, t+1, :],
                                                         self.obstacles)
                         elif 'circle' in self.env_type: 
-                            next_state = cw.StateVector(ep_state[:, t+1, :])
+                            noise_in_next_state = False
+                            ms_next_state = ep_state[:, t+1, :]
+                            # if noise_in_next_state:
+                                # state_noise = np.random.normal(
+                                        # 0, 0.1, ms_next_state.shape)
+                                # ms_next_state += state_noise
+
+                            next_state = cw.StateVector(ms_next_state)
                         else:
                             raise ValueError("Incorrect env type")
                     else:
