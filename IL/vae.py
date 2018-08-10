@@ -933,10 +933,10 @@ class VAETrain(object):
                         state = cw.StateVector(curr_state_arr)
                         # Get next state
                         # MOHIT DEBUGGING
-                        # next_state = self.transition_func(state, action, batch_radius, t)
-                        if t+1 >= ep_state.shape[1]:
-                            break
-                        next_state = cw.StateVector(ep_state[:, t+1, :])
+                        next_state = self.transition_func(state, action, batch_radius, t)
+                        # if t+1 >= ep_state.shape[1]:
+                            # break
+                        # next_state = cw.StateVector(ep_state[:, t+1, :])
 
                     # Update x
                     next_state_features = self.get_state_features(
