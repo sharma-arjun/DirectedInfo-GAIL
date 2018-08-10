@@ -102,7 +102,7 @@ class TransitionFunction():
         return new_state
 
     def next_state(self, state_coord, action_delta, radius, time):
-        radius_idx, w = time // 120, (2 * math.pi) / 120
+        radius_idx, w = time // 60, (2 * math.pi) / 120
         # if time < 60:
             # radius_idx, w = 0, (2*math.pi)/60.0
         # elif time >= 60 and time < 90:

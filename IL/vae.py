@@ -323,13 +323,13 @@ class VAETrain(object):
 
         if args.run_mode == 'train':
             if use_rnn_goal_predictor:
-                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-4)
+                self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
                 self.Q_model_opt = optim.Adam([
                         {'params': self.Q_model.parameters()},
                         {'params': self.Q_2_model.parameters()},
                         {'params': self.Q_model_linear.parameters()},
                     ],
-                    lr=1e-4)
+                    lr=1e-3)
             else:
                 self.vae_opt = optim.Adam(self.vae_model.parameters(), lr=1e-3)
         elif args.run_mode == 'train_goal_pred':
@@ -1260,12 +1260,12 @@ class VAETrain(object):
                             next_state = gw.StateVector(ep_state[:, t+1, :],
                                                         self.obstacles)
                         elif 'circle' in self.env_type: 
-                            noise_in_next_state = False
+                            noise_in_next_state = True 
                             ms_next_state = ep_state[:, t+1, :]
-                            # if noise_in_next_state:
-                                # state_noise = np.random.normal(
-                                        # 0, 0.1, ms_next_state.shape)
-                                # ms_next_state += state_noise
+                            if noise_in_next_state:
+                                state_noise = np.random.normal(
+                                        0, 0.1, ms_next_state.shape)
+                                ms_next_state += state_noise
 
                             next_state = cw.StateVector(ms_next_state)
                         else:
