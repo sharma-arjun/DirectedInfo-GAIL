@@ -181,6 +181,7 @@ class DiscreteVAE(VAE):
     def update_temperature(self, epoch):
         '''Update temperature.'''
         r = 33e-4
+        # r = 33e-4 will become 1.0 after 500 epochs and 0.18 after 1000 epochs.
         # r = 0.023 # Will become 0.1 after 100 epochs if initial temp is 1.0
         # r = 0.011 # Will become 0.1 after 200 epochs if initial temp is 1.0
         self.temperature = max(0.1, self.init_temperature * math.exp(-r*epoch))
@@ -933,10 +934,10 @@ class VAETrain(object):
                         state = cw.StateVector(curr_state_arr)
                         # Get next state
                         # MOHIT DEBUGGING
-                        next_state = self.transition_func(state, action, batch_radius, t)
-                        # if t+1 >= ep_state.shape[1]:
-                            # break
-                        # next_state = cw.StateVector(ep_state[:, t+1, :])
+                        # next_state = self.transition_func(state, action, batch_radius, t)
+                        if t+1 >= ep_state.shape[1]:
+                            break
+                        next_state = cw.StateVector(ep_state[:, t+1, :])
 
                     # Update x
                     next_state_features = self.get_state_features(
@@ -1241,14 +1242,15 @@ class VAETrain(object):
                     train_KLD_loss += KLD_loss.data[0]
 
                 if 'circle' in self.env_type \
-                        and self.args.cosine_loss_for_context_weight > 0.00001 \
+                        and self.args.cosine_similarity_loss_weight > 0.00001 \
                         and len(c_var_hist) > 0:
                     # Add cosine loss for similarity
                     last_c = c_var_hist[-1] 
                     curr_c = vae_output[-1]
                     cos_loss_context = (
                             self.args.cosine_similarity_loss_weight * 
-                            F.cosine_similarity(last_c, )).mean()
+                            (1.0 - F.cosine_similarity(last_c, curr_c)))
+                    cos_loss_context = cos_loss_context.mean()
                     loss += cos_loss_context
                     train_cosine_loss_for_context += cos_loss_context.data[0]
 
@@ -1422,7 +1424,7 @@ class VAETrain(object):
                           'Return: {:.3f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
                         train_policy_loss, train_policy2_loss,
-                        train_cosine_loss_for_context, train_KLD_loss,
+                        train_KLD_loss, train_cosine_loss_for_context,
                         ep_timesteps, true_return))
                 else:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
@@ -1896,7 +1898,7 @@ if __name__ == '__main__':
                         choices=[0, 1],
                         help='Use history of states in policy.')
 
-    parser.add_argument('--cosine_loss_for_context_weight', type=float,
+    parser.add_argument('--cosine_similarity_loss_weight', type=float,
                         default=0, help='Use cosine loss for context.')
 
     # Arguments for VAE training
