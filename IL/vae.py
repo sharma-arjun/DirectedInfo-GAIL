@@ -1093,6 +1093,7 @@ class VAETrain(object):
             # Train loss for this batch
             train_loss, train_policy_loss = 0.0, 0.0
             train_KLD_loss, train_policy2_loss = 0.0, 0.0
+            train_cosine_loss_for_context = 0.0
             ep_timesteps = 0
             true_return = 0.0
             batch = expert.sample(batch_size)
@@ -1171,6 +1172,8 @@ class VAETrain(object):
                 x = self.get_history_features(
                         x_hist, self.args.use_velocity_features)
 
+            c_var_hist = []
+
             # Store list of losses to backprop later.
             ep_loss, curr_state_arr = [], ep_state[:, 0, :]
             for t in range(episode_len):
@@ -1236,6 +1239,16 @@ class VAETrain(object):
                     if self.args.use_separate_goal_policy:
                         train_policy2_loss += policy2_loss.data[0]
                     train_KLD_loss += KLD_loss.data[0]
+
+                # Add cosine loss for similarity
+                if self.args.cosine_loss_for_context_weight > 0.00001 and \
+                        len(c_var_hist) > 0:
+                    last_c = c_var_hist[-1] 
+                    cos_loss_context = (
+                            self.args.cosine_similarity_loss_weight * 
+                            F.cosine_similarity(last_c, c_var))
+                    loss += cos_loss_context
+                    train_cosine_loss_for_context += cos_loss_context.data[0]
 
                 ep_loss.append(loss)
                 train_loss += loss.data[0]
@@ -1337,6 +1350,7 @@ class VAETrain(object):
                         x[:] = next_state
 
                     curr_state_arr = np.reshape(next_state, (batch_size, -1))
+                    c_hist.append(c_var)
 
 
                 # update c
@@ -1380,6 +1394,10 @@ class VAETrain(object):
                         'loss/KLD_per_sample',
                         train_KLD_loss,
                         self.train_step_count)
+                self.logger.summary_writer.add_scalar(
+                        'loss/cosine_loss_context',
+                        train_cosine_loss_for_context,
+                        self.train_step_count)
 
                 if self.args.use_separate_goal_policy:
                     self.logger.summary_writer.add_scalar(
@@ -1396,16 +1414,20 @@ class VAETrain(object):
                 elif self.args.use_separate_goal_policy:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
                           'Policy Loss: {:.2f}, \t Policy Loss 2: {:.2f}, \t '\
-                          'KLD: {:.2f}, \t Timesteps: {} \t Return: {:.3f}'.format(
+                          'KLD: {:.2f}, cosine: {:.3f} \t Timesteps: {} \t '
+                          'Return: {:.3f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_policy_loss, train_policy2_loss, train_KLD_loss,
+                        train_policy_loss, train_policy2_loss,
+                        train_cosine_loss_for_context, train_KLD_loss,
                         ep_timesteps, true_return))
                 else:
                     print('Train Epoch: {} [{}/{}] \t Loss: {:.3f} \t ' \
                             'Policy Loss: {:.2f}, \t KLD: {:.2f}, \t ' \
-                            'Timesteps: {} \t Return: {:.3f}'.format(
+                            'cosine:{:.3f} \t Timesteps: {} \t Return: {:.3f}'.format(
                         epoch, batch_idx, num_batches, train_loss,
-                        train_policy_loss, train_KLD_loss, ep_timesteps, true_return))
+                        train_policy_loss, train_KLD_loss,
+                        train_cosine_loss_for_context, ep_timesteps,
+                        true_return))
 
             self.train_step_count += 1
 
@@ -1869,6 +1891,9 @@ if __name__ == '__main__':
     parser.add_argument('--use_history_in_policy', type=int, default=0,
                         choices=[0, 1],
                         help='Use history of states in policy.')
+
+    parser.add_argument('--cosine_loss_for_context_weight', type=float,
+                        default=0, help='Use cosine loss for context.')
 
     # Arguments for VAE training
     parser.add_argument('--use_discrete_vae', dest='use_discrete_vae',

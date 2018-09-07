@@ -1,7 +1,7 @@
 BATCH_SIZE=64
 
 args=(
-  --batch-size 64
+  --batch-size 1
   --episode_len 104 
   --num-epochs 400
   --use_rnn_goal 0
@@ -20,14 +20,23 @@ args=(
   --checkpoint_every_epoch 50
   --log-interval 1
 
+  # Env info
+  --env-type circle
+  --continuous_action
+
+  # Train policy params
   --use_separate_goal_policy 1
   --use_goal_in_policy 0
   --use_discrete_vae
   --vae_context_size 3 
   --vae_goal_size 1
-  --continuous_action
-  --run_mode test
-  --env-type circle
+
+  # loss
+  --cosine_loss_for_context_weight 1.0
+
+  # Train config
+  --run_mode train
+
 
   # --cuda
 )
