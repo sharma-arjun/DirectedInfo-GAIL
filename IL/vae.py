@@ -1240,13 +1240,15 @@ class VAETrain(object):
                         train_policy2_loss += policy2_loss.data[0]
                     train_KLD_loss += KLD_loss.data[0]
 
-                # Add cosine loss for similarity
-                if self.args.cosine_loss_for_context_weight > 0.00001 and \
-                        len(c_var_hist) > 0:
+                if 'circle' in self.env_type \
+                        and self.args.cosine_loss_for_context_weight > 0.00001 \
+                        and len(c_var_hist) > 0:
+                    # Add cosine loss for similarity
                     last_c = c_var_hist[-1] 
+                    curr_c = vae_output[-1]
                     cos_loss_context = (
                             self.args.cosine_similarity_loss_weight * 
-                            F.cosine_similarity(last_c, c_var))
+                            F.cosine_similarity(last_c, )).mean()
                     loss += cos_loss_context
                     train_cosine_loss_for_context += cos_loss_context.data[0]
 
@@ -1255,6 +1257,9 @@ class VAETrain(object):
 
                 # pred_actions_numpy is (N, A)
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
+
+                if 'circle' in self.env_type:
+                    c_var_hist.append(vae_output[-1])
 
                 if history_size > 1:
                     x_hist[:, :(history_size-1), :] = x_hist[:, 1:, :]
@@ -1350,7 +1355,6 @@ class VAETrain(object):
                         x[:] = next_state
 
                     curr_state_arr = np.reshape(next_state, (batch_size, -1))
-                    c_hist.append(c_var)
 
 
                 # update c
