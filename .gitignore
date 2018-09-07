@@ -48,9 +48,12 @@ Thumbs.db
 *.iml
 *.ipr
 *.swp
+*.swo
 
 # Add ipynb_checkpoints
 IL/plots/.ipynb_checkpoints/
 
 # rl-weights
 RL/assets/learned_models/
+
+IL/h5_trajs/
