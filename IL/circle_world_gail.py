@@ -149,7 +149,6 @@ class GAILMLP(BaseGAIL):
             action = torch.normal(action_mean, action_std)
         else:
             action = action_mean
-        action = action / torch.norm(action, dim=1).unsqueeze(1)
         return action
 
 
@@ -791,20 +790,26 @@ class GAILMLP(BaseGAIL):
                     action = self.select_action(x_var, c_var, goal_var, 
                                                 train=train)
                     action_numpy = action.data.cpu().numpy()
+                    action_numpy_norm = action_numpy / np.linalg.norm(
+                            action_numpy, axis=1)
 
                     # ==== Save generated and true trajectories ====
                     true_traj_curr_episode['state'].append(state_expert[:, t, :])
                     true_traj_curr_episode['action'].append(action_expert[:, t, :])
                     gen_traj_curr_episode['state'].append(curr_state_arr)
-                    gen_traj_curr_episode['action'].append(action_numpy)
+                    gen_traj_curr_episode['action'].append(action_numpy_norm)
                     gen_traj_curr_episode['c'].append(ct)
                     # ==== END ====
 
-                    action = action_numpy
-
                     # Get the discriminator reward
+                    # We should use normalized actions for discriminator 
+                    # since the expert actions are also normalizedl.
                     disc_reward_t = self.get_discriminator_reward(
-                            x_var, action, c_var, next_c_var, goal_var=goal_var)
+                            x_var, 
+                            action_numpy_norm, 
+                            c_var,
+                            next_c_var,
+                            goal_var=goal_var)
                     disc_reward += disc_reward_t
 
                     # Get posterior reward
@@ -829,7 +834,7 @@ class GAILMLP(BaseGAIL):
                         pass
 
                     # ==== Update next state =====
-                    action_vec = ActionVector(action)
+                    action_vec = ActionVector(action_numpy_norm)
                     # Get current state
                     state_vec = StateVector(curr_state_arr)
                     # Get next state
@@ -844,7 +849,7 @@ class GAILMLP(BaseGAIL):
                     # ==== Push to memory ====
                     memory.push(
                         x.copy().reshape(-1),
-                        action,
+                        action_numpy,  # Put un-normalized action into memory.
                         mask,
                         next_state_feat,
                         disc_reward_t + posterior_reward_t,
