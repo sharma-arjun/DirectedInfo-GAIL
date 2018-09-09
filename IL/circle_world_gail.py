@@ -518,6 +518,11 @@ class GAILMLP(BaseGAIL):
                                               action_log_stds_old,
                                               action_stds_old)
 
+            if optim_idx == 0:
+                print("[DEBUG] => Min log prob curr: {:.3f} old: {:.3f}".format(
+                    torch.min(log_prob_cur).data.cpu().numpy()[0],
+                    torch.min(log_prob_old).data.cpu().numpy()[0]))
+
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
             ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
@@ -528,7 +533,7 @@ class GAILMLP(BaseGAIL):
                     1.0 + self.args.clip_epsilon) * advantages_var
             policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
-            clip_grad_value(self.policy_net.parameters(), 50)
+            clip_grad_value(self.policy_net.parameters(), 10)
             self.opt_policy.step()
             # ==== END ====
 
@@ -672,7 +677,8 @@ class GAILMLP(BaseGAIL):
         args, dtype = self.args, self.dtype
         results = {'average_reward': [], 'episode_reward': [],
                    'true_traj_state': {}, 'true_traj_action': {},
-                   'pred_traj_state': {}, 'pred_traj_action': {}}
+                   'pred_traj_state': {}, 'pred_traj_action': {},
+                   'pred_context': {}}
 
         self.train_step_count, self.gail_step_count = 0, 0
         gen_traj_step_count = 0
@@ -691,7 +697,7 @@ class GAILMLP(BaseGAIL):
             num_steps, batch_size = 0, 1
             reward_batch, expert_true_reward_batch = [], []
             true_traj_curr_epoch = {'state':[], 'action': []}
-            gen_traj_curr_epoch = {'state': [], 'action': []}
+            gen_traj_curr_epoch = {'state': [], 'action': [], 'c': []}
             env_reward_batch_dict = {'linear_traj_reward': [],
                                      'map_traj_reward': []}
 
@@ -746,6 +752,9 @@ class GAILMLP(BaseGAIL):
 
 
                 # TODO: Make this a separate function. Can be parallelized.
+                true_traj_curr_episode = {'state':[], 'action': []}
+                gen_traj_curr_episode = {'state': [], 'action': [], 'c': []}
+
                 ep_reward, expert_true_reward = 0, 0
                 env_reward_dict = {'linear_traj_reward': 0.0,
                                     'map_traj_reward': 0.0,}
@@ -782,6 +791,15 @@ class GAILMLP(BaseGAIL):
                     action = self.select_action(x_var, c_var, goal_var, 
                                                 train=train)
                     action_numpy = action.data.cpu().numpy()
+
+                    # ==== Save generated and true trajectories ====
+                    true_traj_curr_episode['state'].append(state_expert[:, t, :])
+                    true_traj_curr_episode['action'].append(action_expert[:, t, :])
+                    gen_traj_curr_episode['state'].append(curr_state_arr)
+                    gen_traj_curr_episode['action'].append(action_numpy)
+                    gen_traj_curr_episode['c'].append(ct)
+                    # ==== END ====
+
                     action = action_numpy
 
                     # Get the discriminator reward
@@ -891,6 +909,13 @@ class GAILMLP(BaseGAIL):
                 results['episode_reward'].append(ep_reward)
                 # ==== END ====
 
+                # Append trajectories
+                true_traj_curr_epoch['state'].append(true_traj_curr_episode['state'])
+                true_traj_curr_epoch['action'].append(true_traj_curr_episode['action'])
+                gen_traj_curr_epoch['state'].append(gen_traj_curr_episode['state'])
+                gen_traj_curr_epoch['action'].append(gen_traj_curr_episode['action'])
+                gen_traj_curr_epoch['c'].append(gen_traj_curr_episode['c'])
+
                 # Increment generated trajectory step count.
                 gen_traj_step_count += 1
 
@@ -920,6 +945,19 @@ class GAILMLP(BaseGAIL):
                             'map_min': np.min(map_traj_reward),
                         },
                         self.train_step_count)
+
+            # Add predicted and generated trajectories to results
+            if not train or ep_idx % self.args.save_interval == 0:
+                results['true_traj_state'][ep_idx] = copy.deepcopy(
+                        true_traj_curr_epoch['state'])
+                results['true_traj_action'][ep_idx] = copy.deepcopy(
+                        true_traj_curr_epoch['action'])
+                results['pred_traj_state'][ep_idx] = copy.deepcopy(
+                        gen_traj_curr_epoch['state'])
+                results['pred_traj_action'][ep_idx] = copy.deepcopy(
+                        gen_traj_curr_epoch['action'])
+                results['pred_context'][ep_idx] = copy.deepcopy(
+                        gen_traj_curr_epoch['c'])
 
             collect_sample_end_time = time.time()
             gail_train_start_time, gail_train_end_time = 0, 0
@@ -1077,12 +1115,10 @@ def main(args):
                 args.results_dir,
                 'results_' + os.path.basename(args.checkpoint_path)[:-3] \
                         + 'pkl')
-        gail_mlp.get_value_function_for_grid()
-
         gail_mlp.train_gail(
-                3,
+                1,
                 results_pkl_path,
-                gen_batch_size=512,
+                gen_batch_size=1200,
                 train=False)
         print("Did save results to: {}".format(results_pkl_path))
         return
