@@ -452,9 +452,11 @@ class GAILMLP(BaseGAIL):
             expert_disc_loss.backward()
 
             # Backprop with generated demonstrations
+            # discriminator should see normalized gen. actions
+            action_var_norm = action_var / torch.norm(action_var, dim=1).unsqueeze(1)
             gen_output = self.reward_net(
                     torch.cat((state_var,
-                               action_var,
+                               action_var_norm,
                                goal_var), 1))
             gen_disc_loss = F.binary_cross_entropy(
                     gen_output,
