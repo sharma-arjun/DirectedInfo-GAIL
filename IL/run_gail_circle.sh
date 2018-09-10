@@ -35,7 +35,7 @@ args=(
   
   --results_dir ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1_posterior_0.001_lr_1e-4/
 
-  # --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1/checkpoint/cp_1200.pth
+  --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1_posterior_0.1_lr_1e-4/checkpoint/cp_2000.pth
   
   # --cuda
 )
