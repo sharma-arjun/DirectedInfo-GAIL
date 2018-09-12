@@ -6,6 +6,7 @@ import pdb
 import pickle
 import torch
 import gym
+from gym import wrappers
 import math
 
 from torch import nn, optim
@@ -757,6 +758,8 @@ class VAETrain(object):
 
         true_reward_batch = []
 
+        self.env_mon = wrappers.Monitor(self.env, './monitor/try', lambda x : False, force=True)
+
         # We need to sample expert trajectories to get (s, a) pairs which
         # are required for goal prediction.
         for e in range(num_test_samples):
@@ -809,23 +812,23 @@ class VAETrain(object):
 
             elif self.env_type == 'mujoco':
                 #x_feat = ep_state[:, 0, :]
-                x_feat = self.env.reset()[None,:]
-                dummy_state = self.env.reset()
+                x_feat = self.env_mon.reset()[None,:]
+                dummy_state = self.env_mon.reset()
                 if 'Hopper' in self.env_name:
-                    self.env.env.set_state(np.concatenate(
+                    self.env_mon.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
                 elif 'Walker' in self.env_name:
-                    self.env.env.set_state(np.concatenate(
+                    self.env_mon.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
             elif self.env_type == 'gym':
                 x_feat = ep_state[:, 0, :]
-                dummy_state = self.env.reset()
+                dummy_state = self.env_mon.reset()
                 theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, np.newaxis]
                 theta_dot = (x_feat[:, 2])[:, np.newaxis]
-                self.env.env.state = np.concatenate(
+                self.env_mon.env.env.state = np.concatenate(
                         (theta, theta_dot), axis=1).reshape(-1)
                 # x_feat = np.concatenate(
                 #        [x_feat, np.zeros((ep_state.shape[0], 1))], axis=1)
@@ -967,9 +970,37 @@ class VAETrain(object):
                     next_state, true_reward_t, done = ep_state[:, t+1, :][0], \
                                                       0, t+2 >= episode_len
 
+                    # Case 4: Sample next state and visualize ontext with
+                    # current state.
+                    # next_state, true_reward_t, done, _ = self.env_mon.step(
+                            # ep_action[:,t,:][0],
+                            # np.argmax(pred_context[-1]))
+
+                    # Case 5: Sample next state using predicted action and 
+                    # visualize context with current state.
+                    # next_state, true_reward_t, done, _ = self.env_mon.step(
+                            # action, np.argmax(pred_context[-1]))
+
                     true_reward += true_reward_t
                     if done:
                         break
+
+                    if self.env_mon.env.env.viewer is not None:
+                        self.env_mon.env.env.viewer.directed_gail_context_list.put(0)
+
+                    self.env_mon.render()
+
+                    # if 'Hopper' in self.env_name:
+                        # self.env_mon.env.env.set_state(np.concatenate(
+                            # (np.array([0.0]), ep_state[0, t+1, :5]), axis=0), ep_state[0, t+1, 5:])
+                    # elif 'Walker' in self.env_name:
+                        # self.env_mon.env.env.set_state(np.concatenate(
+                            # (np.array([0.0]), ep_state[0, t+1, :8]), axis=0), ep_state[0, t+1, 8:17])
+                    # else:
+                        # raise ValueError("Incorrect env name for mujoco")
+
+                    # if done:
+                       # break
 
                     # self.env.render()
 
@@ -1016,6 +1047,8 @@ class VAETrain(object):
         true_reward_batch = np.array(true_reward_batch)
         print('Batch reward mean: {:.3f}'.format(true_reward_batch.mean()))
         print('Batch reward std: {:.3f}'.format(true_reward_batch.std()))
+
+        # pdb.set_trace()
 
         return results
 
@@ -1764,6 +1797,13 @@ class VAETrain(object):
                     expert,
                     num_test_samples=num_test_samples,
                     test_goal_policy_only=test_goal_policy_only)
+            for i in range(len(results['pred_context'])):
+                tmp_c = np.squeeze(results['pred_context'][i])
+                import matplotlib.pyplot as plt
+                plt.plot(np.argmax(tmp_c, axis=1))
+                plt.show()
+
+            pdb.set_trace()
 
         if self.use_rnn_goal_predictor:
             goal_pred_conf_arr = np.zeros((self.num_goals, self.num_goals))
@@ -1837,13 +1877,13 @@ def main(args):
         print("Did load models at: {}".format(args.checkpoint_path))
         results_pkl_path = os.path.join(
             args.results_dir,
-            'results_expert_' + os.path.basename(args.checkpoint_path))
+            'results_test_' + os.path.basename(args.checkpoint_path))
         # Replace pth file extension with pkl
         results_pkl_path = results_pkl_path[:-4] + '.pkl'
         test_goal_policy_only = True if args.run_mode == 'test_goal_pred' else \
                 False
         vae_train.test_models(expert, results_pkl_path=results_pkl_path,
-                              num_test_samples=30,
+                              num_test_samples=5,
                               test_goal_policy_only=test_goal_policy_only)
     elif args.run_mode == 'train_goal_pred':
         assert args.use_separate_goal_policy == 1, \

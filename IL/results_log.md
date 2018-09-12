@@ -6,5 +6,15 @@
 - CUBE 2: ./results/hopper/context_8/gail_fixed_fast_save_25/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_19_14_1
 8_PM/checkpoint/cp_1125.pth
 
-- CUBE 2: /results/hopper/context_8/gail_fixed_fast_c_from_expert_and_policy/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Se
-pt_22_2_03_AM/checkpoint/cp_4975.pth
+- CUBE 2: /results/hopper/context_8/gail_fixed_fast_c_from_expert_and_policy/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_22_2_03_AM/checkpoint/cp_4975.pth
+
+#### context 8 (with c from expert and policy)
+
+- ./results/hopper/context_8/gail_fixed_fast_c_from_expert_and_policy/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_
+time_Sept_21_7_18_PM/checkpoint/cp_1525.pth
+
+#### c from expert only
+
+- CUBE 1 (Context 4): ./results/hopper/context_4/gail_fixed_fast_c_from_expert_only/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_21_7_18_PM/checkpoint/cp_1200.pth
+
+- CUBE 1 (Context 8):./results/hopper/context_8/gail_fixed_fast_c_from_expert_only/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_21_7_18_PM/checkpoint/cp_1000.pth

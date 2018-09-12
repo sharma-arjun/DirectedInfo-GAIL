@@ -267,6 +267,12 @@ def run_agent_worker(run_args,
     memory_list, log_list = [], []
     num_steps, batch_size = 0, 1
 
+    if not train:
+        env = gym.wrappers.Monitor(
+                env,
+                directory='./monitor/c_from_expert_and_policy/hopper/context_4',
+                video_callable=lambda x: True,
+                force=True)
     while num_steps < gen_batch_size:
         # Sample trajectory expert.sample()
         traj_expert, traj_expert_indices = expert.sample(size=batch_size,
@@ -305,19 +311,19 @@ def run_agent_worker(run_args,
         if run_args.use_random_starts:
             ### if using random states ###
             dummy_state = env.reset()
-            x_feat = np.concatenate((dummy_state, np.array([0.0])),
-                                     axis=0)[np.newaxis, :]
+            x_feat = dummy_state[np.newaxis, :]
         else:
             ### use start state from data ###
             if run_args.env_type == 'mujoco':
                 x_feat = state_expert[:, 0, :]
                 dummy_state = env.reset()
                 if 'Hopper' in run_args.env_name:
-                    env.env.set_state(np.concatenate(
+                    env.env.env.set_state(np.concatenate(
                                 (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
                 elif 'Walker' in run_args.env_name:
-                    env.env.set_state(np.concatenate(
-                                (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                    env.env.env.set_state(
+                            np.concatenate((np.array([0.0]), x_feat[0, :8]), axis=0),
+                            x_feat[0, 8:17])
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
@@ -424,7 +430,16 @@ def run_agent_worker(run_args,
             else:
                 ep_reward += disc_reward_t
 
-            next_state_feat, true_reward, done, _ = env.step(action.reshape(-1))
+            if train:
+                next_state_feat, true_reward, done, _ = env.step(
+                        action.reshape(-1))
+            else:
+                next_state_feat, true_reward, done, _ = env.step(
+                        action.reshape(-1),
+                        context=np.argmax(next_ct.data.cpu().numpy().reshape(-1)))
+
+            # env.render()
+
             env_reward_dict['true_reward'] += true_reward
             if run_args.use_time_in_state:
                 next_state_feat = np.concatenate(
@@ -449,8 +464,8 @@ def run_agent_worker(run_args,
 
             num_steps += 1
 
-            if run_args.render:
-                env.render()
+            #if run_args.render:
+            #    env.render()
 
             if mask == 0:
                 break
@@ -1175,7 +1190,10 @@ class CausalGAILMLP(BaseGAIL):
 
         start_time = time.time()
         # Get the results by making a BLOCKING call.
-        results = self.env_pool.map(parallel_run_agent_worker, args_list)
+        if train:
+            results = self.env_pool.map(parallel_run_agent_worker, args_list)
+        else:
+            results = [parallel_run_agent_worker(*args_list)]
         end_time = time.time()
         print("END: Blocking call, time: {:.3f}".format(end_time-start_time))
 
@@ -1202,10 +1220,18 @@ class CausalGAILMLP(BaseGAIL):
         self.convert_models_to_type(dtype)
 
         #running_state = ZFilter((self.vae_train.args.vae_state_size), clip=5)
-        if train:
+        if train or True:
             print("Will get c for all expert trajectories.")
             t1 = time.time()
             self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
+            for i in range(len(self.cached_expert_c_list)):
+                print(np.unique(np.argmax(self.cached_expert_c_list[i], axis=1)))
+                '''
+                import matplotlib.pyplot as plt
+                plt.plot(np.argmax(self.cached_expert_c_list[i], axis=1))
+                plt.show()
+                '''
+            # pdb.set_trace()
             print("Time: {:.3f} Did get c for all expert trajectories. ".format(
                 time.time() - t1))
         else:
