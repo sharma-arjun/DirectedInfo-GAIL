@@ -1303,7 +1303,7 @@ def main(args):
         causal_gail_mlp.train_gail(
                 1,
                 results_pkl_path,
-                gen_batch_size=512,
+                gen_batch_size=1000*10,
                 train=False)
         print("Did save results to: {}".format(results_pkl_path))
         return
