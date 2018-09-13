@@ -33,9 +33,11 @@ args=(
 
   --vae_checkpoint_path ./results/circle/vae/traj_meta_1_traj_100_opposite_circles_equal_radii_epoch_1000_batch_64_1-cos_cos_wt_ratio_50/checkpoint/cp_1000.pth
   
-  --results_dir ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_history_1_posterior_0.1_lr_1e-4/
+  --results_dir ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1_posterior_0.1_lr_1e-4/
 
-  --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_history_1_posterior_0.1_lr_1e-4/checkpoint/cp_1900.pth
+  --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1_posterior_0.1_lr_1e-4/checkpoint/cp_4800.pth
+
+  # --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1_posterior_0.1_lr_1e-4/checkpoint/cp_2000.pth
   
   # --cuda
 )
