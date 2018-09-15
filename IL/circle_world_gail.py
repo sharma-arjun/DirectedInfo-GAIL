@@ -537,7 +537,19 @@ class GAILMLP(BaseGAIL):
                     1.0 - self.args.clip_epsilon,
                     1.0 + self.args.clip_epsilon) * advantages_var
             policy_surr = -torch.min(surr1, surr2).mean()
-            policy_surr.backward()
+            # Add L2 loss on action prediction #
+            if self.args.use_goal_in_policy:
+                inp_var = torch.cat((expert_state_var,
+                                     expert_goal_var), dim=1)
+            else:
+                inp_var = torch.cat((expert_state_var,
+                                     expert_latent_c_var), dim=1)
+
+            pred_action_mean, _, _ = self.policy_net(inp_var)
+            policy_l2 = F.mse_loss(pred_action_mean, expert_action_var)
+            policy_loss = policy_surr + \
+                          self.args.lambda_policy_l2 * policy_l2
+            policy_loss.backward()
             clip_grad_value(self.policy_net.parameters(), 10)
             self.opt_policy.step()
             # ==== END ====
@@ -1198,6 +1210,8 @@ if __name__ == '__main__':
                         help='Parameter to scale MI loss from the posterior.')
     parser.add_argument('--lambda_goal_pred_reward', type=float, default=1.0,
                         help='Reward scale for goal prediction reward from RNN.')
+    parser.add_argument('--lambda_policy_l2', type=float, default=1.0,
+                        help='Parameter to scale L2 loss for policy.')
 
     # Training parameters
     parser.add_argument('--learning_rate', type=float, default=3e-4,
