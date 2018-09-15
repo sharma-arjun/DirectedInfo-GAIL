@@ -95,7 +95,7 @@ class GAILMLP(BaseGAIL):
         # Reward net is the discriminator network.
         self.reward_net = Reward(state_size * history_size,
                                  action_size,
-                                 num_goals,
+                                 num_goals + policy_latent_size,
                                  hidden_size=64)
 
         if vae_train.args.use_discrete_vae:
@@ -333,12 +333,13 @@ class GAILMLP(BaseGAIL):
     def get_discriminator_reward(self, x, a, c, next_c, goal_var=None):
         '''Get discriminator reward.'''
         if goal_var is not None:
-            next_c = torch.cat([goal_var, next_c], dim=1)
+            next_c = torch.cat([next_c, goal_var], dim=1)
 
+        # reward_net([x, a, next_c, g])
         disc_reward = float(self.reward_net(torch.cat(
             (x,
              Variable(torch.from_numpy(a)).type(self.dtype),
-             goal_var), 1)).data.cpu().numpy()[0,0])
+             next_c), 1)).data.cpu().numpy()[0,0])
 
         if self.args.disc_reward == 'log_d':
             if disc_reward < 1e-8:
@@ -433,6 +434,7 @@ class GAILMLP(BaseGAIL):
             start_idx, end_idx = curr_id_exp, curr_id_exp + curr_batch_size_exp
             expert_state_var = Variable(expert_states[start_idx:end_idx])
             expert_action_var = Variable(expert_actions[start_idx:end_idx])
+            expert_latent_c_var = Variable(expert_latent_c[start_idx:end_idx])
             expert_goal_var = None
             if expert_goal is not None:
                 expert_goal_var = Variable(expert_goal[start_idx:end_idx])
@@ -444,6 +446,7 @@ class GAILMLP(BaseGAIL):
             expert_output = self.reward_net(
                     torch.cat((expert_state_var,
                                expert_action_var,
+                               expert_latent_c_var,
                                expert_goal_var), 1))
             expert_disc_loss = F.binary_cross_entropy(
                     expert_output,
@@ -457,6 +460,7 @@ class GAILMLP(BaseGAIL):
             gen_output = self.reward_net(
                     torch.cat((state_var,
                                action_var_norm,
+                               latent_next_c_var,
                                goal_var), 1))
             gen_disc_loss = F.binary_cross_entropy(
                     gen_output,
@@ -721,6 +725,8 @@ class GAILMLP(BaseGAIL):
                     c_gen, expert_goal = self.get_c_for_traj(state_expert,
                                                              action_expert,
                                                              c_expert)
+                
+                # Reverse generated c to compose new policy    
 
                 true_goal_numpy = np.zeros((c_expert.shape[0], self.num_goals))
                 true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
@@ -789,7 +795,7 @@ class GAILMLP(BaseGAIL):
                             raise ValueError("incorrect true goal size")
                     # ==== END ====
 
-                    action = self.select_action(x_var, c_var, goal_var, 
+                    action = self.select_action(x_var, next_c_var, goal_var, 
                                                 train=train)
                     action_numpy = action.data.cpu().numpy()
                     action_numpy_norm = action_numpy / np.linalg.norm(
