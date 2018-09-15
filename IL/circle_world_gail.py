@@ -554,8 +554,12 @@ class GAILMLP(BaseGAIL):
             self.opt_policy.step()
             # ==== END ====
 
-            self.logger.summary_writer.add_scalar('loss/policy',
+            self.logger.summary_writer.add_scalar('loss/policy_surr',
                                                   policy_surr.data[0],
+                                                  self.gail_step_count)
+
+            self.logger.summary_writer.add_scalar('loss/policy_l2',
+                                                  policy_l2.data[0],
                                                   self.gail_step_count)
 
             policy_l2_norm, policy_grad_l2_norm = \
