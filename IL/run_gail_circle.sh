@@ -24,8 +24,8 @@ args=(
 
   --env-type circle
 
-  --lambda_posterior 0.001
-  --lambda_policy_l2 0.001
+  --lambda_posterior 0.01
+  --lambda_policy_l2 0.1
   --use_value_net
   --optim_batch_size 256
   --save_interval 100
@@ -34,9 +34,9 @@ args=(
 
   --vae_checkpoint_path ./results/circle/vae/traj_meta_1_traj_100_opposite_circles_equal_radii_epoch_1000_batch_64_1-cos_cos_wt_ratio_50/checkpoint/cp_1000.pth
   
-  --results_dir ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii/action_policy_output_normalized/context_2_goal_1_history_1/disc_with_nextc_posterior_0.001_lr_1e-4_with_policy_l2_0.001
+  --results_dir ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii/action_policy_output_normalized/context_2_goal_1_history_1/disc_with_nextc_posterior_0.01_lr_1e-4_with_policy_l2_0.1/opposite_dir
 
-  # --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1_posterior_0.001_lr_1e-4/checkpoint/cp_4000.pth
+   --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii/action_policy_output_normalized/context_2_goal_1_history_1/disc_with_nextc_posterior_0.01_lr_1e-4_with_policy_l2_0.1/checkpoint/cp_600.pth
 
   # --checkpoint_path ./results/circle/gail/meta_1_traj_100_opposite_circles_equal_radii_action_policy_output_normalized_context_2_goal_1_posterior_lambda_0.1_history_1_posterior_0.1_lr_1e-4/checkpoint/cp_2000.pth
   

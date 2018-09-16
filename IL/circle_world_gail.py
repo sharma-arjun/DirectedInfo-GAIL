@@ -741,6 +741,8 @@ class GAILMLP(BaseGAIL):
                     c_gen, expert_goal = self.get_c_for_traj(state_expert,
                                                              action_expert,
                                                              c_expert)
+                    c_gen = c_gen[:,::-1,:]
+                    c_gen = np.copy(c_gen)
                 
                 # Reverse generated c to compose new policy    
 
