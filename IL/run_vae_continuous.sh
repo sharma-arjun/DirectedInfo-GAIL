@@ -11,7 +11,7 @@ args=(
   --use_discrete_vae
 
   --vae_state_size 11
-  --vae_action_size 6
+  --vae_action_size 3
   --vae_goal_size 1
   --vae_history_size 1
   --vae_context_size 8
