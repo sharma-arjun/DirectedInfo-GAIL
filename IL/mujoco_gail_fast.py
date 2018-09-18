@@ -56,6 +56,88 @@ class C:
         names = ('frank', 'justin', 'osi', 'thomas')
         pool.map(unwrap_self_f, zip([self]*len(names), names))
 
+
+def get_c_for_traj(vae_model, env, args, state_arr, action_arr, c_arr,
+                   history_size, env_type, num_goals, use_discrete_vae, dtype):
+    '''Get c[1:T] for given trajectory.'''
+    batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
+    c_arr = np.array(c_arr, dtype=np.int32)
+
+    true_goal_numpy = np.zeros((c_arr.shape[0], num_goals))
+    true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
+    true_goal = Variable(torch.from_numpy(true_goal_numpy).type(dtype))
+
+    action_var = Variable(torch.from_numpy(action_arr).type(dtype))
+
+    # Context output from the VAE encoder
+    pred_c_arr = -1 * np.ones((
+        batch_size,
+        episode_len + 1,
+        vae_model.posterior_latent_size))
+
+    if env_type == 'mujoco':
+        x_feat = state_arr[:, 0, :]
+        dummy_state = env.reset()
+        if 'Hopper' in args.env_name:
+            env.env.set_state(np.concatenate(
+                (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
+        elif 'Walker' in args.env_name:
+            env.env.set_state(np.concatenate(
+                (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+        else:
+            raise ValueError("Incorrect env name for mujoco")
+
+        dummy_state = x_feat
+    elif env_type == 'gym':
+        x_feat = state_arr[:, 0, :]
+        dummy_state = env.reset()
+        theta = (np.arctan2(x_feat[:, 1], x_feat[:, 0]))[:, np.newaxis]
+        theta_dot = (x_feat[:, 2])[:, np.newaxis]
+        env.env.state = np.concatenate((theta, theta_dot), axis=1).reshape(-1)
+        if args.use_time_in_state:
+            x_feat = np.concatenate(
+                    [x_feat, np.zeros((state_arr.shape[0], 1))], axis=1)
+    else:
+        raise ValueError('Incorrect env type: {}'.format(args.env_type))
+
+    # x is (N, F)
+    x = x_feat
+
+    # Add history to state
+    if history_size > 1:
+        x_hist = -1 * np.ones((x.shape[0], history_size, x.shape[1]),
+                              dtype=np.float32)
+        x_hist[:, history_size - 1, :] = x_feat
+        x = x_hist
+
+    for t in range(episode_len):
+        c = pred_c_arr[:, t, :]
+        x_var = Variable(torch.from_numpy(
+            x.reshape((batch_size, -1))).type(dtype))
+
+        c_var = Variable(torch.from_numpy(c).type(dtype))
+        if len(true_goal.size()) == 2:
+            c_var = torch.cat([true_goal, c_var], dim=1)
+        elif len(true_goal.size()) == 3:
+            c_var = torch.cat([true_goal[:, t, :], c_var], dim=1)
+        else:
+            raise ValueError("incorrect true goal size")
+
+        # copied code from vae.py get_context_at_state
+        if use_discrete_vae:
+            logits = vae_model.encode(x_var, c_var)
+            c_next = vae_model.reparameterize(logits, vae_model.temperature)
+        else:
+            mu, logvar = vae_model.encode(x_var, c_var)
+            c_next = vae_model.reparameterize(mu, logvar)
+
+        pred_c_arr[:, t+1, :] = c_next.data.cpu().numpy()
+
+        if history_size > 1:
+            x_hist[:, :(history_size-1), :] = x_hist[:, 1:, :]
+
+    return pred_c_arr
+
 def get_history_features(state, use_velocity=False):
     '''
     state: Numpy array of shape (N, H, F)
@@ -178,7 +260,7 @@ def run_agent_worker(run_args,
     max_episode_len: Maximum episode length for each episode. Int.
     config: Agent config.
     volatile: True if input state variable should be volatile else False.
-    Return: Dictionary with `memory_list` and `log_list` keys. 
+    Return: Dictionary with `memory_list` and `log_list` keys.
     '''
     memory_list, log_list = [], []
     num_steps, batch_size = 0, 1
@@ -195,10 +277,17 @@ def run_agent_worker(run_args,
         expert_episode_len = state_expert.shape[1]
 
         # Generate c from trained VAE
-        pred_c_tensor = -1 * torch.ones((
-            batch_size,
-            max(expert_episode_len, run_args.max_ep_length) + 1, # + 1 for c[-1]
-            posterior_latent_size)).type(dtype)
+        if not train:
+            pred_c_tensor = -1 * torch.ones((
+                batch_size,
+                max(expert_episode_len, run_args.max_ep_length) + 1, # + 1 for c[-1]
+                posterior_latent_size)).type(dtype)
+        else:
+            pred_c_tensor = get_c_for_traj(
+                    vae_model, env, run_args, state_expert, action_expert,
+                    c_expert, run_args.history_size, run_args.env_type,
+                    num_goals, use_discrete_vae, dtype)
+            pred_c_tensor = torch.from_numpy(pred_c_tensor).type(dtype)
 
         true_goal_numpy = np.zeros((c_expert.shape[0], num_goals))
         true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
@@ -254,6 +343,7 @@ def run_agent_worker(run_args,
         for t in range(expert_episode_len):
             # First predict next ct
             ct = pred_c_tensor[:, t, :]
+
             # Get state and context variables
             x_var = Variable(torch.from_numpy(x.reshape((batch_size, -1))).type(
                 dtype))
@@ -271,7 +361,8 @@ def run_agent_worker(run_args,
 
             next_ct = get_context_at_state(vae_model, x_var, c_var,
                                            use_discrete_vae=use_discrete_vae)
-            pred_c_tensor[:, t+1, :] = next_ct.data
+            if not train:
+                pred_c_tensor[:, t+1, :] = next_ct.data
 
             # Reassign correct c_var and next_c_var
             c_var, next_c_var = Variable(ct), next_ct
@@ -288,8 +379,9 @@ def run_agent_worker(run_args,
 
 
             # Generator should predict the action using (x_t, c_t)
+            # Note c_t is next_c_var.
             action = select_action(policy_net, x_var, next_c_var, goal_var,
-                                   use_goal_in_policy=run_args.use_goal_in_policy,  
+                                   use_goal_in_policy=run_args.use_goal_in_policy,
                                    train=train)
             action_numpy = action.data.cpu().numpy()
             action = action_numpy
@@ -307,19 +399,21 @@ def run_agent_worker(run_args,
             if not run_args.use_goal_in_policy:
                 posterior_reward_t = run_args.lambda_posterior \
                         * get_posterior_reward(
-                                posterior_net, 
+                                posterior_net,
                                 x_var, c_var,
-                                next_c_var, 
+                                next_c_var,
                                 use_discrete_vae=use_discrete_vae,
                                 use_reparameterize=args.use_reparameterize,
                                 goal_var=goal_var)
             posterior_reward += posterior_reward_t
 
-            # Update Rewards
-            ep_reward += (disc_reward_t + posterior_reward_t)
+            # Update Rewards, do not use posterior reward during test.
+            if train:
+                ep_reward += (disc_reward_t + posterior_reward_t)
+            else:
+                ep_reward += disc_reward_t
 
-            next_state_feat, true_reward, done, _ = env.step(
-                    action.reshape(-1))
+            next_state_feat, true_reward, done, _ = env.step(action.reshape(-1))
             env_reward_dict['true_reward'] += true_reward
             if run_args.use_time_in_state:
                 next_state_feat = np.concatenate(
@@ -508,7 +602,7 @@ class CausalGAILMLP(BaseGAIL):
             batch_list.append(self.cached_expert_c_list[i])
 
         return batch_list
-    
+
     def get_c_for_traj(self, state_arr, action_arr, c_arr):
         '''Get c[1:T] for given trajectory.'''
         batch_size, episode_len = state_arr.shape[0], state_arr.shape[1]
@@ -545,7 +639,7 @@ class CausalGAILMLP(BaseGAIL):
                     (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
             else:
                 raise ValueError("Incorrect env name for mujoco")
-            
+
             dummy_state = x_feat
         elif self.env_type == 'gym':
             x_feat = state_arr[:, 0, :]
@@ -596,24 +690,6 @@ class CausalGAILMLP(BaseGAIL):
             if history_size > 1:
                 x_hist[:, :(history_size-1), :] = x_hist[:, 1:, :]
 
-            #### Next state ####
-            #if 'grid' in self.args.env_type:
-            #    if t < episode_len-1:
-            #        next_state = StateVector(state_arr[:, t+1, :],
-            #                                 self.obstacles)
-            #    else:
-            #        break
-
-            #    if history_size > 1:
-            #        x_hist[:, history_size-1] = self.vae_train.get_state_features(
-            #                next_state, self.args.use_state_features)
-            #        x = self.vae_train.get_history_features(x_hist)
-            #    else:
-            #        x[:] = self.vae_train.get_state_features(
-            #                next_state, self.args.use_state_features)
-            #else:
-            #    raise ValueError("Not implemented yet.")
-
         return pred_c_arr, pred_goal
 
     def checkpoint_data_to_save(self):
@@ -648,7 +724,7 @@ class CausalGAILMLP(BaseGAIL):
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
-        
+
     def set_expert(self, expert):
         assert self.expert is None, "Trying to set non-None expert"
         self.expert = expert
@@ -1129,7 +1205,7 @@ class CausalGAILMLP(BaseGAIL):
                     gen_batch_size, self.args.max_ep_length + 1, train=train)
 
             # Add to tensorboard if training.
-            true_reward =[log['true_reward'] for log in log_list] 
+            true_reward =[log['true_reward'] for log in log_list]
             gen_reward = [log['total_disc_reward'] for log in log_list]
             if train:
                 add_scalars_to_summary_writer(
@@ -1150,7 +1226,7 @@ class CausalGAILMLP(BaseGAIL):
                         self.train_step_count)
 
             collect_sample_end_time = time.time()
-            
+
             gail_train_start_time, gail_train_end_time = 0, 0
             if train:
                 gail_train_start_time = time.time()
