@@ -247,6 +247,7 @@ def run_agent_worker(run_args,
                      posterior_net,
                      expert,
                      env,
+                     cached_expert_c_list,
                      gen_batch_size,
                      posterior_latent_size,
                      num_goals,
@@ -267,7 +268,8 @@ def run_agent_worker(run_args,
 
     while num_steps < gen_batch_size:
         # Sample trajectory expert.sample()
-        traj_expert = expert.sample(size=batch_size)
+        traj_expert, traj_expert_indices = expert.sample(size=batch_size,
+                                                         return_indices=True)
 
         state_expert, action_expert, c_expert, _ = traj_expert
         state_expert = np.array(state_expert, dtype=np.float32)
@@ -283,10 +285,16 @@ def run_agent_worker(run_args,
                 max(expert_episode_len, run_args.max_ep_length) + 1, # + 1 for c[-1]
                 posterior_latent_size)).type(dtype)
         else:
-            pred_c_tensor = get_c_for_traj(
-                    vae_model, env, run_args, state_expert, action_expert,
-                    c_expert, run_args.history_size, run_args.env_type,
-                    num_goals, use_discrete_vae, dtype)
+            pred_c_tensor = np.array([np.vstack((
+                -1 * np.ones((1, cached_expert_c_list[0].shape[1])),
+                cached_expert_c_list[i])) for i in traj_expert_indices])
+            # We have already computed this, don't need to call again.
+            # Saves a LOT of computation!!
+            # pred_c_tensor = get_c_for_traj(
+                    # vae_model, env, run_args, state_expert, action_expert,
+                    # c_expert, run_args.history_size, run_args.env_type,
+                    # num_goals, use_discrete_vae, dtype)
+            
             pred_c_tensor = torch.from_numpy(pred_c_tensor).type(dtype)
 
         true_goal_numpy = np.zeros((c_expert.shape[0], num_goals))
@@ -1144,6 +1152,7 @@ class CausalGAILMLP(BaseGAIL):
                                         self.posterior_net,
                                         self.expert,
                                         env,
+                                        self.cached_expert_c_list,
                                         per_worker_batch_size,
                                         self.vae_train.vae_model.posterior_latent_size,
                                         self.num_goals,
