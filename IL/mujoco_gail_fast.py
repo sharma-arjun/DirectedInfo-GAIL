@@ -359,9 +359,11 @@ def run_agent_worker(run_args,
                 else:
                     raise ValueError("incorrect true goal size")
 
-            next_ct = get_context_at_state(vae_model, x_var, c_var,
-                                           use_discrete_vae=use_discrete_vae)
-            if not train:
+            if train:
+                next_ct = Variable(pred_c_tensor[:, t+1, :])
+            else:
+                next_ct = get_context_at_state(vae_model, x_var, c_var,
+                                               use_discrete_vae=use_discrete_vae)
                 pred_c_tensor[:, t+1, :] = next_ct.data
 
             # Reassign correct c_var and next_c_var
