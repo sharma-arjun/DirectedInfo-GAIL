@@ -21,11 +21,13 @@ args=(
   --env-name Hopper-v2
   --env-type mujoco
   --episode_len 1000
-  --run_mode train
+  --run_mode test
 
   --checkpoint_every_epoch 20
 
   --results_dir ./results/hopper/discrete_vae/batch_64_context_8_no_time/
+
+  --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_8_no_time/checkpoint/cp_960.pth
 
   --cuda
 )
