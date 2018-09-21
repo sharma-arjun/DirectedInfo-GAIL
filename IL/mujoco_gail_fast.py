@@ -254,7 +254,8 @@ def run_agent_worker(run_args,
                      use_rnn_goal_predictor,
                      use_discrete_vae,
                      dtype,
-                     train):
+                     train,
+                     sample_c_from_expert):
     '''Collect experience for agent.
     env: Environment to collect samples from.
     batch_size: Number of example instances to be collected. Int.
@@ -279,12 +280,7 @@ def run_agent_worker(run_args,
         expert_episode_len = state_expert.shape[1]
 
         # Generate c from trained VAE
-        if not train:
-            pred_c_tensor = -1 * torch.ones((
-                batch_size,
-                max(expert_episode_len, run_args.max_ep_length) + 1, # + 1 for c[-1]
-                posterior_latent_size)).type(dtype)
-        else:
+        if sample_c_from_expert:
             pred_c_tensor = np.array([np.vstack((
                 -1 * np.ones((1, cached_expert_c_list[0].shape[1])),
                 cached_expert_c_list[i])) for i in traj_expert_indices])
@@ -296,6 +292,11 @@ def run_agent_worker(run_args,
                     # num_goals, use_discrete_vae, dtype)
             
             pred_c_tensor = torch.from_numpy(pred_c_tensor).type(dtype)
+        else:
+            pred_c_tensor = -1 * torch.ones((
+                batch_size,
+                max(expert_episode_len, run_args.max_ep_length) + 1, # + 1 for c[-1]
+                posterior_latent_size)).type(dtype)
 
         true_goal_numpy = np.zeros((c_expert.shape[0], num_goals))
         true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
@@ -367,7 +368,7 @@ def run_agent_worker(run_args,
                 else:
                     raise ValueError("incorrect true goal size")
 
-            if train:
+            if sample_c_from_expert:
                 next_ct = Variable(pred_c_tensor[:, t+1, :])
             else:
                 next_ct = get_context_at_state(vae_model, x_var, c_var,
@@ -1145,6 +1146,9 @@ class CausalGAILMLP(BaseGAIL):
 
         args_list, per_worker_batch_size = [], batch_size // len(self.envs)
         for i, env in enumerate(self.envs):
+            # Generate trajectories by sampling both from expert and by current
+            # policy.
+            sample_c_from_expert = (i % 2 == 0)
             run_agent_worker_args[i] = (args,
                                         self.vae_train.vae_model,
                                         self.policy_net,
@@ -1160,6 +1164,7 @@ class CausalGAILMLP(BaseGAIL):
                                         self.vae_train.args.use_discrete_vae,
                                         self.dtype,
                                         train,
+                                        sample_c_from_expert,
                                         )
             args_list.append(run_agent_worker_args[i])
 
