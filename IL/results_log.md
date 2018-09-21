@@ -1,0 +1,7 @@
+#### context 8
+
+- CUBE 1: /results/hopper/context_8/gail_fixed_fast_save_25/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_19_14_1
+8_PM/checkpoint/cp_1750.pth
+
+- CUBE 2: ./results/hopper/context_8/gail_fixed_fast_save_25/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_19_14_1
+8_PM/checkpoint/cp_1125.pth
