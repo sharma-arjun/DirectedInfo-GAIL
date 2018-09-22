@@ -676,7 +676,7 @@ class CausalGAILMLP(BaseGAIL):
             x_hist[:, history_size - 1, :] = x_feat
             x = self.vae_train.get_history_features(x_hist)
 
-        for t in range(episode_len):
+        for t in range(episode_len - 1):
             c = pred_c_arr[:, t, :]
             x_var = Variable(torch.from_numpy(
                 x.reshape((batch_size, -1))).type(self.dtype))
@@ -700,6 +700,10 @@ class CausalGAILMLP(BaseGAIL):
 
             if history_size > 1:
                 x_hist[:, :(history_size-1), :] = x_hist[:, 1:, :]
+                x_hist[:, history_size-1,  :] = state_arr[:, t+1, :]
+                x = x_hist
+            else:
+                x = state_arr[:, t+1, :]
 
         return pred_c_arr, pred_goal
 
@@ -1148,7 +1152,8 @@ class CausalGAILMLP(BaseGAIL):
         for i, env in enumerate(self.envs):
             # Generate trajectories by sampling both from expert and by current
             # policy.
-            sample_c_from_expert = (i % 2 == 0)
+            # sample_c_from_expert = (i % 2 == 0)
+            sample_c_from_expert = True
             run_agent_worker_args[i] = (args,
                                         self.vae_train.vae_model,
                                         self.policy_net,
