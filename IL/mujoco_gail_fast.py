@@ -1153,7 +1153,7 @@ class CausalGAILMLP(BaseGAIL):
             # Generate trajectories by sampling both from expert and by current
             # policy.
             # sample_c_from_expert = (i % 2 == 0)
-            sample_c_from_expert = True
+            sample_c_from_expert = train
             run_agent_worker_args[i] = (args,
                                         self.vae_train.vae_model,
                                         self.policy_net,
@@ -1208,6 +1208,8 @@ class CausalGAILMLP(BaseGAIL):
             self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
             print("Time: {:.3f} Did get c for all expert trajectories. ".format(
                 time.time() - t1))
+        else:
+            self.cached_expert_c_list = None
 
         for ep_idx in range(num_epochs):
             num_steps, batch_size = 0, 1
