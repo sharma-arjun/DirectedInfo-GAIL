@@ -956,16 +956,22 @@ class VAETrain(object):
 
                 elif self.env_type == 'mujoco' or self.env_type == 'gym':
                     action = pred_actions_numpy[0, :]
-                    #next_state, true_reward_t, done, _ = self.env.step(action)
-                    next_state, true_reward_t, done, _ = self.env.step(ep_action[:,t,:][0])
+                    true_reward_t = 0
+                    # Case 1: Sample next state from the action predicted
+                    # next_state, true_reward_t, done, _ = self.env.step(action)
+
+                    # Case 2: Sample next state from the expert action
+                    # next_state, true_reward_t, done, _ = self.env.step(ep_action[:,t,:][0])
+
+                    # Case 3: Sample next state from expert states directly
+                    next_state, true_reward_t, done = ep_state[:, t+1, :][0], \
+                                                      0, t+2 >= episode_len
+
                     true_reward += true_reward_t
-                    #self.env.render()
                     if done:
                         break
 
-                    # next_state = np.concatenate(
-                    #        (next_state,
-                    #         np.ones((batch_size)) * (t+1)/(episode_len+1)), axis=0)
+                    # self.env.render()
 
                     if history_size > 1:
                         x_hist[:, history_size - 1, :] = next_state
@@ -1831,7 +1837,7 @@ def main(args):
         print("Did load models at: {}".format(args.checkpoint_path))
         results_pkl_path = os.path.join(
             args.results_dir,
-            'results_' + os.path.basename(args.checkpoint_path))
+            'results_expert_' + os.path.basename(args.checkpoint_path))
         # Replace pth file extension with pkl
         results_pkl_path = results_pkl_path[:-4] + '.pkl'
         test_goal_policy_only = True if args.run_mode == 'test_goal_pred' else \
