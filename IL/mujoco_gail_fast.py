@@ -1152,8 +1152,8 @@ class CausalGAILMLP(BaseGAIL):
         for i, env in enumerate(self.envs):
             # Generate trajectories by sampling both from expert and by current
             # policy.
-            # sample_c_from_expert = (i % 2 == 0)
-            sample_c_from_expert = train
+            sample_c_from_expert = (i % 2 == 0)
+            # sample_c_from_expert = train
             run_agent_worker_args[i] = (args,
                                         self.vae_train.vae_model,
                                         self.policy_net,

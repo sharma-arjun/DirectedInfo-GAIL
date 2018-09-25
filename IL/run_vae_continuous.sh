@@ -4,7 +4,7 @@ args=(
   --expert-path ./h5_trajs/mujoco_trajs/normal_hopper/rebuttal_hopper_100/
 
   --batch-size 64
-  --num-epochs 1000
+  --num-epochs 2000
   --use_rnn_goal 0
   --use_goal_in_policy 0
   --use_separate_goal_policy 1
@@ -25,9 +25,9 @@ args=(
 
   --checkpoint_every_epoch 20
 
-  --results_dir ./results/hopper/discrete_vae/batch_64_context_8_no_time/
+  --results_dir ./results/hopper/discrete_vae/batch_64_context_8_no_time_try_2/
 
-  --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_8_no_time/checkpoint/cp_960.pth
+  --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_8_no_time_try_2/checkpoint/cp_2000.pth
 
   --cuda
 )
