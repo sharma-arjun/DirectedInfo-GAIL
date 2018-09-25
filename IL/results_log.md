@@ -5,3 +5,6 @@
 
 - CUBE 2: ./results/hopper/context_8/gail_fixed_fast_save_25/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_19_14_1
 8_PM/checkpoint/cp_1125.pth
+
+- CUBE 2: /results/hopper/context_8/gail_fixed_fast_c_from_expert_and_policy/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Se
+pt_22_2_03_AM/checkpoint/cp_4975.pth
