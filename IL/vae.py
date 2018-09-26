@@ -1247,7 +1247,7 @@ class VAETrain(object):
                         train_policy2_loss += policy2_loss.data[0]
                     train_KLD_loss += KLD_loss.data[0]
 
-                if 'circle' in self.env_type \
+                if ('circle' in self.env_type or 'mujoco' in self.env_type) \
                         and self.args.cosine_similarity_loss_weight > 0.00001 \
                         and len(c_var_hist) > 0:
                     # Add cosine loss for similarity
@@ -1266,7 +1266,7 @@ class VAETrain(object):
                 # pred_actions_numpy is (N, A)
                 pred_actions_numpy = vae_output[0].data.cpu().numpy()
 
-                if 'circle' in self.env_type:
+                if 'circle' in self.env_type or 'mujoco' in self.env_type:
                     c_var_hist.append(vae_output[-1])
 
                 if history_size > 1:

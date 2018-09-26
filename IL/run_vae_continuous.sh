@@ -9,25 +9,26 @@ args=(
   --use_goal_in_policy 0
   --use_separate_goal_policy 1
   --use_discrete_vae
+  --cosine_similarity_loss_weight 1.0
 
   --vae_state_size 11
   --vae_action_size 3
   --vae_goal_size 1
   --vae_history_size 1
-  --vae_context_size 8
+  --vae_context_size 4
 
   --no-use_state_features
   --continuous_action
   --env-name Hopper-v2
   --env-type mujoco
   --episode_len 1000
-  --run_mode test
+  --run_mode train
 
   --checkpoint_every_epoch 20
 
-  --results_dir ./results/hopper/discrete_vae/batch_64_context_8_no_time_try_2/
+  --results_dir ./results/hopper/discrete_vae/batch_64_context_4_no_time_try_2_cos_similarity/
 
-  --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_8_no_time_try_2/checkpoint/cp_2000.pth
+  # --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_8_no_time_try_2/checkpoint/cp_2000.pth
 
   --cuda
 )
