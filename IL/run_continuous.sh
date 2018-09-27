@@ -6,7 +6,7 @@ args=(
   --state_size 11
   --action_size 3
   --history_size 1
-  --context_size 8
+  --context_size 4
   --batch_size 4096
   --num_epochs 5000
   --max_ep_length 1000
@@ -30,9 +30,10 @@ args=(
   # --vae_checkpoint_path ./results/walker/vae/batch_64_context_4_no_time/results/checkpoint/cp_1000.pth
   # Old hopper path with context = 4
   # --vae_checkpoint_path ./results/hopper/discrete_vae/batch_64_context_4_no_time/results/checkpoint/cp_640.pth
-  --vae_checkpoint_path ./results/hopper/discrete_vae/batch_64_context_8_no_time_try_2/checkpoint/cp_2000.pth
+  # --vae_checkpoint_path ./results/hopper/discrete_vae/batch_64_context_8_no_time_try_2/checkpoint/cp_2000.pth
+  --vae_checkpoint_path ./results/hopper/discrete_vae/batch_64_context_4_no_time_try_2_cos_similarity_0.1/checkpoint/cp_2000.pth
 
-  --results_dir ./results/hopper/context_8/gail_c_from_expert_and_policy_vae_try_2/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_24_11_45_PM
+  --results_dir ./results/hopper/context_4/gail_c_from_expert_and_policy_vae_cp_cos_sim_0.1/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_26_8_15_PM
 
   # --checkpoint_path ./results/hopper/context_4/gail_fixed_fast_c_from_expert_only/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_21_7_18_PM/checkpoint/cp_1300.pth
 
