@@ -1,0 +1,670 @@
+\documentclass{article} % For LaTeX2e
+\usepackage{iclr2019_conference,times}
+
+% Optional math commands from https://github.com/goodfeli/dlbook_notation.
+\input{math_commands.tex}
+
+\usepackage{hyperref}
+\usepackage{url}
+
+% My packages
+\usepackage{graphicx}
+\usepackage{subcaption}
+%\usepackage{amsmath, amsfonts, bm}
+\usepackage{amssymb}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{color}
+\usepackage{booktabs}
+
+\title{Directed-Info GAIL: Learning Hierarchical Policies from Unsegmented Demonstrations using Directed Information}
+
+% Authors must not appear in the submitted version. They should be hidden
+% as long as the \iclrfinalcopy macro remains commented out below.
+% Non-anonymous submissions will be rejected without review.
+
+\author{Antiquus S.~Hippocampus, Natalia Cerebro \& Amelie P. Amygdale \thanks{ Use footnote for providing further information
+about author (webpage, alternative address)---\emph{not} for acknowledging
+funding agencies.  Funding acknowledgements go at the end of the paper.} \\
+Department of Computer Science\\
+Cranberry-Lemon University\\
+Pittsburgh, PA 15213, USA \\
+\texttt{\{hippo,brain,jen\}@cs.cranberry-lemon.edu} \\
+\And
+Ji Q. Ren \& Yevgeny LeNet \\
+Department of Computational Neuroscience \\
+University of the Witwatersrand \\
+Joburg, South Africa \\
+\texttt{\{robot,net\}@wits.ac.za} \\
+\AND
+Coauthor \\
+Affiliation \\
+Address \\
+\texttt{email}
+}
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to \LaTeX{} to determine where to break
+% the lines. Using \AND forces a linebreak at that point. So, if \LaTeX{}
+% puts 3 of 4 authors names on the first line, and the last on the second
+% line, try using \AND instead of \And before the third author name.
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+%\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+\begin{document}
+
+
+\maketitle
+
+\begin{abstract}
+The use of imitation learning to learn a single policy for a complex task that has multiple modes or hierarchical structure can be challenging. In fact, previous work has shown that when the modes are known, learning separate policies for each mode or sub-task can greatly improve the performance of imitation learning. In this work, we discover the interaction between sub-tasks from their resulting state-action trajectory sequences using a directed graphical model. We propose a new algorithm based on the generative adversarial imitation learning framework which automatically learns sub-task policies from unsegmented demonstrations. Our approach maximizes the directed information flow in the graphical model between sub-task latent variables and their generated trajectories. We also show how our approach connects with the existing Options framework, which is commonly used to learn hierarchical policies. %We show experimentally, the ability of our approach to learn sub-task policies automatically from unsegmented demonstrations in both discrete and continuous state-action spaces.
+\end{abstract}
+
+%\IEEEpeerreviewmaketitle
+
+\section{Introduction}
+
+Complex human activities can often be broken down into various simpler sub-activities or sub-tasks that can serve as the basic building blocks for completing a variety of complicated tasks. For instance, when driving a car, a driver may perform several simpler sub-tasks such as driving straight in a lane, changing lanes, executing a turn and braking, in different orders and for varying times depending on the source, destination, traffic conditions \emph{etc.} Using imitation learning to learn a single monolithic policy to represent a structured activity can be challenging as it does not make explicit the sub-structure between the parts within the activity. In this work, we develop an imitation learning framework that can learn a policy for each of these sub-tasks given unsegmented activity demonstrations and also learn a macro-policy which dictates switching from one sub-task policy to another. Learning sub-task specific policies has the benefit of shared learning. Each such sub-task policy also needs to specialize over a restricted state space, thus making the learning problem easier.
+
+Previous works in imitation learning \citep{li2017infogail, hausman2017multi} focus on learning each sub-task specific policy using \emph{segmented} expert demonstrations by modeling the variability in each sub-task policy using a latent variable. This latent variable is inferred by enforcing high mutual information between the latent variable and expert demonstrations. This information theoretic perspective is equivalent to the graphical model shown in Figure~\ref{fig:causal_model} (Left), where the node $c$ represents the latent variable. However, since learning sub-task policies requires isolated demonstrations for each sub-task, this setup is difficult to scale to many real world scenarios where providing such segmented trajectories is cumbersome. Further, this setup does not learn a macro-policy to combine the learned sub-task policies in meaningful ways to achieve different tasks.
+
+In our work, we aim to learn each sub-task policy directly from \textit{unsegmented} activity demonstrations.
+For example, given a task consisting of three sub-tasks --- A, B and C, we wish to learn a policy to complete sub-task A, learn when to transition from A to B, finish sub-task B and so on. To achieve this we use a causal graphical model, which can be represented as a Dynamic Bayesian Network as shown in Figure~\ref{fig:causal_model} (Right). The nodes $c_t$ denote latent variables which indicate the currently active sub-task and the nodes $\tau_t$ denote the state-action pair at time $t$. We consider as given, a set of expert demonstrations, each of which is represented by $\boldsymbol{\tau} = \{\tau_1, \cdots, \tau_T\}$ and has a corresponding sequence of latent factors $\boldsymbol{c} = \{c_1, \cdots, c_{T-1}\} $. The sub-activity at time $t$ dictates what state-action pair was generated at time $t$. The previous sub-task and the current state together cause the selection of the next sub-task.
+
+% \begin{figure}
+%     \centering
+%     \includegraphics[scale=0.34]{figures/causal_model_new.png}
+%     \caption{Causal model in this work. The latent code causes the policy to produce a trajectory. The current trajectory, and latent code produce the next latent code}
+%     \label{fig:causal_model}
+% \vspace{-0.1cm}
+% \end{figure}
+
+%\begin{figure}
+%\centering
+%\begin{tabular}{cc}
+%    \includegraphics[width=0.18\textwidth]{figures/graphical_model/info_gail_model.png} &
+%    \includegraphics[width=0.24\textwidth]{figures/graphical_model/directed_info_gail_model.png}
+%    \end{tabular}
+%    \caption{\textbf{Left:} Graphical model used in Info-GAIL \cite{li2017infogail}. \textbf{Right:} Causal model in this work. The latent code causes the policy to produce a trajectory. The current trajectory, and latent code produce the next latent code }
+%    \label{fig:causal_model}
+%    \vspace{-0.2cm}
+% \end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[scale=0.5]{figures/causal_model.pdf}
+    \caption{\textbf{Left:} Graphical model used in Info-GAIL \cite{li2017infogail}. \textbf{Right:} Causal model in this work. The latent code causes the policy to produce a trajectory. The current trajectory, and latent code produce the next latent code}
+    \label{fig:causal_model}
+\end{figure}
+
+
+
+As we will discuss in Section~\ref{sec:proposed_approach}, extending the use of mutual information
+to learn sub-task policies from unsegmented demonstrations
+is \textit{problematic}, as it requires learning the macro-policy as a conditional probability distribution which depends on the \emph{unobserved future}. This unobserved future is unknown during earlier points of interaction (Figure~\ref{fig:causal_model}).
+To alleviate this, in our work we aim to force the policy to generate trajectories that maximize the directed information or causal information \citep{massey1990causality} flow from trajectories to latent factors of variation within the trajectories instead of mutual information. Using directed information requires us to learn a causally conditioned probability distribution \citep{kramer1998directed} which depends only on the \emph{observed past} while allowing the unobserved future to be sequentially revealed. Further, since there exists \emph{feedback} in our causal graphical model \emph{i.e.}, information flows from the latent variables to trajectories and vice versa, directed information also provides a better upper bound on this information flow between the latent variables and expert trajectories than does the conventional mutual information \citep{massey1990causality, kramer1998directed}.
+
+We also draw connections with existing work on learning sub-task policies using imitation learning with the \textit{options framework} \citep{sutton1998intra, daniel2016probabilistic}. We show that our work, while derived using the information theoretic perspective of maximizing directed information, bears a close resemblance to applying the options framework in a generative adversarial imitation setting. Thus, our approach combines the benefits of learning hierarchical policies using the options framework with the robustness of generative adversarial imitation learning, helping overcome problems such as compounding errors that plague behaviour cloning.
+
+In summary, the main contributions of our work include:
+
+\begin{itemize}
+    \item We extend existing generative adversarial imitation learning frameworks to allow for learning of sub-task specific policies by maximizing directed information in a causal graph of sub-activity latent variables and observed trajectory variables.
+    
+    \item We draw connections between previous works on imitation learning with sub-task policies using \textit{options} and show that our proposed approach can also be seen as \textit{option} learning in a generative adversarial setting.
+    
+    \item We show through experiments on both discrete and continuous state-action spaces, the ability of our approach to segment expert demonstrations into meaningful sub-tasks and  combine sub-task specific policies to perform the desired task.
+\end{itemize}
+
+\section{Related Work}
+
+%\subsection{Markov Decision Processes}
+
+%A discrete time-discounted Markov Decision Process can be described by the tuple $(\mathcal{S}, \mathcal{A}, p_{0}, \mathcal{T}, \mathcal{R}, \gamma )$ where $\mathcal{S}$ is the set of states, $\mathcal{A}$ is the set of actions, $p_{0}$ is the initial state distribution,  $\mathcal{T}$ is the state-transition distribution $\mathcal{R}$ is the reward function and $\gamma \in [0, 1)$ is the discount factor. A policy $\pi(a|s)$ defines the conditional distribution over actions given the state. A trajectory $\tau = (s_{0}, a_{0}, \cdots , s_{T})$ defines the sequence of states and actions.
+
+\subsection{Imitation Learning}
+
+Imitation Learning \citep{pomerleau1989alvinn} aims at learning policies that can mimic expert behaviours from demonstrations. Modeling the problem as a Markov Decision Process (MDP), the goal in imitation learning is to learn a policy $\pi(a|s)$, which defines the conditional distribution over actions $a \in \mathcal{A} $ given the state $s \in \mathcal{S}$, from state-action trajectories $\tau = (s_{0}, a_{0}, \cdots , s_{T})$ of expert behaviour. Recently, \cite{ho2016generative} introduced an imitation learning framework called Generative Adversarial Imitation Learning (GAIL) that is able to learn policies for complex high-dimensional physics-based control tasks. They reduce the imitation learning problem into an adversarial learning framework, for which they utilize Generative Adversarial Networks (GAN) \citep{goodfellow2014generative}. The generator network of the GAN represents the agent's policy $\pi$ while the discriminator network serves as a local reward function and learns to differentiate between state-action pairs from the expert policy $\pi_{\mathbb{E}}$ and from the agent's policy $\pi$. Mathematically, it is equivalent to optimizing the following,
+
+\begin{align*}\label{eq:gail_2}
+\begin{split}
+    \min_{\pi} \max_{D} \mathbb{E}_{\pi} [\log D(s,a)] + \mathbb{E}_{\pi_E} [1-\log D(s,a)] -\lambda H(\pi)
+\end{split}
+\end{align*}
+
+InfoGAIL \citep{li2017infogail} and \cite{hausman2017multi} solve the problem of learning from policies generated by a mixture of experts. They introduce a latent variable $c$ into the policy function $\pi(a|s, c)$ to separate different type of behaviours present in the demonstration. To incentivize the network to use the latent variable, they utilize an information-theoretic regularization enforcing that there should be high mutual information between $c$ and the state-action pairs in the generated trajectory, a concept that was first introduced in InfoGAN \citep{chen2016infogan}. They introduce a variational lower bound $L_1(\pi, Q)$ of the mutual information $I(c; \tau)$ to the loss function in GAIL.
+
+\begin{equation*}
+    L_1(\pi, Q) = \mathbb{E}_{c \sim p(c), a \sim \pi(\cdot | s, c)} \log Q(c|\tau) + H(c) \leq I(c; \tau)
+\end{equation*}
+
+The modified objective can then be given as,
+\begin{align*}
+\begin{split}
+    \min_{\pi, q} \max_{D} \mathbb{E}_{\pi} [\log D(s,a)] + \mathbb{E}_{\pi_E} [1-\log D(s,a)]
+    -\lambda_{1}L_{1}(\pi, q) -\lambda_{2}H(\pi)
+\end{split}
+\end{align*}
+
+InfoGAIL models variations between different trajectories as the latent codes correspond to trajectories coming from different demonstrators. In contrast, we aim to model \emph{intra-trajectory variations} and latent codes in our work correspond to sub-tasks (variations) within a demonstration. In Section~\ref{sec:proposed_approach}, we discuss why using a mutual information based loss is infeasible in our problem setting and describe our proposed approach.
+
+\subsection{Options}
+Consider an MDP with states $s \in \mathcal{S}$ and actions $a \in \mathcal{A}$. Under the options framework \citep{sutton1998intra}, an option, indexed by $o \in \mathcal{O}$ consists of a sub-policy $\pi(a|s,o)$, a termination policy $\pi(b|s,\bar{o})$ and an option activation policy $\pi(o|s)$. After an option is initiated, actions are generated by the sub-policy until the option is terminated and a new option is selected. 
+
+Options framework has been studied widely in RL literature. A challening problem related to the options framework is to automatically infer options without supervision.
+Option discovery approaches often aim to find bottleneck states, \emph{i.e.}, states that the agent has to pass through to reach the goal. Many different approaches such as multiple-instance learning \citep{mcgovern2001accelerating}, graph based algorithms \citep{menache2002q, csimcsek2005identifying} have  been used to find such bottleneck states. Once the bottleneck states are discovered, the above approaches find options policies to reach each such state. In contrast, we propose a unified framework using a information-theoretic approach to automatically discover relevant option policies without the need to discover bottleneck states.
+
+\cite{daniel2016probabilistic} formulate the options framework as a probabilistic graphical model where options are treated as latent variables which are then learned from expert data. The option policies ($\pi(a|s,o)$) are analogous to sub-task policies in our work. These option policies are then learned by maximizing a lower bound using the Expectation-Maximization algorithm~\citep{moon1996expectation}. We show how this lower bound is closely related to the objective derived in our work. We further show how this connection allows our method to be seen as a generative adversarial variant of their approach.
+% automatically discover relevant bottleneck states which enumerate option policies.
+
+
+%In contrast, in our work we do not need to assume the existence of bottleneck states and instead use information-theoretic approaches to discover relevant option policies.
+
+Prior work in robot learning has also looked at learning motion primitives from unsegmented demonstrations. These primitives usually correspond to a particular skill and are analogous to options.
+%\cite{fox2009sharing} introduced the Beta-Process Autoregressive Hidden Markov Model (BP-AR-HMM) to segment and identify the common behaviors from multiple motion capture trajectories.
+\cite{niekum2011clustering} used the Beta-Process Autoregressive Hidden Markov Model (BP-AR-HMM) to segment expert demonstrations and post-process these segments to learn motion primitives which provide the ability to use reinforcement learning for policy improvement.
+Alternately, \cite{krishnan2018transition} use Dirichlet Process Gaussian Mixture Model (DP-GMM) to segment the expert demonstrations by finding transition states between linear dynamical segments.
+%They further use a series of merging and pruning steps to optimize the number of segments in the given trajectory.
+Similarly, \cite{ranchod2015nonparametric} use the BP-AR-HMM framework to initially segment the expert demonstrations and then use an inverse reinforcement learning step to infer the reward function for each segment.
+The use of appropriate priors allows these methods to discover options without a priori knowledge of the total number of skills.
+However, unlike the above methods in our proposed approach we also learn an appropriate policy over the extracted options. We show how this allows us to compose the individual option policies to induce novel behaviours which were not present in the expert demonstrations. 
+% which allows us to combine the options in novel ways.
+% However, in contrast to our work none of these methods have been used in conjunction with reinforcement learning methods which requires learning a robust meta-policy to combine the learned primitives in novel ways.
+
+%The work of \cite{daniel2016probabilistic} is most similar to our proposed approach. 
+% We connect our work to this existing method and show that our method can be seen as a generative adversarial variant of their approach.
+
+\section{Proposed Approach}
+\label{sec:proposed_approach}
+
+%\subsection{Modeling sub-activities}
+
+As mentioned in the previous section, while prior approaches can learn to disambiguate the multiple modalities in the demonstration of a sub-task and learn to imitate them, they cannot learn to imitate demonstrations of unsegmented long tasks that are formed by a combination of many small sub-tasks. To learn such sub-task policies from unsegmented deomonstrations we use the graphical model in Figure~\ref{fig:causal_model} (Right), \emph{i.e.}, consider a set of expert demonstrations, each of which is represented by $\boldsymbol{\tau} = \{\tau_1, \cdots, \tau_T\}$ where $\tau_t$ is the state-action pair observed at time $t$. Each such demonstration has a corresponding sequence of latent variables $\boldsymbol{c} = \{c_1, \cdots, c_{T-1}\} $ which denote the sub-activity in the demonstration at any given time step. 
+
+As noted before, previous approaches \citep{li2017infogail, hausman2017multi} model the expert sub-task demonstrations using only a single latent variable. To enforce the model to use this latent variable, these approaches propose to maximize the mutual information between the demonstrated sequence of state-action pairs and the latent embedding of the nature of the sub-activity. This is achieved by adding a lower bound to the mutual information between the latent variables and expert demonstrations. This variational lower bound of the mutual information is then combined with the the adversarial loss for imitation learning proposed in \cite{ho2016generative}. Extending this to our setting, where we have a \emph{sequence} of latent variables $\boldsymbol{c}$, yields the following lower bound on the mutual information,
+
+\begin{equation}
+%\footnotesize
+ L(\pi, q) = \sum_{t} \mathbb{E}_{c^{1:t} \sim p(c^{1:t}), a^{t-1} \sim \pi(\cdot | s^{t-1},c^{1:t-1})} \Big[
+ \log q(c^{t} | c^{1:t-1}, \boldsymbol{\tau}) \Big] + H(\boldsymbol{c}) \leq I(\boldsymbol{\tau}; \boldsymbol{c})
+\end{equation}
+
+Observe that the dependence of $q$ on the entire trajectory $\boldsymbol{\tau}$ precludes the use of such a distribution at test time, where only the trajectory up to the current time is known. To overcome this limitation, in this work we propose to force the policy to generate trajectories that maximize the \textit{directed} or \textit{causal} information flow from trajectories to the sequence of latent sub-activity variables instead. As we show below, by using directed information instead of mutual information, we can replace the dependence on $\boldsymbol{\tau}$ with a dependence on the trajectory generated up to current time $t$.
+
+The directed information flow from a sequence $\boldsymbol{X}$ to $\boldsymbol{Y}$ is given by,
+
+\begin{equation*}
+I(\boldsymbol{X} \rightarrow \boldsymbol{Y}) = H(\boldsymbol{Y}) - H(\boldsymbol{Y} \| \boldsymbol{X})    
+\end{equation*}
+
+where $H(\boldsymbol{Y} \| \boldsymbol{X})$ is the causally-conditioned entropy. Replacing $\boldsymbol{X}$ and $\boldsymbol{Y}$ with sequences $\boldsymbol{\tau}$ and $\boldsymbol{c}$,
+
+\begin{align}
+\footnotesize
+I(\boldsymbol{\tau} \rightarrow \boldsymbol{c}) &= H(\boldsymbol{c}) - H(\boldsymbol{c} \| \boldsymbol{\tau})& &\nonumber \\
+&= H(\boldsymbol{c}) - \sum_{t}H(c^{t}|c^{1:t-1}, \tau^{1:t})& & \nonumber \\
+&= H(\boldsymbol{c}) + \sum_{t} \sum_{c^{1:t-1}, \tau^{1:t}} \Big[ p(c^{1:t-1}, \tau^{1:t}) & &\nonumber \\
+& \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log p(c^{t} | c^{1:t-1}, \tau^{1:t})\Big]  
+\end{align}
+
+%We now introduce a variational lower bound for the directed information by introducing an approximate posterior $q(c^t | c^{1:t-1}, \tau^{1:t})$,
+%\begin{align}
+%\footnotesize
+% I(\boldsymbol{\tau} \rightarrow \boldsymbol{c}) &= H(\boldsymbol{c}) + \sum_{t} \sum_{c^{1:t-1}, \tau^{1:t}} \Big[ p(c^{1:t-1}, \tau^{1:t}) & & \nonumber\\
+%& [D_{KL}(p(\cdot | c^{1:t-1}, \tau^{1:t}) \| q(\cdot | c^{1:t-1}, \tau^{1:t})) \nonumber \\
+%& \hspace{-5pt}+ \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t})]\Big]   \nonumber \\
+%&\geq H(\boldsymbol{c}) + \sum_{t} \sum_{c^{1:t-1}, \tau^{1:t}} \Big[ p(c^{1:t-1}, \tau^{1:t}) & & \nonumber\\
+%& \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t})\Big]
+%\label{eq:directed_info}
+%\end{align}
+
+%The lower bound in equation~\ref{eq:directed_info} requires us to know the true posterior distribution to compute the expectation. To avoid sampling from $p(c^{t}|c^{1:t-1}, \tau^{1:t})$, we use the following,
+
+%\begin{align}
+% \sum_{c^{1:t-1}, \tau^{1:t}}& \Big[ p(c^{1:t-1}, \tau^{1:t}) & \nonumber\\
+%& \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \nonumber\\
+%& \log q(c^{t} | c^{1:t-1}, \tau^{1:t})\Big] \nonumber \\
+%= \sum_{c^{1:t-1}, \tau^{1:t},c^{t}}& \Big[ p(c^{1:t-1}, \tau^{1:t}) p(c^{t} | c^{1:t-1}, \tau^{1:t}) & &\nonumber\\
+%& \log q(c^{t} | c^{1:t-1}, \tau^{1:t})\Big] \nonumber \\
+%= \sum_{c^{1:t-1}, \tau^{1:t},c^{t}}& \Big[ p(c^{t}, c^{1:t-1}, \tau^{1:t}) \nonumber\\
+%& \log q(c^{t} | c^{1:t-1}, \tau^{1:t})] \nonumber \\
+%= \sum_{c^{1:t-1}, \tau^{1:t},c^{t}}&  \Big[p(\tau^{1:t} | c^{t}, c^{1:t-1}) p(c^{t}, c^{1:t-1}) \nonumber\\
+%& \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \Big] \nonumber \\
+%% \end{align}
+%% \begin{align}
+%= \sum_{c^{1:t}} p(c^{1:t})\sum_{\tau^{1:t}}&  \Big[p(\tau^{1:t} | c^{t}, c^{1:t-1}) \nonumber\\
+%& \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \Big] \nonumber \\
+%= \sum_{c^{1:t}} p(c^{1:t})\sum_{\tau^{1:t}}&  \Big[p(\tau^{1:t} | c^{1:t-1}) \nonumber\\
+%& \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \Big]
+%\label{eq:directed_info2}
+%\end{align}
+%
+%where the last step follows from the causal restriction that future provided variables ($c^t$) do not  influence earlier predicted variables ($\tau^{1:t}$ ). Putting the result from equation~\eqref{eq:directed_info2} in equation~\eqref{eq:directed_info} gives,
+
+Here $\tau^{1:t} = (s_1, \cdots, a_{t-1}, s_{t})$. A variational lower bound, $L_{1}(\pi, q)$ of the directed information,  $I(\boldsymbol{\tau} \rightarrow \boldsymbol{c})$ which uses an approximate posterior $q(c^{t}|c^{1:t-1}, \tau^{1:t})$ instead of the true posterior $p(c^{t}|c^{1:t-1}, \tau^{1:t})$ can then be derived to get (See Appendix~\ref{sec:derivation} for the complete derivation),
+\begin{align}
+\begin{split}
+ L_{1}(\pi, q) = \sum_{t} \mathbb{E}_{c^{1:t} \sim p(c^{1:t}), a^{t-1} \sim \pi(\cdot | s^{t-1},c^{1:t-1})} \left[
+ \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \right] + H(\boldsymbol{c}) \leq I(\boldsymbol{\tau} \rightarrow \boldsymbol{c})
+\label{eq:loss1}
+\end{split}
+\end{align}
+% \begin{align}
+% L_{1}(\pi, q) = \sum_{t}\Big[ &\big(\mathbb{E}_{c^{1:t} \sim p(c^{1:t}), a^{t} \sim \pi(\cdot | s^{t},c^{1:t})} \nonumber\\
+% &\log q(c^{t} | c^{1:t-1}, \tau^{1:t})\big)  \nonumber\\
+% & + H(\boldsymbol{c})\Big]\nonumber\\
+% & \leq I(\boldsymbol{\tau} \rightarrow \boldsymbol{c})
+% \label{eq:loss1}
+% \end{align}
+Thus, by maximizing directed information instead of mutual information, we can learn a posterior distribution over the next latent factor $c$ given the latent factors discovered up to now and the trajectory followed up to now, thereby removing the dependence on the future trajectory. In practice, we do not consider the $H(\boldsymbol{c})$ term. This gives us the following objective,
+
+\begin{equation}
+    \min_{\pi, q} \max_{D} ~~\mathbb{E}_{\pi} \left[\log D(s,a)\right] + \mathbb{E}_{\pi_E} \left[1-\log D(s,a)\right] -\lambda_{1}L_{1}(\pi, q) - \lambda_{2}H(\pi)
+\label{eq:directed_info_loss}
+\end{equation}
+
+We call this approach Directed-Info GAIL. Notice that, to compute the loss in \eqref{eq:loss1}, we need to sample from the prior distribution $p(c^{1:t})$. In order to estimate this distribution, we first pre-train a variational auto-encoder (VAE) \citep{kingma2013auto} on the expert trajectories, the details of which are described in the next sub-section.
+
+\subsection{VAE pre-training}
+
+Figure~\ref{fig:vae_pretraining_step} (left) shows the design of the VAE pictorially. The VAE consists of two multi-layer perceptrons that serve as the encoder and the decoder. The encoder uses the current state $s_t$ and the previous latent variable $c_{t-1}$ to produce the current latent variable $c_t$. We used the Gumbel-softmax trick \citep{jang2016categorical} to obtain samples of latent variables from a categorical distribution. The decoder then takes $s_t$ and $c_t$ as input and outputs the action $a_t$. We use the following objective, which maximizes the lower bound of the probability of the trajectories $p(\boldsymbol{\tau})$, to train our VAE,
+
+\begin{equation}
+L_{\text{VAE}}(\pi, q; \boldsymbol{\tau_i}) = - \sum_{t} \mathbb{E}_{c^{t} \sim q} \Big[\log \pi(a^t | s^{t}, c^{1:t})\Big] + \sum_{t} D_{\text{KL}}(q(c^{t} | c^{1:t-1}, \tau^{1:t}) \| p(c^{t} | c^{1:t-1}))
+\label{eq:loss_vae}
+\end{equation}
+
+
+\begin{figure}
+    \centering
+    \begin{subfigure}{0.56\columnwidth}
+    \includegraphics[scale=0.4]{figures/VAE_step2.pdf}
+    \end{subfigure}
+    \centering
+    \begin{subfigure}{0.4\columnwidth}
+    \includegraphics[scale=0.26]{figures/pipeline.pdf}
+    \end{subfigure}
+    %\vspace{0.2cm}
+    \caption{Left: VAE pre-training step. The VAE encoder uses the current state $(s_t)$, and previous latent variable $(c_{t-1})$ to produce the current latent variable $(c_{t})$. The decoder reconstructs the action $(a_t)$ using $s_t$ and $c_t$. Right: An overview of the proposed approach. We use the VAE pre-training step to learn an approximate prior over the latent variables and use this to learn sub-task policies in the proposed Directed-Info GAIL step.}
+    \label{fig:vae_pretraining_step}
+
+\end{figure}
+
+
+Figure~\ref{fig:vae_pretraining_step} (right) gives an overview of the complete method. The VAE pre-training step allows us to get approximate samples from the distribution $p(c^{1:t})$ to optimize~\eqref{eq:directed_info_loss}. This is done by using $q$ to obtain samples of latent variable sequence $\boldsymbol{c}$ by using its output on the expert demonstrations. In practice, we fix the weights of the network $q$ to those obtained from the VAE pre-training step when optimizing the Directed-Info GAIL loss in \eqref{eq:directed_info_loss}.
+
+\subsection{Connection with options framework}
+
+In \cite{daniel2016probabilistic} the authors provide a probabilistic perspective of the options framework. Although, \cite{daniel2016probabilistic} consider separate termination and option latent variables ($b^t$ and $o^t$), for the purpose of comparison, we collapse them into a single latent variable $c^t$, similar to our framework with a distribution $p(c^t|s^t, c^{t-1})$. The lower-bound derived in \cite{daniel2016probabilistic} which is maximized using Expectation-Maximization (EM) algorithm can then be written as (suppressing dependence on parameters),
+
+\begin{equation}
+    p(\tau) \geq \sum_{t} \sum_{c^{t-1:t}} p(c^{t-1:t}|\tau) \log p(c^t|s^t, c^{t-1})) 
+    + \sum_{t} \sum_{c^t} p(c^t|\tau) \log \pi(a^t|s^t, c^t)
+\label{eq:daniel}
+\end{equation}
+
+Note that the first term in equation \ref{eq:daniel} \emph{i.e.}, the expectation over the distribution $\log p(c^t|s^t, c^{t-1})$ is the same as equation \ref{eq:loss1} of our proposed approach with a one-step Markov assumption and a conditional expectation with given expert trajectories instead of an expectation with generated trajectories. The second term in equation \ref{eq:daniel} \emph{i.e.}, the expectation over $\log \pi(a^t|s^t, c^t)$ is replaced by the GAIL loss in equation \ref{eq:directed_info_loss}. Our proposed Directed-Info GAIL can be therefore be considered as the generative adversarial variant of imitation learning using the options framework. The VAE behaviour cloning pre-training step in equation \ref{eq:loss_vae} is exactly equivalent to equation \ref{eq:daniel}, where we use approximate variational inference using VAEs instead of EM. Thus, our approach combines the benefits of both behavior cloning and generative adversarial imitation learning. Using GAIL enables learning of robust policies that do not suffer from the problem of compounding errors. At the same time, conditioning GAIL on latent codes learned from the behavior cloning step prevents the issue of mode collapse in GANs.
+
+%\subsection{Modelling goal-directed behaviour}
+
+%Two demonstrations of different activities may follow an identical sub-activity sequence till a certain point of time and then deviate from one another. What causes this deviation? We argue that the goal an agent wants to achieve (or the type of activity) directs the sequence of sub-activities. Since we sample a sequence of latent variables using an expert trajectory, and since the goals in the expert trajectory are unknown, we instead infer the goal directly from the expert trajectory. We train a recurrent neural network to predict the goal (a categorical variable) from an input trajectory. During the VAE training step, we predict the goal of the expert trajectory using a recurrent neural network and then condition the VAE on this goal (Figure~\ref{fig:vae_pretraining_step}). During imitation learning, we sample both the goal and the sub-activity sequence using the same expert trajectory and then train the policy to generate a trajectory that can then be used to correctly predict the goal. This can be done by adding the following loss term,
+
+%\begin{align}
+%    L_{2}(\pi, Q) =& \mathbb{E}_{g \sim p(g), c^t \sim q(\cdot | c^{1:t-1}, \tau^{1:t-1}), a^t \sim \pi(\cdot | s^{t}, c^{1:t})} \nonumber\\
+%    & \log Q(g|\boldsymbol{\tau})
+%\label{eq:loss2}
+%\end{align}
+
+%Adding the loss in equation~\ref{eq:loss2} to the objective in equation~\ref{eq:directed_info_loss} gives the goal-directed Directed-Info objective,
+
+%\begin{align}
+%    \min_{\pi, q} \max_{D} & ~~\mathbb{E}_{\pi} [\log D(s,a)] + \mathbb{E}_{\pi_E} [1-\log D(s,a)] \nonumber\\
+%    & -\lambda_{1}L_{1}(\pi, q) -\lambda_{2}L_{2}(\pi, Q)
+%    -\lambda_{3}H(\pi)
+%\end{align}
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.2]{figures/c2.png}
+    \caption{}
+    \end{subfigure}%
+    \centering
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.2]{figures/c3.png}
+    \caption{}
+    \end{subfigure}
+    %~
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.2]{figures/path2.png}
+    \caption{}
+    \end{subfigure}%
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.2]{figures/path4.png}
+    \caption{}
+    \end{subfigure}%
+    
+\caption{Results on the Four Rooms environment. (a) and (b) show results for two different latent variables. The arrows in each cell indicate the direction (action) with highest probability in that state and using the given latent variable. (c) and (d) show expert and generated trajectories in this environment. Star (*) represents the start state. The expert trajectory is shown in red. The color of the generated trajectory represents the latent code used by the policy at each time step.}
+\label{results_exp1}
+\vspace{-0.3cm}
+\end{figure}
+
+\section{Experiments}
+
+We present results on both discrete and continuous state-action environments. In both of these settings we show that (1) our method is able to segment out sub-tasks from given expert trajectories, (2) learn sub-task conditioned policies, and (3) learn to combine these sub-task policies in order to achieve the task objective. 
+
+\subsection{Discrete Environment}
+
+For the discrete setting, we choose a grid world environment which consists of a $15 \times 11 $ grid with four rooms connected via corridors as shown in Figure~\ref{results_exp1}. The agent spawns at a random location in the grid and its goal is to reach an apple, which spawns in one of the four rooms randomly, using the shortest possible path.
+Through this experiment we aim to see whether our proposed approach is able to infer sub-tasks which correspond to meaningful navigation strategies and combine them to plan paths to different goal states.
+% Expert trajectories were created using Dijkstra's shortest path algorithm.
+
+Figure~\ref{results_exp1} shows sub-task policies learned by our approach in this task. The two plots on the left correspond to two of the four different values of the latent variable. The arrow at every state in the grid shows the agent action (direction) with the highest probability in that state for that latent variable. In the discussion that follows, we label the rooms from 1 to 4 starting from the room at the top left and moving in the clockwise direction. 
+We observe that the sub-tasks extracted by our approach represent semantically meaningful navigation plans. Also, each latent variable is utilized for a different sub-task.
+For instance, the agent uses the latent code in Figure~\ref{results_exp1}(a), to perform the sub-task of moving from room 1 to room 3 and from room 2 to room 4 and the code in Figure~\ref{results_exp1}(b) to move in the opposite direction.
+Further, our approach learns to successfully combine these navigation strategies to achieve the given objectives. For example,  
+Figure~\ref{results_exp1}(c, d) show examples of how the macro-policy switches between various latent codes to achieve the desired goals of reaching the apples in rooms 1 and 2 respectively. 
+
+%Star represents the starting state and and the dots in red show the expert trajectory. The green, blue, cyan and purple dots represent the latent code selected at that state. The code in Figure \ref{results_exp1}(d) learns the sub-task of moving from rooms 2 and 4 to the horizontal corridor.
+
+\subsection{Continuous Environments}
+
+To validate our proposed approach in continuous control tasks we experiment
+with 5 continuous state-action environments.
+The first environment involves learning to draw circles on a 2D plane and is called \textit{Circle-World}. In this experiment, the agent must learn to draw a circle in both clockwise and counter-clockwise direction. The agent always starts at (0,0), completes a circle in clockwise direction and then retraces its path in the counter-clockwise direction. The trajectories differ in the radii of the circles. The state $s \in \mathbb{R}^2$ is the (x,y) co-ordinate and the actions $a \in \mathbb{R}^2$ is a unit vector representing the direction of motion.
+Notice that in Circle-World, the expert trajectories include two different actions (for clockwise and anti-clockwise direction) for every state ($x$, $y$) in the trajectory, thus making the problem multi-modal in nature.
+This requires the agent to appropriately disambiguate between the two different phases of the trajectory.
+
+Further, to show the scalability of our approach to higher dimensional continuous control tasks we also show experiments on Pendulum, Inverted Pendulum, Hopper and Walker environments, provided in OpenAI Gym \citep{openai_gym}. Each task is progressively more challenging, with a larger state and action space. 
+Our aim with these experiments is to see whether our approach can identify certain action primitives which helps the agent to complete the given task successfully. 
+To verify the effectiveness of our proposed approach we do a comparative analysis of our results with both GAIL \citep{ho2016generative} and the supervised behavior cloning approaching using a VAE.
+To generate expert trajectories we train an agent using Proximal Policy Optimization \citep{schulman2017proximal}. We used 25 expert trajectories for the Pendulum and Inverted Pendulum tasks and 50 expert trajectories for experiments with the Hopper and Walker environments.
+
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.185]{figures/circle_trajs/result_4.pdf}
+    \caption{}
+    \end{subfigure}%
+    \centering
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.185]{figures/circle_trajs/result_4_rainbow_opposite_cropped.pdf}
+    \caption{}
+    \end{subfigure}
+    \centering
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.185]{figures/circle_trajs/result_4_rainbow_cropped.pdf}
+    \caption{}
+    \end{subfigure}
+    \centering
+    \begin{subfigure}{0.24\columnwidth}
+    \centering
+    \includegraphics[scale=0.169]{figures/pendulum/context_output.pdf}
+    \caption{}
+    \end{subfigure}
+\caption{Results for Directed-Info GAIL on continuous environments. (a) Our method learns to break down the Circle-World task into two different sub-activities, shown in green and blue. (b) Trajectory generated using our approach. Color denotes time step. (c) Trajectory generated in opposite direction. Color denotes time step. (d) Sub-activity latent variables as inferred by Directed-Info GAIL on Pendulum-v0. Different colors represent different context.}
+\label{results_exp2}
+
+\end{figure}
+
+
+\begin{figure}[tb]
+    \centering
+    \begin{subfigure}{0.48\columnwidth}
+    \centering
+    \includegraphics[scale=0.25]{figures/hopper/hopper_walker_subtasks_crop.pdf}
+    \caption{}
+    \end{subfigure}%
+    \centering
+    \begin{subfigure}{0.48\columnwidth}
+    \centering
+    \includegraphics[scale=0.17]{figures/hopper_walker_frames_cropped.pdf}
+    \caption{}
+    \end{subfigure}%
+    %\centering
+    %\begin{subfigure}{0.24\columnwidth}
+    %\includegraphics[scale=0.24]{figures/walker_subtasks.png}
+    %\caption{}
+    %\end{subfigure}
+    
+    \caption{(a) and (b) show the plot of the sub-task latent variable vs time on the Hopper and Walker tasks. (c) and (d) show discovered sub-tasks using Directed-Info GAIL on these environments.}
+    \label{fig:hopper_walker}
+    \vspace{-0.3cm}
+\end{figure}
+
+\begin{table}[]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+ Environment & GAIL \citep{ho2016generative} & VAE & Directed-Info GAIL \\ \midrule
+ Pendulum-v0 & $\mathbf{-121.42 \pm 94.13}$ & $-142.89 \pm 95.57$  & $-125.39 \pm 103.75$ \\
+ InvertedPendulum-v2 & $1000.0 \pm 15.23$ & $ 218.8 \pm 7.95 $ & $\mathbf{1000.0 \pm 14.97}$ \\
+ Hopper-v2 & $3623.4 \pm 51.0 $ & $499.1 \pm 86.2$ & $\mathbf{3662.1 \pm 21.7}$ \\
+ Walker2d-v2 & $4858.0 \pm 301.7$ & $1549.5 \pm 793.7 $ & $\mathbf{5083.9 \pm 356.3}$ \\
+ \bottomrule
+\end{tabular}
+%\vspace{0.2cm}
+\caption{A comparison of returns for continuous environments. The returns were computed using 300 episodes. Our approach gives comparable returns to using GAIL but also segments expert demonstrations into sub-tasks. The proposed Directed-Info GAIL approach improves over the policy learned from the VAE pre-training step.}
+\label{table:reward_results}
+\vspace{-0.2cm}
+\end{table}
+
+Figures~\ref{results_exp2}(a, b, c) show results on the Circle-World environment. As can be seen in Figure~\ref{results_exp2}(a, b), when using two sub-task latent variables, our method learns to segment the demonstrations into two intuitive sub-tasks of drawing circles in clockwise and counterclockwise directions.
+Hence, our method is able to identify the underlying modes and thus find meaningful sub-task segmentations from unsegmented data.
+We also illustrate how the learned sub-task policies can be composed to perform \emph{new} types of behavior that were unobserved in the expert data. In Figure~\ref{results_exp2}(c) we show how the sub-task policies can be combined to draw the circles in inverted order of direction by swapping the learned macro-policy with a different desired policy. Thus, the sub-task policies can be utilized as a library of primitive actions which is a significant benefit over methods learning monolithic policies. 
+
+We now discuss the results on the classical Pendulum environment. Figure~\ref{results_exp2}(d) shows the sub-task latent variables assigned by our approach to the various states. As can be seen in the figure, the network is able to associate different latent variables to different sub-tasks. For instance, states that have a high velocity are assigned a particular latent variable (shown in blue). Similarly, states that lie close to position 0 and have low velocity (i.e. the desired target position) get assigned another latent variable (shown in green). The remaining states get classified as a separate sub-task.
+
+Figure~\ref{fig:hopper_walker} shows the results on the higher dimensional continuous control, Hopper and Walker, environments. 
+Figure~\ref{fig:hopper_walker}(a) shows a plots for sub-task latent variable assignment obtained on these environments. Our proposed method identifies basic action primitives which are then chained together to effectively perform the two locomotion tasks. Figure~\ref{fig:hopper_walker}(b) shows that our approach learns to assign separate latent variable values for different action primitives such as, jumping, mid-air and landing phases of these tasks, with the latent variable changing approximately periodically as the agent performs the periodic hopping/walking motion.
+
+Finally, in Table~\ref{table:reward_results} we also show the quantitative evaluation on the above continuous control environments. We report the mean and standard deviations of the returns over 300 episodes. As can be seen, our approach improves the performance over the VAE pre-training step, overcoming the issue of compounding errors. The performance of our approach is comparable to the state-of-the-art GAIL \citep{ho2016generative}. Our method moreover, has the added advantage of segmenting the demonstrations into sub-tasks and also providing composable sub-task policies.
+
+We further analyze our proposed approach in more detail in the Appendix. In Appendix~\ref{sec:appendix_pca} we visualize the sub-tasks in a low-dimensional sub-space. Also, in Appendix~\ref{sec:appendix_large_context} we show results when using a larger dimensional sub-task latent variable. A video of our results on Hopper and Walker environments can be seen at \url{https://sites.google.com/view/directedinfo-gail}.
+
+\section{Conclusion}
+ Learning separate sub-task policies can help improve the performance of imitation learning when the demonstrated task is complex and has a hierarchical structure. In this work, we present an algorithm that infers these latent sub-task policies directly from given unstructured and unlabelled expert demonstrations. We model the problem of imitation learning as a directed graph with sub-task latent variables and observed trajectory variables. We use the notion of directed information in a generative adversarial imitation learning framework to learn sub-task and macro policies. We further show theoretical connections with the options literature as used in hierarchical reinforcement and imitation learning. We evaluate our method on both discrete and continuous environments. Our experiments show that our method is able to segment the expert demonstrations into different sub-tasks, learn sub-task specific policies and also learn a macro-policy that can combines these sub-task.
+
+\bibliography{iclr2019_conference}
+\bibliographystyle{iclr2019_conference}
+
+\clearpage
+
+\appendix
+\renewcommand{\thesection}{\Alph{section}}
+\section{Appendix}
+
+\subsection{Derivation for Directed-Info Loss}
+\label{sec:derivation}
+The directed information flow from a sequence $\boldsymbol{X}$ to $\boldsymbol{Y}$ is given by:
+
+\begin{equation*}
+I(\boldsymbol{X} \rightarrow \boldsymbol{Y}) = H(\boldsymbol{Y}) - H(\boldsymbol{Y} \| \boldsymbol{X})
+\end{equation*}
+
+where $H(\boldsymbol{Y} \| \boldsymbol{X})$ is the causally-conditioned entropy. Replacing $\boldsymbol{X}$ and $\boldsymbol{Y}$ with the sequences $\boldsymbol{\tau}$ and $\boldsymbol{c}$ give,
+
+\begin{align}
+\footnotesize
+I(\boldsymbol{\tau} \rightarrow \boldsymbol{c}) &= H(\boldsymbol{c}) - H(\boldsymbol{c} \| \boldsymbol{\tau})& &\nonumber \\
+&= H(\boldsymbol{c}) - \sum_{t}H(c^{t}|c^{1:t-1}, \tau^{1:t})& & \nonumber \\
+&= H(\boldsymbol{c}) + \sum_{t} \sum_{c^{1:t-1}, \tau^{1:t}} \Big[ p(c^{1:t-1}, \tau^{1:t}) \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log p(c^{t} | c^{1:t-1}, \tau^{1:t})\Big]  \nonumber \\
+&= H(\boldsymbol{c}) + \sum_{t} \sum_{c^{1:t-1}, \tau^{1:t}} \Big[ p(c^{1:t-1}, \tau^{1:t})  [D_{KL}(p(\cdot | c^{1:t-1}, \tau^{1:t}) \| q(\cdot | c^{1:t-1}, \tau^{1:t})) \nonumber \\
+& \hspace{5.275cm} + \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t})]\Big]   \nonumber \\
+&\geq H(\boldsymbol{c}) + \sum_{t} \sum_{c^{1:t-1}, \tau^{1:t}} \Big[ p(c^{1:t-1}, \tau^{1:t}) \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t})\Big]. \label{eq:directed_info}
+\end{align}
+
+Here $\tau^{1:t} = (s_1, \cdots, a_{t-1}, s_{t})$. The lower bound in equation~\ref{eq:directed_info} requires us to know the true posterior distribution to compute the expectation. To avoid sampling from $p(c^{t}|c^{1:t-1}, \tau^{1:t})$, we use the following,
+
+\begin{align}
+\sum_{c^{1:t-1}} \sum_{\tau^{1:t}} & \Big[ p(c^{1:t-1}, \tau^{1:t}) \sum_{c^{t}} p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t})\Big] \nonumber \\
+&= \sum_{c^{1:t-1}} \sum_{\tau^{1:t}} \sum_{c^{t}} \Big[ p(c^{1:t-1}, \tau^{1:t}) p(c^{t} | c^{1:t-1}, \tau^{1:t}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t})\Big] \nonumber \\
+&= \sum_{c^{1:t-1}} \sum_{\tau^{1:t}} \sum_{c^{t}} \Big[ p(c^{t}, c^{1:t-1}, \tau^{1:t}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t})] \nonumber \\
+&= \sum_{c^{1:t-1}} \sum_{\tau^{1:t}} \sum_{c^{t}}  \Big[p(\tau^{1:t} | c^{t}, c^{1:t-1}) p(c^{t}, c^{1:t-1}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \Big] \nonumber \\
+% \end{align}
+% \begin{align}
+&= \sum_{c^{1:t}} p(c^{1:t})\sum_{\tau^{1:t}}  \Big[p(\tau^{1:t} | c^{t}, c^{1:t-1}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \Big] \nonumber \\
+&= \sum_{c^{1:t}} p(c^{1:t})\sum_{\tau^{1:t}}  \Big[p(\tau^{1:t} | c^{1:t-1}) \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \Big]
+\label{eq:directed_info2}
+\end{align}
+
+where the last step follows from the causal restriction that future provided variables ($c^t$) do not  influence earlier predicted variables ($\tau^{1:t}$ consists of states up to time $t$. $c_t$ does not effect state $s_t$). Putting the result in equation~\ref{eq:directed_info2} in equation~\ref{eq:directed_info} gives,
+
+\begin{align}
+\begin{split}
+ L_{1}(\pi, q) &= \sum_{t} \mathbb{E}_{c^{1:t} \sim p(c^{1:t}), a^{t-1} \sim \pi(\cdot | s^{t-1},c^{1:t-1})} \Big[ \log q(c^{t} | c^{1:t-1}, \tau^{1:t}) \Big] + H(\boldsymbol{c}) \leq I(\boldsymbol{\tau} \rightarrow \boldsymbol{c})
+\label{eq:loss2}
+\end{split}
+\end{align}
+
+Thus, by maximizing directed information instead of mutual information, we can learn a posterior distribution over the next latent factor $c$ given the latent factors discovered up to now and the trajectory followed up to now, thereby removing the dependence on the future trajectory. In practice, we do not consider the $H(\boldsymbol{c})$ term. This gives us the objective,
+
+\begin{align*}
+    \min_{\pi, q} \max_{D} & ~~\mathbb{E}_{\pi} [\log D(s,a)] + \mathbb{E}_{\pi_E} [1-\log D(s,a)] -\lambda_{1}L_{1}(\pi, q) - \lambda_{2}H(\pi).
+\end{align*}
+
+In practice, we fix $q$ from the VAE pre-training and only minimize over the policy $\pi$ in~\eqref{eq:directed_info_loss}.
+% no \bibliographystyle is required, since the corl style is automatically used.
+%\bibliography{example}  % .bib
+
+% Please add the following required packages to your document preamble:
+% \usepackage{booktabs}
+\begin{table}[]
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}cccccl@{}}
+\toprule
+\multicolumn{1}{l}{} & \multicolumn{3}{c}{Directed Info-GAIL} & \multicolumn{2}{l}{VAE pre-training} \\ \midrule
+Environment & Epochs & Batch Size & posterior $\lambda$ & Epochs & Batch Size \\ \midrule
+Discrete & 1000 & 256 & 0.1 & 500 & 32 \\
+Circle-World & 1000 & 512 & 0.01 & 1000 & 16 \\
+Pendulum (both) & 2000 & 1024 & 0.01 & 1000 & 16 \\
+Hopper-v2 & 5000 & 4096 & 0.01 & 2000 & 32 \\
+Walker2d-v2 & 5000 & 8192 & 0.001 & 2000 & 32 \\ \bottomrule
+\end{tabular}
+}
+\caption{Experiment settings for all the different environments for both DirectedInfo-GAIL and VAE-pretraining step respectively.}
+\label{table:exp_settings}
+\end{table}
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}{0.48\columnwidth}
+    \centering
+    \includegraphics[scale=0.5]{figures/circle_trajs/semi_circle_results/context_without_smoothing.pdf}
+    \caption{}
+    \end{subfigure}%
+    \centering
+    \begin{subfigure}{0.48\columnwidth}
+    \centering
+    \includegraphics[scale=0.5]{figures/circle_trajs/semi_circle_results/context_with_smoothing.pdf}
+    \caption{}
+    \end{subfigure}%
+    
+    \caption{Latent variable assignment on the expert trajectories in Circle-World (a) with and (b) without smoothing penalty $L_s$. Blue and green colors represent the two different values of the context variable. The centres of the two circles are shifted for clarity.}
+    \label{fig:smoothing}
+\end{figure}
+
+
+\subsection{Implementation Details}
+Table~\ref{table:exp_settings} lists the experiment settings for all of the different environments. 
+We use multi-layer perceptrons for our policy (generator), value, reward (discriminator) and posterior function representations. Each network consisted of 2 hidden layers with 64 units in each layer and ReLU as our non-linearity function. We used Adam ~\citep{kingma2014adam} as our optimizer setting an initial learning rate of $3e^{-4}$. 
+Further, we used the Proximal Policy Optimization algorithm ~\citep{schulman2017proximal} to train our policy network with $\epsilon = 0.2$.
+For the VAE pre-training step we set the VAE learning rate also to $3e^{-4}$. For the Gumbel-Softmax distribution we set an initial temperature $\tau = 5.0$. The temperature is annealed using using an exponential decay with the following schedule $\tau = \max(0.1, \exp^{-kt})$, where $k = 3e-3$ and $t$ is the current epoch.
+
+
+\subsection{Circle-World smoothing}
+
+In the Circle-World experiment, we added another loss term $L_s$ to VAE pre-training loss $L_{VAE}$, which penalizes the number of times the latent variable switches from one value to another.
+
+\begin{equation*}
+    L_{s} = \sum_t \Big[ 1 - \frac{c_{t-1} \cdot c_{t}}{\max (||c_{t-1}||_2, ||c_{t}||_2)} \Big]
+\end{equation*}
+
+Figure~\ref{fig:smoothing} shows the segmentation of expert trajectories with and without the $L_s$ term. We observed that without adding the smoothing penalty, the VAE learns to segment the expert trajectories into semi-circles as shown in Figure~\ref{fig:smoothing}(a). While a valid solution, this does not match with the intuitive segmentation of the task into two sub-tasks of drawing circles in clockwise and counter-clockwise directions. The smoothing term can be thought of as a prior, forcing the network to change the latent variable as few times as possible. This helps reach a solution where the network switches between latent variables only when required. Figure~\ref{fig:smoothing}(b) shows an example of segmentation obtained on expert trajectories after smoothing. Thus, adding more terms to the VAE pre-training loss can be a good way to introduce priors and bias solutions towards those that match with human notion of sub-tasks.
+
+
+\subsection{PCA visualization of sub-tasks} \label{sec:appendix_pca}
+\begin{figure}
+    \centering
+    \begin{subfigure}{0.33\columnwidth}
+    \centering
+    \includegraphics[scale=0.17]{figures/pca/pca_hopper_expert.png}
+    \caption{Hopper}
+    \end{subfigure}%
+    \centering
+    \begin{subfigure}{0.33\columnwidth}
+    \centering
+    \includegraphics[scale=0.17]{figures/pca/pca_walker_expert_2.png}
+    \caption{Walker: View 1}
+    \end{subfigure}%
+    \begin{subfigure}{0.33\columnwidth}
+    \centering
+    \includegraphics[scale=0.17]{figures/pca/pca_walker_expert_3.png}
+    \caption{Walker: View 2}
+    \end{subfigure}%
+    
+    \caption{PCA Visualization for Hopper and Walker environment with sub-task latent variable of size~4.}
+    \label{fig:pca}
+\end{figure}
+\begin{figure}
+    \centering
+    \begin{subfigure}{0.45\columnwidth}
+    \centering
+    \includegraphics[scale=0.3]{figures/hopper/context_8_plot.pdf}
+    \caption{Sub-Task Latent Variable}
+    \end{subfigure}%
+    \centering
+    \begin{subfigure}{0.45\columnwidth}
+    \centering
+    \includegraphics[scale=0.3]{figures/pca/context_8/pca_hopper_context_8_plot_3.pdf}
+    \caption{PCA Visualization for Sub-Task Latent Variable}
+    \end{subfigure}%
+    \caption{Results on Hopper environment with sub-task latent variable of size 8.}
+    \label{fig:hopper_context_8}
+\end{figure}
+
+In Figure~\ref{fig:pca}, we show the plots expert states, reduced in dimensionality using Principal Component Analysis (PCA), in Hopper and Walker environments. States are color coded by the latent code assigned at these states. We reduced the dimension of states in Hopper from 11 to 2 and in Walker from 17 to 3.
+These low dimensional representations are able to cover $\sim90\%$ of variance in the states.
+As can be seen in the figure, states in different parts of the space get assigned different latent variables. This further shows that our proposed approach is able to segment trajectories in such a way so that states that are similar to each other get assigned to the same segment (latent variable).
+
+\subsection{Using Larger Context}\label{sec:appendix_large_context}
+
+
+For the following discussion we will represent a $k$-dimensional categorical variable as belonging to $\Delta^{k-1}$ simplex.
+To observe how the dimensionality of the sub-task latent variable affects our proposed approach we show results with larger dimensionality for the categorical latent variable $c_t$. 
+Since DirectedInfo-GAIL infers the sub-tasks in an unsupervised manner, we expect our approach to output meaningful sub-tasks irrespective of the dimensionality of $c_t$. Figure~\ref{fig:hopper_context_8} shows results for using a higher dimensional sub-task latent variable. Precisely, we assume $c_t$ to be a 8-dimensional one hot vector, i.e., $c_t \in \Delta^7$.
+% Para without c-8 results
+
+As seen in the above figure, even with a larger context our approach identifies similar basic action primitives as done previously when $c_t \in \Delta^3$. This shows that despite larger dimensionality our approach is able to reuse appropriate context inferred previously. 
+We also visualize the context values for the low-dimensional state-space embedding obtained by PCA. Although not perfectly identical, these context values are similar to the visualizations observed previously for $c_t  \in \Delta^3$.
+Thus our proposed approach is able, to some extent, infer appropriate sub-task representations independent of the dimensionality of the context variable.
+
+% Figure~\ref{fig:hopper_context_8_frames} visualizes the different sub-tasks learned by our proposed approach with $c_t \in \Delta^7$. As seen above, our method is able to infer similar sub-tasks \emph{i.e.}, Ascend, Peak and Land, as it had done previously when $c_t \in \Delta^3$. More importantly, with a higher dimensional sub-task latent variable, our model is also able to infer a new sub-task, Descend. 
+% This illustrates that our approach is able to adapt to the dimensionality of the sub-task latent variable to infer appropriate sub-tasks in an unsupervised manner. However, interestingly our model uses the same context for Peak and Land sub-tasks. 
+% \textcolor{red}{We believe this might happen because the duration of the peak sub-task is quite short and the general stochastic nature of the Gumbel-Softmax estimator specifically the temperature annealing associated with it. We believe a more carefully tuned annealing schedule should give better results.}
+% \textcolor{blue}{We believe this might happen because the duration of the peak sub-task is quite short. This coupled with the general stochastic nature of the Gumbel-Softmax estimator, specifically the temperature annealing schedule make the model re-use the dominant latent variable. We believe a more carefully tuned annealing schedule should give better results. }
+% Another interesting future direction would be to explore structural priors which bias sub-task discovery towards human notion of sub-tasks.
+
+% As seen in the above figure, even with a larger context our approach identifies similar basic action primitives as done previously when $c_t \in \Delta^3$. This shows that despite larger dimensionality our approach is able to reuse appropriate context inferred previously. 
+% We also visualize the context values for the low-dimensional state-space embedding obtained by PCA. Although not perfectly identical, these context values are similar to the visualizations observed previously for $c_t  \in \Delta^3$.
+% Thus our proposed approach is able, to some extent, infer appropriate sub-task representations independent of the dimensionality of the context variable.
+
+% \begin{figure}[tb]
+%     \centering
+%     \includegraphics[scale=0.45]{figures/hopper/context_8_sample_frames_crop.pdf}
+%     \caption{Discovered sub-tasks for Hopper given that sub-task latent variable is a one-hot vector of size 8. Video of our results can be seen at \url{https://sites.google.com/view/directedinfo-gail}}
+%     \label{fig:hopper_context_8_frames}
+% \end{figure}
+
+\end{document}
