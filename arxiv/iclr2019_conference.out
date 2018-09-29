@@ -1,0 +1,17 @@
+\BOOKMARK [1][-]{section.1}{Introduction}{}% 1
+\BOOKMARK [1][-]{section.2}{Related Work}{}% 2
+\BOOKMARK [2][-]{subsection.2.1}{Imitation Learning}{section.2}% 3
+\BOOKMARK [2][-]{subsection.2.2}{Options}{section.2}% 4
+\BOOKMARK [1][-]{section.3}{Proposed Approach}{}% 5
+\BOOKMARK [2][-]{subsection.3.1}{VAE pre-training}{section.3}% 6
+\BOOKMARK [2][-]{subsection.3.2}{Connection with options framework}{section.3}% 7
+\BOOKMARK [1][-]{section.4}{Experiments}{}% 8
+\BOOKMARK [2][-]{subsection.4.1}{Discrete Environment}{section.4}% 9
+\BOOKMARK [2][-]{subsection.4.2}{Continuous Environments}{section.4}% 10
+\BOOKMARK [1][-]{section.5}{Conclusion}{}% 11
+\BOOKMARK [1][-]{appendix.A}{Appendix}{}% 12
+\BOOKMARK [2][-]{subsection.A.1}{Derivation for Directed-Info Loss}{appendix.A}% 13
+\BOOKMARK [2][-]{subsection.A.2}{Implementation Details}{appendix.A}% 14
+\BOOKMARK [2][-]{subsection.A.3}{Circle-World smoothing}{appendix.A}% 15
+\BOOKMARK [2][-]{subsection.A.4}{PCA visualization of sub-tasks}{appendix.A}% 16
+\BOOKMARK [2][-]{subsection.A.5}{Using Larger Context}{appendix.A}% 17

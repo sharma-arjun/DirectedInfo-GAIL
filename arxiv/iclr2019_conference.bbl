@@ -1,0 +1,152 @@
+\begin{thebibliography}{22}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Brockman et~al.(2016)Brockman, Cheung, Pettersson, Schneider,
+  Schulman, Tang, and Zaremba]{openai_gym}
+Greg Brockman, Vicki Cheung, Ludwig Pettersson, Jonas Schneider, John Schulman,
+  Jie Tang, and Wojciech Zaremba.
+\newblock Openai gym, 2016.
+
+\bibitem[Chen et~al.(2016)Chen, Duan, Houthooft, Schulman, Sutskever, and
+  Abbeel]{chen2016infogan}
+Xi~Chen, Yan Duan, Rein Houthooft, John Schulman, Ilya Sutskever, and Pieter
+  Abbeel.
+\newblock Infogan: Interpretable representation learning by information
+  maximizing generative adversarial nets.
+\newblock In \emph{Advances in Neural Information Processing Systems}, pp.\
+  2172--2180, 2016.
+
+\bibitem[Daniel et~al.(2016)Daniel, Van~Hoof, Peters, and
+  Neumann]{daniel2016probabilistic}
+Christian Daniel, Herke Van~Hoof, Jan Peters, and Gerhard Neumann.
+\newblock Probabilistic inference for determining options in reinforcement
+  learning.
+\newblock \emph{Machine Learning}, 104\penalty0 (2-3):\penalty0 337--357, 2016.
+
+\bibitem[Goodfellow et~al.(2014)Goodfellow, Pouget-Abadie, Mirza, Xu,
+  Warde-Farley, Ozair, Courville, and Bengio]{goodfellow2014generative}
+Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley,
+  Sherjil Ozair, Aaron Courville, and Yoshua Bengio.
+\newblock Generative adversarial nets.
+\newblock In \emph{Advances in neural information processing systems}, pp.\
+  2672--2680, 2014.
+
+\bibitem[Hausman et~al.(2017)Hausman, Chebotar, Schaal, Sukhatme, and
+  Lim]{hausman2017multi}
+Karol Hausman, Yevgen Chebotar, Stefan Schaal, Gaurav Sukhatme, and Joseph~J
+  Lim.
+\newblock Multi-modal imitation learning from unstructured demonstrations using
+  generative adversarial nets.
+\newblock In \emph{Advances in Neural Information Processing Systems}, pp.\
+  1235--1245, 2017.
+
+\bibitem[Ho \& Ermon(2016)Ho and Ermon]{ho2016generative}
+Jonathan Ho and Stefano Ermon.
+\newblock Generative adversarial imitation learning.
+\newblock In \emph{Advances in Neural Information Processing Systems}, pp.\
+  4565--4573, 2016.
+
+\bibitem[Jang et~al.(2016)Jang, Gu, and Poole]{jang2016categorical}
+Eric Jang, Shixiang Gu, and Ben Poole.
+\newblock Categorical reparameterization with gumbel-softmax.
+\newblock \emph{arXiv preprint arXiv:1611.01144}, 2016.
+
+\bibitem[Kingma \& Ba(2014)Kingma and Ba]{kingma2014adam}
+Diederik~P Kingma and Jimmy Ba.
+\newblock Adam: A method for stochastic optimization.
+\newblock \emph{arXiv preprint arXiv:1412.6980}, 2014.
+
+\bibitem[Kingma \& Welling(2013)Kingma and Welling]{kingma2013auto}
+Diederik~P Kingma and Max Welling.
+\newblock Auto-encoding variational bayes.
+\newblock \emph{arXiv preprint arXiv:1312.6114}, 2013.
+
+\bibitem[Kramer(1998)]{kramer1998directed}
+Gerhard Kramer.
+\newblock \emph{Directed information for channels with feedback}.
+\newblock PhD thesis, Eidgenossiche Technische Hochschule Zurich, 1998.
+
+\bibitem[Krishnan et~al.(2018)Krishnan, Garg, Patil, Lea, Hager, Abbeel, and
+  Goldberg]{krishnan2018transition}
+Sanjay Krishnan, Animesh Garg, Sachin Patil, Colin Lea, Gregory Hager, Pieter
+  Abbeel, and Ken Goldberg.
+\newblock Transition state clustering: Unsupervised surgical trajectory
+  segmentation for robot learning.
+\newblock In \emph{Robotics Research}, pp.\  91--110. Springer, 2018.
+
+\bibitem[Li et~al.(2017)Li, Song, and Ermon]{li2017infogail}
+Yunzhu Li, Jiaming Song, and Stefano Ermon.
+\newblock Infogail: Interpretable imitation learning from visual
+  demonstrations.
+\newblock In \emph{Advances in Neural Information Processing Systems}, pp.\
+  3815--3825, 2017.
+
+\bibitem[Massey(1990)]{massey1990causality}
+James Massey.
+\newblock Causality, feedback and directed information.
+\newblock In \emph{Proc. Int. Symp. Inf. Theory Applic.(ISITA-90)}, pp.\
+  303--305. Citeseer, 1990.
+
+\bibitem[McGovern \& Barto(2001)McGovern and Barto]{mcgovern2001accelerating}
+Amy McGovern and Andrew~G Barto.
+\newblock Accelerating reinforcement learning through the discovery of useful
+  subgoals.
+\newblock 2001.
+
+\bibitem[Menache et~al.(2002)Menache, Mannor, and Shimkin]{menache2002q}
+Ishai Menache, Shie Mannor, and Nahum Shimkin.
+\newblock Q-cut—dynamic discovery of sub-goals in reinforcement learning.
+\newblock In \emph{European Conference on Machine Learning}, pp.\  295--306.
+  Springer, 2002.
+
+\bibitem[Moon(1996)]{moon1996expectation}
+Todd~K Moon.
+\newblock The expectation-maximization algorithm.
+\newblock \emph{IEEE Signal processing magazine}, 13\penalty0 (6):\penalty0
+  47--60, 1996.
+
+\bibitem[Niekum \& Barto(2011)Niekum and Barto]{niekum2011clustering}
+Scott Niekum and Andrew~G Barto.
+\newblock Clustering via dirichlet process mixture models for portable skill
+  discovery.
+\newblock In \emph{Advances in neural information processing systems}, pp.\
+  1818--1826, 2011.
+
+\bibitem[Pomerleau(1989)]{pomerleau1989alvinn}
+Dean~A Pomerleau.
+\newblock Alvinn: An autonomous land vehicle in a neural network.
+\newblock In \emph{Advances in neural information processing systems}, pp.\
+  305--313, 1989.
+
+\bibitem[Ranchod et~al.(2015)Ranchod, Rosman, and
+  Konidaris]{ranchod2015nonparametric}
+Pravesh Ranchod, Benjamin Rosman, and George Konidaris.
+\newblock Nonparametric bayesian reward segmentation for skill discovery using
+  inverse reinforcement learning.
+\newblock In \emph{Intelligent Robots and Systems (IROS), 2015 IEEE/RSJ
+  International Conference on}, pp.\  471--477. IEEE, 2015.
+
+\bibitem[Schulman et~al.(2017)Schulman, Wolski, Dhariwal, Radford, and
+  Klimov]{schulman2017proximal}
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+\newblock Proximal policy optimization algorithms.
+\newblock \emph{arXiv preprint arXiv:1707.06347}, 2017.
+
+\bibitem[{\c{S}}im{\c{s}}ek et~al.(2005){\c{S}}im{\c{s}}ek, Wolfe, and
+  Barto]{csimcsek2005identifying}
+{\"O}zg{\"u}r {\c{S}}im{\c{s}}ek, Alicia~P Wolfe, and Andrew~G Barto.
+\newblock Identifying useful subgoals in reinforcement learning by local graph
+  partitioning.
+\newblock In \emph{Proceedings of the 22nd international conference on Machine
+  learning}, pp.\  816--823. ACM, 2005.
+
+\bibitem[Sutton et~al.(1998)Sutton, Precup, and Singh]{sutton1998intra}
+Richard~S Sutton, Doina Precup, and Satinder~P Singh.
+\newblock Intra-option learning about temporally abstract actions.
+\newblock In \emph{ICML}, volume~98, pp.\  556--564, 1998.
+
+\end{thebibliography}

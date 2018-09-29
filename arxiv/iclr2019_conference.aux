@@ -1,0 +1,126 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{li2017infogail,hausman2017multi}
+\citation{li2017infogail}
+\citation{li2017infogail}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}}
+\citation{massey1990causality}
+\citation{kramer1998directed}
+\citation{massey1990causality,kramer1998directed}
+\citation{sutton1998intra,daniel2016probabilistic}
+\citation{pomerleau1989alvinn}
+\citation{ho2016generative}
+\citation{goodfellow2014generative}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces \textbf  {Left:} Graphical model used in Info-GAIL \cite  {li2017infogail}. \textbf  {Right:} Causal model in this work. The latent code causes the policy to produce a trajectory. The current trajectory, and latent code produce the next latent code\relax }}{2}{figure.caption.1}}
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:causal_model}{{1}{2}{\textbf {Left:} Graphical model used in Info-GAIL \cite {li2017infogail}. \textbf {Right:} Causal model in this work. The latent code causes the policy to produce a trajectory. The current trajectory, and latent code produce the next latent code\relax }{figure.caption.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Imitation Learning}{2}{subsection.2.1}}
+\citation{li2017infogail}
+\citation{hausman2017multi}
+\citation{chen2016infogan}
+\citation{sutton1998intra}
+\citation{mcgovern2001accelerating}
+\citation{menache2002q,csimcsek2005identifying}
+\citation{daniel2016probabilistic}
+\citation{moon1996expectation}
+\citation{niekum2011clustering}
+\citation{krishnan2018transition}
+\citation{ranchod2015nonparametric}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Options}{3}{subsection.2.2}}
+\citation{li2017infogail,hausman2017multi}
+\citation{ho2016generative}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Proposed Approach}{4}{section.3}}
+\newlabel{sec:proposed_approach}{{3}{4}{Proposed Approach}{section.3}{}}
+\newlabel{eq:loss1}{{3}{4}{Proposed Approach}{equation.3.3}{}}
+\citation{kingma2013auto}
+\citation{jang2016categorical}
+\citation{daniel2016probabilistic}
+\citation{daniel2016probabilistic}
+\citation{daniel2016probabilistic}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Left: VAE pre-training step. The VAE encoder uses the current state $(s_t)$, and previous latent variable $(c_{t-1})$ to produce the current latent variable $(c_{t})$. The decoder reconstructs the action $(a_t)$ using $s_t$ and $c_t$. Right: An overview of the proposed approach. We use the VAE pre-training step to learn an approximate prior over the latent variables and use this to learn sub-task policies in the proposed Directed-Info GAIL step.\relax }}{5}{figure.caption.2}}
+\newlabel{fig:vae_pretraining_step}{{2}{5}{Left: VAE pre-training step. The VAE encoder uses the current state $(s_t)$, and previous latent variable $(c_{t-1})$ to produce the current latent variable $(c_{t})$. The decoder reconstructs the action $(a_t)$ using $s_t$ and $c_t$. Right: An overview of the proposed approach. We use the VAE pre-training step to learn an approximate prior over the latent variables and use this to learn sub-task policies in the proposed Directed-Info GAIL step.\relax }{figure.caption.2}{}}
+\newlabel{eq:directed_info_loss}{{4}{5}{Proposed Approach}{equation.3.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}VAE pre-training}{5}{subsection.3.1}}
+\newlabel{eq:loss_vae}{{5}{5}{VAE pre-training}{equation.3.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Connection with options framework}{5}{subsection.3.2}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Results on the Four Rooms environment. (a) and (b) show results for two different latent variables. The arrows in each cell indicate the direction (action) with highest probability in that state and using the given latent variable. (c) and (d) show expert and generated trajectories in this environment. Star (*) represents the start state. The expert trajectory is shown in red. The color of the generated trajectory represents the latent code used by the policy at each time step.\relax }}{6}{figure.caption.3}}
+\newlabel{results_exp1}{{3}{6}{Results on the Four Rooms environment. (a) and (b) show results for two different latent variables. The arrows in each cell indicate the direction (action) with highest probability in that state and using the given latent variable. (c) and (d) show expert and generated trajectories in this environment. Star (*) represents the start state. The expert trajectory is shown in red. The color of the generated trajectory represents the latent code used by the policy at each time step.\relax }{figure.caption.3}{}}
+\newlabel{eq:daniel}{{6}{6}{Connection with options framework}{equation.3.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experiments}{6}{section.4}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Discrete Environment}{6}{subsection.4.1}}
+\citation{openai_gym}
+\citation{ho2016generative}
+\citation{schulman2017proximal}
+\citation{ho2016generative}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Results for Directed-Info GAIL on continuous environments. (a) Our method learns to break down the Circle-World task into two different sub-activities, shown in green and blue. (b) Trajectory generated using our approach. Color denotes time step. (c) Trajectory generated in opposite direction. Color denotes time step. (d) Sub-activity latent variables as inferred by Directed-Info GAIL on Pendulum-v0. Different colors represent different context.\relax }}{7}{figure.caption.4}}
+\newlabel{results_exp2}{{4}{7}{Results for Directed-Info GAIL on continuous environments. (a) Our method learns to break down the Circle-World task into two different sub-activities, shown in green and blue. (b) Trajectory generated using our approach. Color denotes time step. (c) Trajectory generated in opposite direction. Color denotes time step. (d) Sub-activity latent variables as inferred by Directed-Info GAIL on Pendulum-v0. Different colors represent different context.\relax }{figure.caption.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces (a) and (b) show the plot of the sub-task latent variable vs time on the Hopper and Walker tasks. (c) and (d) show discovered sub-tasks using Directed-Info GAIL on these environments.\relax }}{7}{figure.caption.5}}
+\newlabel{fig:hopper_walker}{{5}{7}{(a) and (b) show the plot of the sub-task latent variable vs time on the Hopper and Walker tasks. (c) and (d) show discovered sub-tasks using Directed-Info GAIL on these environments.\relax }{figure.caption.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Continuous Environments}{7}{subsection.4.2}}
+\citation{ho2016generative}
+\bibdata{iclr2019_conference}
+\bibcite{openai_gym}{{1}{2016}{{Brockman et~al.}}{{Brockman, Cheung, Pettersson, Schneider, Schulman, Tang, and Zaremba}}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces A comparison of returns for continuous environments. The returns were computed using 300 episodes. Our approach gives comparable returns to using GAIL but also segments expert demonstrations into sub-tasks. The proposed Directed-Info GAIL approach improves over the policy learned from the VAE pre-training step.\relax }}{8}{table.caption.6}}
+\newlabel{table:reward_results}{{1}{8}{A comparison of returns for continuous environments. The returns were computed using 300 episodes. Our approach gives comparable returns to using GAIL but also segments expert demonstrations into sub-tasks. The proposed Directed-Info GAIL approach improves over the policy learned from the VAE pre-training step.\relax }{table.caption.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{8}{section.5}}
+\bibcite{chen2016infogan}{{2}{2016}{{Chen et~al.}}{{Chen, Duan, Houthooft, Schulman, Sutskever, and Abbeel}}}
+\bibcite{daniel2016probabilistic}{{3}{2016}{{Daniel et~al.}}{{Daniel, Van~Hoof, Peters, and Neumann}}}
+\bibcite{goodfellow2014generative}{{4}{2014}{{Goodfellow et~al.}}{{Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville, and Bengio}}}
+\bibcite{hausman2017multi}{{5}{2017}{{Hausman et~al.}}{{Hausman, Chebotar, Schaal, Sukhatme, and Lim}}}
+\bibcite{ho2016generative}{{6}{2016}{{Ho \& Ermon}}{{Ho and Ermon}}}
+\bibcite{jang2016categorical}{{7}{2016}{{Jang et~al.}}{{Jang, Gu, and Poole}}}
+\bibcite{kingma2014adam}{{8}{2014}{{Kingma \& Ba}}{{Kingma and Ba}}}
+\bibcite{kingma2013auto}{{9}{2013}{{Kingma \& Welling}}{{Kingma and Welling}}}
+\bibcite{kramer1998directed}{{10}{1998}{{Kramer}}{{}}}
+\bibcite{krishnan2018transition}{{11}{2018}{{Krishnan et~al.}}{{Krishnan, Garg, Patil, Lea, Hager, Abbeel, and Goldberg}}}
+\bibcite{li2017infogail}{{12}{2017}{{Li et~al.}}{{Li, Song, and Ermon}}}
+\bibcite{massey1990causality}{{13}{1990}{{Massey}}{{}}}
+\bibcite{mcgovern2001accelerating}{{14}{2001}{{McGovern \& Barto}}{{McGovern and Barto}}}
+\bibcite{menache2002q}{{15}{2002}{{Menache et~al.}}{{Menache, Mannor, and Shimkin}}}
+\bibcite{moon1996expectation}{{16}{1996}{{Moon}}{{}}}
+\bibcite{niekum2011clustering}{{17}{2011}{{Niekum \& Barto}}{{Niekum and Barto}}}
+\bibcite{pomerleau1989alvinn}{{18}{1989}{{Pomerleau}}{{}}}
+\bibcite{ranchod2015nonparametric}{{19}{2015}{{Ranchod et~al.}}{{Ranchod, Rosman, and Konidaris}}}
+\bibcite{schulman2017proximal}{{20}{2017}{{Schulman et~al.}}{{Schulman, Wolski, Dhariwal, Radford, and Klimov}}}
+\bibcite{csimcsek2005identifying}{{21}{2005}{{{\c {S}}im{\c {s}}ek et~al.}}{{{\c {S}}im{\c {s}}ek, Wolfe, and Barto}}}
+\bibcite{sutton1998intra}{{22}{1998}{{Sutton et~al.}}{{Sutton, Precup, and Singh}}}
+\bibstyle{iclr2019_conference}
+\@writefile{toc}{\contentsline {section}{\numberline {A}Appendix}{11}{appendix.A}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Derivation for Directed-Info Loss}{11}{subsection.A.1}}
+\newlabel{sec:derivation}{{A.1}{11}{Derivation for Directed-Info Loss}{subsection.A.1}{}}
+\newlabel{eq:directed_info}{{7}{11}{Derivation for Directed-Info Loss}{equation.A.7}{}}
+\newlabel{eq:directed_info2}{{8}{11}{Derivation for Directed-Info Loss}{equation.A.8}{}}
+\newlabel{eq:loss2}{{9}{11}{Derivation for Directed-Info Loss}{equation.A.9}{}}
+\citation{kingma2014adam}
+\citation{schulman2017proximal}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Experiment settings for all the different environments for both DirectedInfo-GAIL and VAE-pretraining step respectively.\relax }}{12}{table.caption.8}}
+\newlabel{table:exp_settings}{{2}{12}{Experiment settings for all the different environments for both DirectedInfo-GAIL and VAE-pretraining step respectively.\relax }{table.caption.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Latent variable assignment on the expert trajectories in Circle-World (a) with and (b) without smoothing penalty $L_s$. Blue and green colors represent the two different values of the context variable. The centres of the two circles are shifted for clarity.\relax }}{12}{figure.caption.9}}
+\newlabel{fig:smoothing}{{6}{12}{Latent variable assignment on the expert trajectories in Circle-World (a) with and (b) without smoothing penalty $L_s$. Blue and green colors represent the two different values of the context variable. The centres of the two circles are shifted for clarity.\relax }{figure.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Implementation Details}{12}{subsection.A.2}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Circle-World smoothing}{12}{subsection.A.3}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces PCA Visualization for Hopper and Walker environment with sub-task latent variable of size\nobreakspace  {}4.\relax }}{13}{figure.caption.10}}
+\newlabel{fig:pca}{{7}{13}{PCA Visualization for Hopper and Walker environment with sub-task latent variable of size~4.\relax }{figure.caption.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Results on Hopper environment with sub-task latent variable of size 8.\relax }}{13}{figure.caption.11}}
+\newlabel{fig:hopper_context_8}{{8}{13}{Results on Hopper environment with sub-task latent variable of size 8.\relax }{figure.caption.11}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.4}PCA visualization of sub-tasks}{13}{subsection.A.4}}
+\newlabel{sec:appendix_pca}{{A.4}{13}{PCA visualization of sub-tasks}{subsection.A.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.5}Using Larger Context}{13}{subsection.A.5}}
+\newlabel{sec:appendix_large_context}{{A.5}{13}{Using Larger Context}{subsection.A.5}{}}
