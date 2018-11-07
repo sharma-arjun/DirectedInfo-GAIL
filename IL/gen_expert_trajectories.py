@@ -629,10 +629,10 @@ def gen_fetch_data(fetch_baselines_npz_path):
             s_arr = fetch_data['obs'][i][t]['observation'] 
             a_arr = np.array(fetch_data['acs'][i][t])
             s_list.append(s_arr)
-            a_arr.append(a_arr)
+            a_list.append(a_arr)
             c_list.append(np.array([1.0]))
 
-        expert_traj_dict[i] = {
+        expert_traj_dict[str(i)] = {
                 'state': np.array(s_list),
                 'action': np.array(a_list),
                 'context': np.array(c_list),
