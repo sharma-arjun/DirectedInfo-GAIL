@@ -374,7 +374,7 @@ class VAETrain(object):
             self.env = gym.make(env_name)
             if 'FetchPickAndPlace' in env_name:
                 self.env = gym.wrappers.FlattenDictWrapper(
-                        self.env, ['observation'])
+                        self.env, ['observation', 'desired_goal'])
 
         else:
             raise ValueError("Invalid env type: {}".format(env_type))
