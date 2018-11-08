@@ -10,7 +10,6 @@ import random
 import sys
 import os
 from graph import Graph
-import pdb
 
 from load_expert_traj import recursively_save_dict_contents_to_group
 
@@ -617,7 +616,7 @@ def gen_fetch_data(fetch_baselines_npz_path):
     assert os.path.exists(fetch_baselines_npz_path), \
             "Fetch baselines does not exist {}".format(fetch_baselines_npz_path)
     fetch_data = np.load(fetch_baselines_npz_path)
-    num_trajs = len(fetch_data)
+    num_trajs = len(fetch_data['obs'])
 
     expert_traj_dict = {}
     for i in range(num_trajs):
@@ -631,11 +630,13 @@ def gen_fetch_data(fetch_baselines_npz_path):
             s_list.append(s_arr)
             a_list.append(a_arr)
             c_list.append(np.array([1.0]))
+        if i > 0 and i % 5 == 0:
+            print("Trajectories done: {}".format(i))
 
         expert_traj_dict[str(i)] = {
                 'state': np.array(s_list),
                 'action': np.array(a_list),
-                'context': np.array(c_list),
+                'goal': np.array(c_list),
                 }
 
     env_data_dict = {'num_goals': 1, 'num_actions': 4}
