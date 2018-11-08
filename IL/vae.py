@@ -29,6 +29,8 @@ from utils.torch_utils import get_weight_norm_for_network
 #else:
 #    R = RewardFunction(-1.0,1.0)
 
+from bcolors import bcolors
+
 global_args = None
 
 class VAE(nn.Module):
@@ -177,10 +179,12 @@ class DiscreteVAE(VAE):
         self.encoder_softmax = nn.Softmax(dim=1)
         self.temperature = temperature
         self.init_temperature = temperature
+        print(bcolors.Blue+"Initial temperature: {}".format(temperature)+
+                bcolors.Endc)
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 33e-4
+        r = 5e-4  # will become 1.0 after 3000 epochs 
         # r = 33e-4 will become 1.0 after 500 epochs and 0.18 after 1000 epochs.
         # r = 0.023 # Will become 0.1 after 100 epochs if initial temp is 1.0
         # r = 0.011 # Will become 0.1 after 200 epochs if initial temp is 1.0
@@ -633,7 +637,7 @@ class VAETrain(object):
                 final_train_stats['temperature'].append(
                         self.vae_model.temperature)
 
-            if epoch % 5 == 0:
+            if epoch % 100 == 0:
                 results_pkl_path = os.path.join(
                         self.args.results_dir, 
                         'results_{}.pkl'.format(epoch))
