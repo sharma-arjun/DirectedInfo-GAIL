@@ -368,6 +368,10 @@ class VAETrain(object):
         elif env_type == 'mujoco' or env_type == 'gym':
             assert(env_name is not None)
             self.env = gym.make(env_name)
+            if 'FetchPickAndPlace' in env_name:
+                self.env = gym.wrappers.FlattenDictWrapper(
+                        self.env, ['observation'])
+
         else:
             raise ValueError("Invalid env type: {}".format(env_type))
 
@@ -785,8 +789,14 @@ class VAETrain(object):
                 true_goal_numpy = np.copy(ep_c)
             else:
                 true_goal_numpy = np.zeros((ep_c.shape[0], self.num_goals))
-                true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
+                # HACK: do not know why this weird ep_c behavior happens, leave
+                # it for now.
+                if 'FetchPickAndPlace' in self.env_name:
+                    true_goal_numpy[np.arange(ep_c.shape[0]), 0] = 1
+                else:
+                    true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
             true_goal = Variable(torch.from_numpy(true_goal_numpy).type(
+
                 self.dtype))
 
             results['true_goal'].append(true_goal_numpy)
@@ -817,6 +827,8 @@ class VAETrain(object):
                 elif 'Walker' in self.env_name:
                     self.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                elif 'FetchPickAndPlace' in self.env_name:
+                    pass
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
@@ -1120,7 +1132,11 @@ class VAETrain(object):
                 true_goal_numpy = np.copy(ep_c)
             else: 
                 true_goal_numpy = np.zeros((ep_c.shape[0], self.num_goals))
-                true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
+                # HACK: Not sure why this happens
+                if 'FetchPickAndPlace' in self.env_name:
+                    true_goal_numpy[np.arange(ep_c.shape[0]), 0] = 1
+                else:
+                    true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
             true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(
                     self.dtype)
 
@@ -1159,6 +1175,8 @@ class VAETrain(object):
                 elif 'Walker' in self.env_name:
                     self.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                elif 'FetchPickAndPlace' in self.env_name:
+                    pass
                 else:
                     raise ValueError("Incorrect env name for mujoco")
             elif self.env_type == 'gym':
@@ -1341,14 +1359,16 @@ class VAETrain(object):
                         else:
                             self.env.env.mode = 'jump'
 
-                    #next_state, true_reward, done, _ = self.env.step(action)
+                    # next_state, true_reward, done, _ = self.env.step(action)
+
                     if t < episode_len-1:
-                        next_state = ep_state[:, t+1, :17]
+                        next_state = ep_state[:, t+1, :]
                     else:
                         break
-                    #true_return += true_reward
-                    #if done:
-                    #    break
+
+                    # true_return += true_reward
+                    # if done:
+                       # break
 
                     # No time used
                     # next_state = np.concatenate((
