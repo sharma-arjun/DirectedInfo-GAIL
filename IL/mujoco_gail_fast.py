@@ -575,6 +575,9 @@ class CausalGAILMLP(BaseGAIL):
         self.envs = []
         for i in range(num_threads):
             env = gym.make(env_name)
+            if 'FetchPickAndPlace' in env_name:
+                env = gym.wrappers.FlattenDictWrapper(env,
+                        ['observation', 'desired_goal'])
             env.seed(int(time.time()) + i)
             self.envs.append(env)
         self.env_pool = Pool(num_threads)
