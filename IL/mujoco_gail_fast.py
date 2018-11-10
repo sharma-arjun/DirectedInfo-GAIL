@@ -1202,7 +1202,8 @@ class CausalGAILMLP(BaseGAIL):
                                         self.num_goals,
                                         self.vae_train.use_rnn_goal_predictor,
                                         self.vae_train.args.use_discrete_vae,
-                                        self.dtype,
+                                        # Use non-cuda for collecting samples
+                                        torch.FloatTensor,
                                         train,
                                         sample_c_from_expert,
                                         )
@@ -1260,8 +1261,12 @@ class CausalGAILMLP(BaseGAIL):
             # Update learning rate schedules (decay etc.)
             self.opt_policy.lr = self.get_policy_learning_rate(ep_idx)
 
+            if self.dtype != torch.FloatTensor:
+                self.convert_models_to_type(torch.FloatTensor)
             gen_batch, _, log_list = self.collect_samples(
                     gen_batch_size, self.args.max_ep_length + 1, train=train)
+            if self.dtype != torch.FloatTensor:
+                self.convert_models_to_type(torch.cuda.FloatTensor)
 
             # Add to tensorboard if training.
             true_reward =[log['true_reward'] for log in log_list]
