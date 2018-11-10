@@ -64,7 +64,10 @@ def get_c_for_traj(vae_model, env, args, state_arr, action_arr, c_arr,
     c_arr = np.array(c_arr, dtype=np.int32)
 
     true_goal_numpy = np.zeros((c_arr.shape[0], num_goals))
-    true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
+    if num_goals == 1:
+        true_goal_numpy += 1
+    else:
+        true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
     true_goal = Variable(torch.from_numpy(true_goal_numpy).type(dtype))
 
     action_var = Variable(torch.from_numpy(action_arr).type(dtype))
@@ -84,6 +87,8 @@ def get_c_for_traj(vae_model, env, args, state_arr, action_arr, c_arr,
         elif 'Walker' in args.env_name:
             env.env.set_state(np.concatenate(
                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+        elif 'FetchPickAndPlace' in args.env_name:
+            pass
         else:
             raise ValueError("Incorrect env name for mujoco")
 
@@ -299,7 +304,10 @@ def run_agent_worker(run_args,
                 posterior_latent_size)).type(dtype)
 
         true_goal_numpy = np.zeros((c_expert.shape[0], num_goals))
-        true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
+        if num_goals == 1:
+            true_goal_numpy[...] += 1
+        else:
+            true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
         true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(dtype)
 
         if run_args.use_random_starts:
@@ -318,6 +326,8 @@ def run_agent_worker(run_args,
                 elif 'Walker' in run_args.env_name:
                     env.env.set_state(np.concatenate(
                                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                elif 'FetchPickAndPlace' in run_args.env_name:
+                    pass
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
@@ -335,6 +345,7 @@ def run_agent_worker(run_args,
                     run_args.env_type))
 
         x = x_feat
+        x_no_hist = x_feat
         curr_state_arr = x_feat
 
         # Add history to state
@@ -354,8 +365,10 @@ def run_agent_worker(run_args,
             ct = pred_c_tensor[:, t, :]
 
             # Get state and context variables
-            x_var = Variable(torch.from_numpy(x.reshape((batch_size, -1))).type(
-                dtype))
+            x_var = Variable(torch.from_numpy(
+                x.reshape((batch_size, -1))).type(dtype))
+            x_no_hist_var = Variable(torch.from_numpy(
+                x_no_hist.reshape((batch_size, -1))).type(dtype))
             # Append 'c' at the end.
             if use_rnn_goal_predictor:
                 raise ValueError("Do not use this.")
@@ -391,15 +404,16 @@ def run_agent_worker(run_args,
 
             # Generator should predict the action using (x_t, c_t)
             # Note c_t is next_c_var.
-            action = select_action(policy_net, x_var, next_c_var, goal_var,
-                                   use_goal_in_policy=run_args.use_goal_in_policy,
-                                   train=train)
+            action = select_action(
+                    policy_net, x_no_hist_var, next_c_var, goal_var,
+                    use_goal_in_policy=run_args.use_goal_in_policy,
+                    train=train)
             action_numpy = action.data.cpu().numpy()
             action = action_numpy
 
             # Get the discriminator reward
             disc_reward_t = get_discriminator_reward(
-                            reward_net, x_var, action, c_var, next_c_var,
+                            reward_net, x_no_hist_var, action, c_var, next_c_var,
                             dtype=dtype,
                             goal_var=goal_var,
                             disc_reward_type=run_args.disc_reward)
@@ -432,6 +446,7 @@ def run_agent_worker(run_args,
                         np.array([(t+1)/(expert_episode_len+1)])), axis=0)
             # next_state_feat = running_state(next_state_feat)
             x[:] = next_state_feat.copy()
+            x_no_hist[:] = next_state_feat.copy()
 
             mask = 0 if t == expert_episode_len - 1 or done else 1
 
@@ -521,15 +536,14 @@ class CausalGAILMLP(BaseGAIL):
 
         if args.use_value_net:
             # context_size contains num_goals
-            self.value_net = Value(state_size * history_size + num_goals,
+            self.value_net = Value(state_size + num_goals,
                                    hidden_size=64)
 
         # Reward net is the discriminator network.
-        self.reward_net = Reward(state_size * history_size,
+        self.reward_net = Reward(state_size * 1,
                                  action_size,
                                  num_goals,
                                  hidden_size=64)
-
         if vae_train.args.use_discrete_vae:
             self.posterior_net = DiscretePosterior(
                     state_size=vae_train.vae_model.posterior.state_size,
@@ -630,7 +644,10 @@ class CausalGAILMLP(BaseGAIL):
                 state_arr, action_arr, c_arr, None, self.num_goals)
 
         true_goal_numpy = np.zeros((c_arr.shape[0], self.num_goals))
-        true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
+        if self.num_goals == 1:
+            true_goal_numpy += 1
+        else:
+            true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
         true_goal = Variable(torch.from_numpy(true_goal_numpy).type(self.dtype))
 
         action_var = Variable(
@@ -651,6 +668,8 @@ class CausalGAILMLP(BaseGAIL):
             elif 'Walker' in self.args.env_name:
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            elif 'FetchPickAndPlace' in self.args.env_name:
+                pass
             else:
                 raise ValueError("Incorrect env name for mujoco")
 
@@ -868,9 +887,19 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update reward net ====
             self.opt_reward.zero_grad()
 
+            if self.args.history_size > 1 and \
+                    not self.vae_train.vae_model.use_history_in_policy:
+                assert expert_state_var.shape[1] % self.args.history_size == 0, \
+                        "Expert states should have history"
+                expert_state_no_hist_var = \
+                        expert_state_var[:, -self.args.state_size:]
+                reward_net_expert_state_var = expert_state_no_hist_var
+            else:
+                reward_net_expert_state_var = expert_state_var
+
             # Backprop with expert demonstrations
             expert_output = self.reward_net(
-                    torch.cat((expert_state_var,
+                    torch.cat((reward_net_expert_state_var,
                                expert_action_var,
                                expert_goal_var), 1))
             expert_disc_loss = F.binary_cross_entropy(
@@ -1065,7 +1094,10 @@ class CausalGAILMLP(BaseGAIL):
             else:
                 batch_goals = expert_batch.c[i].astype(np.int32)
                 expert_goal = np.zeros((batch_goals.shape[0], self.num_goals))
-                expert_goal[np.arange(batch_goals.shape[0]), batch_goals] = 1.0
+                if self.num_goals == 1:
+                    expert_goal[np.arange(batch_goals.shape[0]), 0] = 1.0
+                else:
+                    expert_goal[np.arange(batch_goals.shape[0]), batch_goals] = 1.0
 
             ## Expand expert states ##
             expert_state_i = expert_batch.state[i]
@@ -1179,6 +1211,7 @@ class CausalGAILMLP(BaseGAIL):
         start_time = time.time()
         # Get the results by making a BLOCKING call.
         results = self.env_pool.map(parallel_run_agent_worker, args_list)
+        # results = [parallel_run_agent_worker(args_list[0])]
         end_time = time.time()
         print("END: Blocking call, time: {:.3f}".format(end_time-start_time))
 

@@ -13,7 +13,7 @@ args=(
   --max_ep_length 50
   --num_expert_trajs 100
 
-  --num_threads 4
+  --num_threads 6
   --save_interval 100
 
   --no-use_state_features
