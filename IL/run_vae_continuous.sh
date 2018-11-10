@@ -17,7 +17,7 @@ args=(
   --vae_action_size 4
   --vae_goal_size 1
   --vae_history_size 5
-  --vae_context_size 4
+  --vae_context_size 2
 
   --no-use_state_features
   --continuous_action
@@ -28,7 +28,7 @@ args=(
 
   --checkpoint_every_epoch 100
 
-  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/batch_128_context_2_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1/
+  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/batch_128_context_4_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1/
 
  # --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_6_no_time_cos_similarity_1.0_decay_33e-4/checkpoint/cp_540.pth
 
