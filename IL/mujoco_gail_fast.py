@@ -988,7 +988,9 @@ class CausalGAILMLP(BaseGAIL):
 
             # ==== Update policy net (PPO step) ====
             self.opt_policy.zero_grad()
-            ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
+            prob_diff = torch.clamp(log_prob_cur - log_prob_old, -10, 10)
+            ratio = torch.exp(prob_diff)
+            # ratio = torch.exp(log_prob_cur - log_prob_old) # pnew / pold
             surr1 = ratio * advantages_var
             surr2 = torch.clamp(
                     ratio,
