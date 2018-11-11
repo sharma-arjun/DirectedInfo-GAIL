@@ -111,10 +111,24 @@ def main():
           ['torso_vertical', 'joint_angles', 'velocity', 'com_velocity', 'extremities'])
 
   step = 0
+  video_frames = []
+  action_spec = env._env.action_spec()
+  time_step = env.reset()
   while step < 1000:
-      state = env.reset()
-      env.render()
+      frame = env.render()
+      video_frames.append(frame)
+      action =  np.random.uniform(action_spec.minimum,
+                                  action_spec.maximum,
+                                  size=action_spec.shape)
+      state, reward, done, info = env.step(action)
+      # print("reward: {}, done: {}, obs: {}".format(reward, done, state))
       step = step + 1
+
+  import matplotlib.pyplot as plt
+  for i in range(len(video_frames)):
+      img = plt.imshow(video_frames[i])
+      plt.pause(0.01)
+      plt.draw()
   print(step)
 
 if __name__ == '__main__':
