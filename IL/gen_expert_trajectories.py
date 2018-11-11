@@ -624,8 +624,16 @@ def gen_fetch_data(fetch_baselines_npz_path):
         action_list = fetch_data['acs'][i]
         traj_len = len(states_list)
         s_list, a_list, c_list = [], [], []
+        if traj_len < 51:
+            print("Trajectory length is less than 50: {}".format(traj_len))
+            continue
         for t in range(traj_len - 1):
+            if t >= 50:
+                print("Traj length exceeds 50: {}".format(traj_len))
+                break
             s_arr = fetch_data['obs'][i][t]['observation'] 
+            goal_arr = fetch_data['obs'][i][t]['desired_goal'] 
+            s_arr = np.concatenate([s_arr, goal_arr])
             a_arr = np.array(fetch_data['acs'][i][t])
             s_list.append(s_arr)
             a_list.append(a_arr)
