@@ -24,11 +24,12 @@ args=(
   --env-name FetchPickAndPlace-v1
   --env-type mujoco
   --episode_len 50
-  --run_mode train 
+  --run_mode test
 
   --checkpoint_every_epoch 100
 
   --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/batch_128_context_4_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1/
+  --checkpoint_path ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/batch_128_context_4_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1/checkpoint/cp_2000.pth
 
  # --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_6_no_time_cos_similarity_1.0_decay_33e-4/checkpoint/cp_540.pth
 

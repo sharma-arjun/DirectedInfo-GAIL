@@ -765,6 +765,11 @@ class VAETrain(object):
 
         true_reward_batch = []
 
+        self.env = gym.wrappers.Monitor(
+                self.env, './monitor/fetch_pick_and_place',
+                video_callable=lambda x: True,
+                force=True)
+
         # We need to sample expert trajectories to get (s, a) pairs which
         # are required for goal prediction.
         for e in range(num_test_samples):
@@ -832,7 +837,10 @@ class VAETrain(object):
                     self.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 elif 'FetchPickAndPlace' in self.env_name:
-                    pass
+                    object_qpos = self.env.env.env.env.sim.data.get_joint_qpos('object0:joint')
+                    object_qpos[:2] = ep_state[0, 0, 3:5]
+                    self.env.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+                    self.env.env.env.env.goal = ep_state[0, 0, -3:]
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
@@ -977,17 +985,21 @@ class VAETrain(object):
                     # next_state, true_reward_t, done, _ = self.env.step(action)
 
                     # Case 2: Sample next state from the expert action
-                    # next_state, true_reward_t, done, _ = self.env.step(ep_action[:,t,:][0])
+                    _, temp_context = torch.max(vae_reparam_input[0], dim=1)
+                    next_state, true_reward_t, done, _ = self.env.step(
+                            ep_action[:,t,:][0],
+                            context=temp_context.data.cpu().numpy()[0]
+                    )
 
                     # Case 3: Sample next state from expert states directly
-                    next_state, true_reward_t, done = ep_state[:, t+1, :][0], \
-                                                      0, t+2 >= episode_len
+                    # next_state, true_reward_t, done = ep_state[:, t+1, :][0], \
+                    #                                  0, t+2 >= episode_len
 
                     true_reward += true_reward_t
                     if done:
                         break
-
-                    # self.env.render()
+                    
+                    self.env.render()
 
                     if history_size > 1:
                         x_hist[:, history_size - 1, :] = next_state
@@ -1180,7 +1192,10 @@ class VAETrain(object):
                     self.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 elif 'FetchPickAndPlace' in self.env_name:
-                    pass
+                    object_qpos = self.env.env.env.env.sim.data.get_joint_qpos('object0:joint')
+                    object_qpos[:2] = ep_state[0, 0, 3:5]
+                    self.env.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+                    self.env.env.env.env.goal = ep_state[0, 0, -3:]
                 else:
                     raise ValueError("Incorrect env name for mujoco")
             elif self.env_type == 'gym':
@@ -1491,6 +1506,7 @@ class VAETrain(object):
         # multiple times. Will fix it later.
         num_batches = len(expert) // batch_size
         total_epoch_loss, total_epoch_per_step_loss = 0.0, 0.0
+
 
         for batch_idx in range(num_batches):
             # Train loss for this batch
