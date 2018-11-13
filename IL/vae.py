@@ -986,10 +986,14 @@ class VAETrain(object):
 
                     # Case 2: Sample next state from the expert action
                     _, temp_context = torch.max(vae_reparam_input[0], dim=1)
+                    temp_context = temp_context.data.cpu().numpy()[0]
                     next_state, true_reward_t, done, _ = self.env.step(
                             ep_action[:,t,:][0],
-                            context=temp_context.data.cpu().numpy()[0]
+                            context=temp_context,
                     )
+
+                    # print('dist: {}'.format(self.env.viewer.cam.distance))
+
 
                     # Case 3: Sample next state from expert states directly
                     # next_state, true_reward_t, done = ep_state[:, t+1, :][0], \
@@ -999,7 +1003,7 @@ class VAETrain(object):
                     if done:
                         break
                     
-                    self.env.render()
+                    self.env.render(context=temp_context)
 
                     if history_size > 1:
                         x_hist[:, history_size - 1, :] = next_state
