@@ -184,7 +184,7 @@ class DiscreteVAE(VAE):
 
     def update_temperature(self, epoch):
         '''Update temperature.'''
-        r = 5e-4  # will become 1.0 after 3000 epochs 
+        r = 2e-3  # will become 1.0 after 3000 epochs 
         # r = 33e-4 will become 1.0 after 500 epochs and 0.18 after 1000 epochs.
         # r = 0.023 # Will become 0.1 after 100 epochs if initial temp is 1.0
         # r = 0.011 # Will become 0.1 after 200 epochs if initial temp is 1.0
@@ -375,7 +375,8 @@ class VAETrain(object):
             if 'FetchPickAndPlace' in env_name:
                 self.env = gym.wrappers.FlattenDictWrapper(
                         self.env, ['observation', 'desired_goal'])
-
+        elif env_type == 'mujoco_custom':
+            self.env = gym.make(env_name)
         else:
             raise ValueError("Invalid env type: {}".format(env_type))
 
@@ -637,7 +638,7 @@ class VAETrain(object):
                 final_train_stats['temperature'].append(
                         self.vae_model.temperature)
 
-            if epoch % 100 == 0:
+            if epoch % 25 == 0:
                 results_pkl_path = os.path.join(
                         self.args.results_dir, 
                         'results_{}.pkl'.format(epoch))
@@ -696,7 +697,7 @@ class VAETrain(object):
                 state_tensor = torch.from_numpy(self.get_state_features(
                     state_obj, self.args.use_state_features)).type(self.dtype)
 
-            elif self.env_type == 'mujoco':
+            elif self.env_type == 'mujoco' or self.env_type == 'mujoco_custom':
                 state_tensor = torch.from_numpy(ep_state[:, t, :]).type(self.dtype)
 
             # action_tensor is (N, A)
@@ -800,7 +801,6 @@ class VAETrain(object):
                 else:
                     true_goal_numpy[np.arange(ep_c.shape[0]), ep_c[:, 0]] = 1
             true_goal = Variable(torch.from_numpy(true_goal_numpy).type(
-
                 self.dtype))
 
             results['true_goal'].append(true_goal_numpy)
@@ -839,6 +839,8 @@ class VAETrain(object):
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
+            elif self.env_type == 'mujoco_custom':
+                x_feat = ep_state[:, 0, :]
             elif self.env_type == 'gym':
                 x_feat = ep_state[:, 0, :]
                 dummy_state = self.env.reset()
@@ -973,7 +975,8 @@ class VAETrain(object):
                                               dtype=np.float32)
 
 
-                elif self.env_type == 'mujoco' or self.env_type == 'gym':
+                elif self.env_type == 'mujoco' or self.env_type == 'gym' or \
+                        self.env_type == 'mujoco_custom':
                     action = pred_actions_numpy[0, :]
                     true_reward_t = 0
                     # Case 1: Sample next state from the action predicted
@@ -1189,6 +1192,8 @@ class VAETrain(object):
                     self.env.env.env.goal = ep_state[0, 0, -3:]
                 else:
                     raise ValueError("Incorrect env name for mujoco")
+            elif self.env_type == 'mujoco_custom':
+                x_feat = ep_state[:, 0, :]
             elif self.env_type == 'gym':
                 x_feat = ep_state[:, 0, :]
                 dummy_state = self.env.reset()
@@ -1848,7 +1853,8 @@ def main(args):
     elif 'circle' in args.env_type:
         expert = CircleExpertHDF5(args.expert_path, args.vae_state_size)
         expert.push(only_coordinates_in_state=False, one_hot_action=False)
-    elif args.env_type == 'mujoco' or args.env_type == 'gym':
+    elif args.env_type == 'mujoco' or args.env_type == 'gym' or \
+            args.env_type == 'mujoco_custom':
         expert.push(only_coordinates_in_state=False, one_hot_action=False)
     else:
         raise ValueError("Incorrect env type {}. No expert available".format(
@@ -2020,7 +2026,8 @@ if __name__ == '__main__':
 
     # Environment - Grid or Mujoco
     parser.add_argument('--env-type', default='grid', 
-                        choices=['grid', 'grid_room', 'mujoco', 'gym', 'circle'],
+                        choices=['grid', 'grid_room', 'mujoco', 'gym', 'circle',
+                                 'mujoco_custom'],
                         help='Environment type Grid or Mujoco.')
     parser.add_argument('--env-name', default=None,
                         help='Environment name if Mujoco.')

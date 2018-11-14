@@ -6,7 +6,7 @@ args=(
   --expert-path ./h5_trajs/mujoco_trajs/walker_expert_traj_7/
 
   --batch-size 128
-  --num-epochs 5000
+  --num-epochs 2000
   --use_rnn_goal 0
   --use_goal_in_policy 0
   --use_separate_goal_policy 1
@@ -16,20 +16,20 @@ args=(
 
   --vae_state_size 18
   --vae_action_size 6
-  --vae_goal_size 1
+  --vae_goal_size 7
   --vae_history_size 1
   --vae_context_size 3
 
   --no-use_state_features
   --continuous_action
-  --env-name FetchPickAndPlace-v1
-  --env-type mujoco
+  --env-name Walker2d-v2
+  --env-type mujoco_custom
   --episode_len 999
   --run_mode train 
 
-  --checkpoint_every_epoch 100
+  --checkpoint_every_epoch 1
 
-  --results_dir ./results/walk_jump_run_goal_7/discrete_vae/batch_128_context_3_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1
+  --results_dir ./results/walk_jump_run_goal_7/discrete_vae/batch_128_context_3_no_time_cos_similarity_0.0_init_5_decay_1e-3_try_1
 
  # --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_6_no_time_cos_similarity_1.0_decay_33e-4/checkpoint/cp_540.pth
 
