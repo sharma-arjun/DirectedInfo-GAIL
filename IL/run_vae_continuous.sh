@@ -1,8 +1,9 @@
 BATCH_SIZE=64
 
 args=(
-  --expert-path ./h5_trajs/fetch_pick_and_place_trajs/state_with_obs_goal/fetch_500
+  # --expert-path ./h5_trajs/fetch_pick_and_place_trajs/state_with_obs_goal/fetch_500
   # --expert-path ./h5_trajs/mujoco_trajs/normal_hopper/rebuttal_hopper_100/
+  --expert-path ./h5_trajs/mujoco_trajs/walker_expert_traj_7/
 
   --batch-size 128
   --num-epochs 5000
@@ -13,22 +14,22 @@ args=(
   --cosine_similarity_loss_weight 0.0
   --temperature 5.0
 
-  --vae_state_size 28
-  --vae_action_size 4
+  --vae_state_size 18
+  --vae_action_size 6
   --vae_goal_size 1
-  --vae_history_size 5
-  --vae_context_size 2
+  --vae_history_size 1
+  --vae_context_size 3
 
   --no-use_state_features
   --continuous_action
   --env-name FetchPickAndPlace-v1
   --env-type mujoco
-  --episode_len 50
+  --episode_len 999
   --run_mode train 
 
   --checkpoint_every_epoch 100
 
-  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/batch_128_context_4_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1/
+  --results_dir ./results/walk_jump_run_goal_7/discrete_vae/batch_128_context_3_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1
 
  # --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_6_no_time_cos_similarity_1.0_decay_33e-4/checkpoint/cp_540.pth
 
@@ -42,7 +43,7 @@ args=(
 
 echo "${args[@]}"
 
-CUDA_VISIBLE_DEVICES=1 python -m pdb vae.py "${args[@]}"
+CUDA_VISIBLE_DEVICES=3 python -m pdb vae.py "${args[@]}"
 
 # Walker
 #python -m pdb vae.py \
