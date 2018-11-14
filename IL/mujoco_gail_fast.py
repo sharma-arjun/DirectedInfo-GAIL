@@ -84,6 +84,11 @@ def get_c_for_traj(vae_model, env, args, state_arr, action_arr, c_arr,
         elif 'Walker' in args.env_name:
             env.env.set_state(np.concatenate(
                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+        elif 'FetchPickAndPlace' in self.args.env_name:
+            object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
+            object_qpos[:2] = ep_state[0, 0, 3:5]
+            self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+            self.env.env.env.goal = ep_state[0, 0, -3:]
         else:
             raise ValueError("Incorrect env name for mujoco")
 
@@ -318,6 +323,11 @@ def run_agent_worker(run_args,
                 elif 'Walker' in run_args.env_name:
                     env.env.set_state(np.concatenate(
                                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+                elif 'FetchPickAndPlace' in self.args.env_name:
+                    object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
+                    object_qpos[:2] = ep_state[0, 0, 3:5]
+                    self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+                    self.env.env.env.goal = ep_state[0, 0, -3:]
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
@@ -651,6 +661,11 @@ class CausalGAILMLP(BaseGAIL):
             elif 'Walker' in self.args.env_name:
                 self.env.env.set_state(np.concatenate(
                     (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
+            elif 'FetchPickAndPlace' in self.args.env_name:
+                object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
+                object_qpos[:2] = ep_state[0, 0, 3:5]
+                self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+                self.env.env.env.goal = ep_state[0, 0, -3:]
             else:
                 raise ValueError("Incorrect env name for mujoco")
 

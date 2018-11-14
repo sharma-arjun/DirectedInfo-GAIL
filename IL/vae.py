@@ -832,7 +832,10 @@ class VAETrain(object):
                     self.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 elif 'FetchPickAndPlace' in self.env_name:
-                    pass
+                    object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
+                    object_qpos[:2] = ep_state[0, 0, 3:5]
+                    self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+                    self.env.env.env.goal = ep_state[0, 0, -3:]
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
@@ -1180,7 +1183,10 @@ class VAETrain(object):
                     self.env.env.set_state(np.concatenate(
                         (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 elif 'FetchPickAndPlace' in self.env_name:
-                    pass
+                    object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
+                    object_qpos[:2] = ep_state[0, 0, 3:5]
+                    self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+                    self.env.env.env.goal = ep_state[0, 0, -3:]
                 else:
                     raise ValueError("Incorrect env name for mujoco")
             elif self.env_type == 'gym':
