@@ -64,7 +64,10 @@ def get_c_for_traj(vae_model, env, args, state_arr, action_arr, c_arr,
     c_arr = np.array(c_arr, dtype=np.int32)
 
     true_goal_numpy = np.zeros((c_arr.shape[0], num_goals))
-    true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
+    if num_goals == 1:
+        true_goal_numpy[np.arange(c_arr.shape[0]), 0] = 1
+    else:
+        true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
     true_goal = Variable(torch.from_numpy(true_goal_numpy).type(dtype))
 
     action_var = Variable(torch.from_numpy(action_arr).type(dtype))
@@ -304,7 +307,11 @@ def run_agent_worker(run_args,
                 posterior_latent_size)).type(dtype)
 
         true_goal_numpy = np.zeros((c_expert.shape[0], num_goals))
-        true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
+        if num_goals == 1:
+            true_goal_numpy[np.arange(c_expert.shape[0]), 0] = 1
+        else:
+            true_goal_numpy[np.arange(c_expert.shape[0]), c_expert[:, 0]] = 1
+
         true_goal = Variable(torch.from_numpy(true_goal_numpy)).type(dtype)
 
         if run_args.use_random_starts:
@@ -640,7 +647,10 @@ class CausalGAILMLP(BaseGAIL):
                 state_arr, action_arr, c_arr, None, self.num_goals)
 
         true_goal_numpy = np.zeros((c_arr.shape[0], self.num_goals))
-        true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
+        if self.num_goals == 1:
+            true_goal_numpy[np.arange(c_arr.shape[0]), 0] = 1
+        else:
+            true_goal_numpy[np.arange(c_arr.shape[0]), c_arr[:, 0]] = 1
         true_goal = Variable(torch.from_numpy(true_goal_numpy).type(self.dtype))
 
         action_var = Variable(
@@ -747,13 +757,13 @@ class CausalGAILMLP(BaseGAIL):
 
     def load_weights_from_vae(self):
         # deepcopy from vae
-        # self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
-        # self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
+        self.old_policy_net = copy.deepcopy(self.vae_train.vae_model.policy)
         self.posterior_net = copy.deepcopy(self.vae_train.vae_model.posterior)
 
         # re-initialize optimizers
-        # self.opt_policy = optim.Adam(self.policy_net.parameters(),
-        #                              lr=self.args.gen_learning_rate)
+        self.opt_policy = optim.Adam(self.policy_net.parameters(),
+                                     lr=self.args.gen_learning_rate)
         self.opt_posterior = optim.Adam(self.posterior_net.parameters(),
                                         lr=self.args.posterior_learning_rate)
 
@@ -1082,7 +1092,10 @@ class CausalGAILMLP(BaseGAIL):
             else:
                 batch_goals = expert_batch.c[i].astype(np.int32)
                 expert_goal = np.zeros((batch_goals.shape[0], self.num_goals))
-                expert_goal[np.arange(batch_goals.shape[0]), batch_goals] = 1.0
+                if self.num_goals == 1:
+                    expert_goal[np.arange(batch_goals.shape[0]), 0] = 1.0
+                else:
+                    expert_goal[np.arange(batch_goals.shape[0]), batch_goals] = 1.0
 
             ## Expand expert states ##
             expert_state_i = expert_batch.state[i]
@@ -1187,7 +1200,7 @@ class CausalGAILMLP(BaseGAIL):
                                         self.num_goals,
                                         self.vae_train.use_rnn_goal_predictor,
                                         self.vae_train.args.use_discrete_vae,
-                                        self.dtype,
+                                        torch.FloatTensor,
                                         train,
                                         sample_c_from_expert,
                                         )
@@ -1244,8 +1257,12 @@ class CausalGAILMLP(BaseGAIL):
             # Update learning rate schedules (decay etc.)
             self.opt_policy.lr = self.get_policy_learning_rate(ep_idx)
 
+            if self.dtype != torch.FloatTensor:
+                self.convert_models_to_type(torch.FloatTensor)
             gen_batch, _, log_list = self.collect_samples(
                     gen_batch_size, self.args.max_ep_length + 1, train=train)
+            if self.dtype != torch.FloatTensor:
+                self.convert_models_to_type(self.dtype)
 
             # Add to tensorboard if training.
             true_reward =[log['true_reward'] for log in log_list]
