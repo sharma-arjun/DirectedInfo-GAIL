@@ -292,6 +292,7 @@ def run_agent_worker(run_args,
                     # num_goals, use_discrete_vae, dtype)
             
             pred_c_tensor = torch.from_numpy(pred_c_tensor).type(dtype)
+
         else:
             pred_c_tensor = -1 * torch.ones((
                 batch_size,
@@ -316,7 +317,7 @@ def run_agent_worker(run_args,
                     env.env.set_state(np.concatenate(
                                 (np.array([0.0]), x_feat[0, :5]), axis=0), x_feat[0, 5:])
                 elif 'Walker' in run_args.env_name:
-                    env.env.set_state(np.concatenate(
+                    env.env.env.set_state(np.concatenate(
                                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
                 else:
                     raise ValueError("Incorrect env name for mujoco")
@@ -349,6 +350,7 @@ def run_agent_worker(run_args,
         disc_reward, posterior_reward = 0.0, 0.0
 
         memory = Memory()
+        pred_c_context_list = []
         for t in range(expert_episode_len):
             # First predict next ct
             ct = pred_c_tensor[:, t, :]
@@ -373,7 +375,39 @@ def run_agent_worker(run_args,
             else:
                 next_ct = get_context_at_state(vae_model, x_var, c_var,
                                                use_discrete_vae=use_discrete_vae)
+
+                # ==== Composition debugging ====
+                _, debug_context = torch.max(next_ct, dim=1)
+                debug_context = debug_context.data.cpu().numpy()[0]
+                # if debug_context.data.cpu().numpy()[0] == 1:
+
+                # Generate equal periods
+                if t > 200:
+                    print('pred context: {}'.format(debug_context))
+                    next_ct_new = next_ct.clone()
+                    period = ((t - 200) % 40) // 20
+                    period_map = [2, 2, 2]
+                    next_ct_new[:, period_map[period]] = 10
+                    next_ct_new = next_ct_new / torch.sum(next_ct_new)
+                    assert abs(torch.sum(next_ct_new).data.cpu().numpy() - 1.0) <= 0.0001
+                    next_ct = next_ct_new
+
+                # if t > 200 and debug_context == 1 or debug_context == 0:
+                    # print('pred context: {}'.format(debug_context))
+                    # next_ct_new = next_ct.clone()
+                    # if debug_context == 1:
+                        # next_ct_new[:, 0] = 1.1
+                    # elif debug_context == 0:
+                        # next_ct_new[:, 0] = 1.1
+                    # else:
+                        # raise ValueError("fuck off")
+                    # next_ct = next_ct_new
+
                 pred_c_tensor[:, t+1, :] = next_ct.data
+
+            temp_context = torch.max(next_ct, dim=1)[1].data.cpu().numpy()[0]
+            pred_c_context_list.append(temp_context)
+            print('context: {}'.format(temp_context))
 
             # Reassign correct c_var and next_c_var
             c_var, next_c_var = Variable(ct), next_ct
@@ -424,7 +458,8 @@ def run_agent_worker(run_args,
             else:
                 ep_reward += disc_reward_t
 
-            next_state_feat, true_reward, done, _ = env.step(action.reshape(-1))
+            next_state_feat, true_reward, done, _ = env.step(action.reshape(-1),
+                                                             context=pred_c_context_list[-1])
             env_reward_dict['true_reward'] += true_reward
             if run_args.use_time_in_state:
                 next_state_feat = np.concatenate(
@@ -449,14 +484,16 @@ def run_agent_worker(run_args,
 
             num_steps += 1
 
-            if run_args.render:
-                env.render()
+            if run_args.render: env.render(context=pred_c_context_list[-1])
 
             if mask == 0:
                 break
 
             # Update current state
             curr_state_arr = np.array(next_state_feat, dtype=np.float32)
+
+        np.savetxt('./walker_pred_context/try_1.txt',
+                   np.array(pred_c_context_list))
 
         memory_list.append(memory)
         log_list.append({
@@ -1157,6 +1194,7 @@ class CausalGAILMLP(BaseGAIL):
             # policy.
             sample_c_from_expert = (i % 2 == 0)
             # sample_c_from_expert = train
+            sample_c_from_expert = False
             run_agent_worker_args[i] = (args,
                                         self.vae_train.vae_model,
                                         self.policy_net,
@@ -1178,7 +1216,8 @@ class CausalGAILMLP(BaseGAIL):
 
         start_time = time.time()
         # Get the results by making a BLOCKING call.
-        results = self.env_pool.map(parallel_run_agent_worker, args_list)
+        # results = self.env_pool.map(parallel_run_agent_worker, args_list)
+        results = [parallel_run_agent_worker(args_list[0])]
         end_time = time.time()
         print("END: Blocking call, time: {:.3f}".format(end_time-start_time))
 
@@ -1205,7 +1244,7 @@ class CausalGAILMLP(BaseGAIL):
         self.convert_models_to_type(dtype)
 
         #running_state = ZFilter((self.vae_train.args.vae_state_size), clip=5)
-        if train:
+        if True:
             print("Will get c for all expert trajectories.")
             t1 = time.time()
             self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
@@ -1213,6 +1252,12 @@ class CausalGAILMLP(BaseGAIL):
                 time.time() - t1))
         else:
             self.cached_expert_c_list = None
+
+        self.envs[0] = gym.wrappers.Monitor(
+                self.envs[0],
+                directory='./monitor/composite_walker_new_afer_200/walker_pred_c_map_2_2_2/',
+                video_callable=lambda x: True,
+                force=True)
 
         for ep_idx in range(num_epochs):
             num_steps, batch_size = 0, 1
