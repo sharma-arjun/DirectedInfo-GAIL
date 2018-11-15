@@ -1238,14 +1238,11 @@ class CausalGAILMLP(BaseGAIL):
         self.convert_models_to_type(dtype)
 
         #running_state = ZFilter((self.vae_train.args.vae_state_size), clip=5)
-        if train:
-            print("Will get c for all expert trajectories.")
-            t1 = time.time()
-            self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
-            print("Time: {:.3f} Did get c for all expert trajectories. ".format(
-                time.time() - t1))
-        else:
-            self.cached_expert_c_list = None
+        print("Will get c for all expert trajectories.")
+        t1 = time.time()
+        self.cached_expert_c_list = self.get_c_for_all_expert_trajs(self.expert)
+        print("Time: {:.3f} Did get c for all expert trajectories. ".format(
+            time.time() - t1))
 
         for ep_idx in range(num_epochs):
             num_steps, batch_size = 0, 1
