@@ -18,7 +18,7 @@ args=(
   --vae_action_size 6
   --vae_goal_size 7
   --vae_history_size 1
-  --vae_context_size 3
+  --vae_context_size 4
 
   --no-use_state_features
   --continuous_action
@@ -27,9 +27,9 @@ args=(
   --episode_len 999
   --run_mode train 
 
-  --checkpoint_every_epoch 1
+  --checkpoint_every_epoch 100
 
-  --results_dir ./results/walk_jump_run_goal_7/discrete_vae/batch_128_context_3_no_time_cos_similarity_0.0_init_5_decay_1e-3_try_1
+  --results_dir ./results/walk_jump_run_goal_7/discrete_vae/tmp/batch_128_context_4_no_time_cos_similarity_0.0_init_5_decay_5e-4_try_1
 
  # --checkpoint_path ./results/hopper/discrete_vae/batch_64_context_6_no_time_cos_similarity_1.0_decay_33e-4/checkpoint/cp_540.pth
 

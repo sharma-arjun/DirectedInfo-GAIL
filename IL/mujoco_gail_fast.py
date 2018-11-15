@@ -89,9 +89,9 @@ def get_c_for_traj(vae_model, env, args, state_arr, action_arr, c_arr,
                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
         elif 'FetchPickAndPlace' in self.args.env_name:
             object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
-            object_qpos[:2] = ep_state[0, 0, 3:5]
+            object_qpos[:2] = x_feat[0, 3:5]
             self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
-            self.env.env.env.goal = ep_state[0, 0, -3:]
+            self.env.env.env.goal = x_feat[0, -3:]
         else:
             raise ValueError("Incorrect env name for mujoco")
 
@@ -330,11 +330,11 @@ def run_agent_worker(run_args,
                 elif 'Walker' in run_args.env_name:
                     env.env.set_state(np.concatenate(
                                 (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
-                elif 'FetchPickAndPlace' in self.args.env_name:
-                    object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
-                    object_qpos[:2] = ep_state[0, 0, 3:5]
-                    self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
-                    self.env.env.env.goal = ep_state[0, 0, -3:]
+                elif 'FetchPickAndPlace' in run_args.env_name:
+                    object_qpos = env.env.env.sim.data.get_joint_qpos('object0:joint')
+                    object_qpos[:2] = x_feat[0, 3:5]
+                    env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
+                    env.env.env.goal = x_feat[0, -3:]
                 else:
                     raise ValueError("Incorrect env name for mujoco")
                 dummy_state = x_feat
@@ -589,6 +589,9 @@ class CausalGAILMLP(BaseGAIL):
     def create_environment(self, env_type, env_name=None, num_threads=1):
         assert(env_name is not None)
         self.env = gym.make(env_name)
+        if 'FetchPickAndPlace' in env_name:
+            self.env = gym.wrappers.FlattenDictWrapper(
+                    self.env, ['observation', 'desired_goal'])
         self.envs = []
         for i in range(num_threads):
             env = gym.make(env_name)
@@ -673,9 +676,9 @@ class CausalGAILMLP(BaseGAIL):
                     (np.array([0.0]), x_feat[0, :8]), axis=0), x_feat[0, 8:17])
             elif 'FetchPickAndPlace' in self.args.env_name:
                 object_qpos = self.env.env.env.sim.data.get_joint_qpos('object0:joint')
-                object_qpos[:2] = ep_state[0, 0, 3:5]
+                object_qpos[:2] = x_feat[0, 3:5]
                 self.env.env.env.sim.data.set_joint_qpos('object0:joint', object_qpos)
-                self.env.env.env.goal = ep_state[0, 0, -3:]
+                self.env.env.env.goal = x_feat[0, -3:]
             else:
                 raise ValueError("Incorrect env name for mujoco")
 
