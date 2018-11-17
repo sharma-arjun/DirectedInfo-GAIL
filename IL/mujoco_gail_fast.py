@@ -42,6 +42,8 @@ from utils.torch_utils import add_scalars_to_summary_writer
 from multiprocessing import Pool
 import time
 
+from bcolors import bcolors
+
 def unwrap_self_f(arg, **kwarg):
     return C.f(*arg, **kwarg)
 
@@ -907,6 +909,8 @@ class CausalGAILMLP(BaseGAIL):
                         dtype))
             expert_disc_loss.backward()
 
+
+
             # Backprop with generated demonstrations
             # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
             gen_output = self.reward_net(
@@ -1026,6 +1030,19 @@ class CausalGAILMLP(BaseGAIL):
                     1.0 + self.args.clip_epsilon) * advantages_var
             policy_surr = -torch.min(surr1, surr2).mean()
             policy_surr.backward()
+
+            # Add L2 loss on expert for the policy network (behavior cloning)
+            if self.args.l2_loss > 0.00001:
+                expert_action_means, expert_action_log_stds, expert_action_stds = \
+                        self.policy_net(torch.cat((expert_state_var, expert_goal_var), 1))
+                expert_l2_loss = self.args.l2_loss * torch.mean(
+                        expert_action_means - expert_action_var)
+                expert_l2_loss.backward()
+                print(bcolors.Red+"L2 loss: {:.3f}".format(
+                    expert_l2_loss.data[0])+bcolors.Endc)
+            else:
+                expert_l2_loss = None
+
             # This clips the entire norm.
             # torch.nn.utils.clip_grad_norm(self.policy_net.parameters(), 10)
             clip_grad_value(self.policy_net.parameters(), 50)
@@ -1035,6 +1052,10 @@ class CausalGAILMLP(BaseGAIL):
             self.logger.summary_writer.add_scalar('loss/policy',
                                                   policy_surr.data[0],
                                                   self.gail_step_count)
+            if expert_l2_loss is not None:
+                self.logger.summary_writer.add_scalar('loss/l2_expert',
+                                                      expert_l2_loss.data[0],
+                                                      self.gail_step_count)
 
             policy_l2_norm, policy_grad_l2_norm = \
                               get_weight_norm_for_network(self.policy_net)
@@ -1044,6 +1065,7 @@ class CausalGAILMLP(BaseGAIL):
             self.logger.summary_writer.add_scalar('weight/policy/grad',
                                                   policy_grad_l2_norm,
                                                   self.gail_step_count)
+
 
             # set new starting point for batch
             curr_id += curr_batch_size
@@ -1503,6 +1525,8 @@ if __name__ == '__main__':
                         help='Parameter to scale MI loss from the posterior.')
     parser.add_argument('--lambda_goal_pred_reward', type=float, default=1.0,
                         help='Reward scale for goal prediction reward from RNN.')
+    parser.add_argument('--l2_loss', type=float, default=0.0,
+                        help='L2 loss on the policy network from expert trajectories.')
 
     # Training parameters
     parser.add_argument('--learning_rate', type=float, default=3e-4,
