@@ -1477,7 +1477,8 @@ def main(args):
         logger = TensorboardXLogger(os.path.join(results_dir, 'log'))
         causal_gail_mlp.logger = logger
 
-        print("Finetune checkpoint: {}".format(args.finetune_path))
+        print(bcolors.Red+"Finetune checkpoint: {}".format(args.finetune_path)+
+                bcolors.Endc)
         causal_gail_mlp.load_checkpoint_data(args.finetune_path)
         causal_gail_mlp.train_gail(
                 args.num_epochs,

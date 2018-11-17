@@ -25,6 +25,7 @@ args=(
 
   --posterior_learning_rate 0.0
   --lambda_posterior 0.01
+  --l2_loss 0.1
   --use_value_net
   --optim_batch_size 256
 
@@ -36,9 +37,13 @@ args=(
 
   --vae_checkpoint_path ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/hist_1_batch_256_context_2_no_time_cos_similarity_0.0_init_5_decay_5e-4/checkpoint/cp_2000.pth
 
-  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Oct_11_9_30_PM/
+  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Nov_14_7_30_PM_finetune_cp_400_Nov_17_2_00_AM
 
-  --checkpoint_path ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Oct_11_9_30_PM/checkpoint/cp_1000.pth
+  --finetune_path ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Nov_14_7_30_PM/checkpoint/cp_400.pth
+
+  # --checkpoint_path ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Oct_11_9_30_PM/checkpoint/cp_1000.pth
+  
+  
   # --checkpoint_path ./results/hopper/context_4/gail_fixed_fast_c_from_expert_only/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_21_7_18_PM/checkpoint/cp_1300.pth
 
   # --checkpoint_path ./results/hopper/context_8/gail_fixed_fast_save_25/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.1_time_Sept_19_14_18_PM/checkpoint/cp_1750.pth
