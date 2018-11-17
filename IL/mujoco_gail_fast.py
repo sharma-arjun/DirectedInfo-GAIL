@@ -1033,13 +1033,19 @@ class CausalGAILMLP(BaseGAIL):
 
             # Add L2 loss on expert for the policy network (behavior cloning)
             if self.args.l2_loss > 0.00001:
-                expert_action_means, expert_action_log_stds, expert_action_stds = \
-                        self.policy_net(torch.cat((expert_state_var, expert_goal_var), 1))
+                if self.args.use_goal_in_policy:
+                    expert_action_means, expert_action_log_stds, expert_action_stds = \
+                            self.policy_net(torch.cat((expert_state_var, expert_goal_var), 1))
+                else:
+                    expert_action_means, expert_action_log_stds, expert_action_stds = \
+                            self.policy_net(torch.cat((expert_state_var, expert_latent_c_var), 1))
+
                 expert_l2_loss = self.args.l2_loss * torch.mean(
                         expert_action_means - expert_action_var)
                 expert_l2_loss.backward()
-                print(bcolors.Red+"L2 loss: {:.3f}".format(
-                    expert_l2_loss.data[0])+bcolors.Endc)
+
+                # print(bcolors.Red+"PPO loss:{:.3f} L2 loss: {:.3f}".format(
+                    # policy_surr.data[0], expert_l2_loss.data[0])+bcolors.Endc)
             else:
                 expert_l2_loss = None
 
@@ -1473,6 +1479,8 @@ def main(args):
         results_dir = os.path.join(args.results_dir,
                                    'finetune_' + checkpoint_name)
         create_result_dirs(results_dir)
+        print(bcolors.Blue+"Will use result dir: {}".format(results_dir)+
+                bcolors.Endc)
         # Set new Tensorboard logger for finetune results.
         logger = TensorboardXLogger(os.path.join(results_dir, 'log'))
         causal_gail_mlp.logger = logger

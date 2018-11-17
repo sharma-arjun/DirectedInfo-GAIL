@@ -11,10 +11,10 @@ args=(
   --batch_size 4096
   --num_epochs 10000
   --max_ep_length 50
-  --num_expert_trajs 50
+  --num_expert_trajs 40
 
   --num_threads 6
-  --save_interval 100
+  --save_interval 25
 
   --no-use_state_features
   --no-use_goal_in_policy
@@ -23,9 +23,10 @@ args=(
   --env-type mujoco
   --env-name FetchPickAndPlace-v1
 
+  --gen_learning_rate 3e-5
   --posterior_learning_rate 0.0
   --lambda_posterior 0.01
-  --l2_loss 0.1
+  --l2_loss 1.0
   --use_value_net
   --optim_batch_size 256
 
@@ -37,7 +38,7 @@ args=(
 
   --vae_checkpoint_path ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/hist_1_batch_256_context_2_no_time_cos_similarity_0.0_init_5_decay_5e-4/checkpoint/cp_2000.pth
 
-  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Nov_14_7_30_PM_finetune_cp_400_Nov_17_2_00_AM
+  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_num_expert_40_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Nov_14_7_30_PM_finetune_cp_400__l2_loss_1_lr_3e-5_Nov_17_2_50_AM
 
   --finetune_path ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Nov_14_7_30_PM/checkpoint/cp_400.pth
 
@@ -50,8 +51,7 @@ args=(
 
   # --checkpoint_path ./results/hopper/gail/rebuttal_batch_4096_cp_640_ep_5000_num_expert_100_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Aug_6_00_05_AM/checkpoint/cp_1000.pth
 
-  # --cuda
-  --render
+  --cuda
 )
 
 echo "${args[@]}"
