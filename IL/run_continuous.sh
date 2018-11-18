@@ -7,11 +7,11 @@ args=(
   --state_size 28
   --action_size 4
   --history_size 1
-  --context_size 2
+  --context_size 3
   --batch_size 4096
   --num_epochs 10000
   --max_ep_length 50
-  --num_expert_trajs 40
+  --num_expert_trajs 80
 
   --num_threads 6
   --save_interval 25
@@ -23,9 +23,9 @@ args=(
   --env-type mujoco
   --env-name FetchPickAndPlace-v1
 
-  --gen_learning_rate 3e-5
+  --gen_learning_rate 3e-4
   --posterior_learning_rate 0.0
-  --lambda_posterior 0.01
+  --lambda_posterior 0.001
   --l2_loss 1.0
   --use_value_net
   --optim_batch_size 256
@@ -38,7 +38,7 @@ args=(
 
   --vae_checkpoint_path ./results/fetch_pick_and_place/state_with_obs_goal_500/discrete_vae/hist_1_batch_256_context_2_no_time_cos_similarity_0.0_init_5_decay_5e-4/checkpoint/cp_2000.pth
 
-  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_num_expert_40_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Nov_14_7_30_PM_finetune_cp_400__l2_loss_1_lr_3e-5_Nov_17_2_50_AM
+  --results_dir ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_8192_cp_2000_num_expert_80_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.001_time_Nov_14_7_30_PM_finetune_cp_400__l2_loss_0_lr_3e-4_optim_batch_256_Nov_18_5_45_PM
 
   --finetune_path ./results/fetch_pick_and_place/state_with_obs_goal_500/gail/context_2/hist_1_gail_c_from_expert_and_policy_vae/rebuttal_batch_4096_cp_2000_ep_10000_num_expert_50_policy_log_std_clamped_use_posterior_reward_lambda_posterior_0.01_time_Nov_14_7_30_PM/checkpoint/cp_400.pth
 

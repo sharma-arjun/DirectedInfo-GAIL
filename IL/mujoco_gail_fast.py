@@ -864,7 +864,8 @@ class CausalGAILMLP(BaseGAIL):
                                 optim_batch_size_exp,
                                 optim_iters,
                                 goal=None,
-                                expert_goal=None):
+                                expert_goal=None,
+                                train_discriminator_once=False):
         '''Update parameters for one batch of data.
 
         Update the policy network, discriminator (reward) network and the
@@ -898,29 +899,43 @@ class CausalGAILMLP(BaseGAIL):
             # ==== Update reward net ====
             self.opt_reward.zero_grad()
 
-            # Backprop with expert demonstrations
-            expert_output = self.reward_net(
-                    torch.cat((expert_state_var,
-                               expert_action_var,
-                               expert_goal_var), 1))
-            expert_disc_loss = F.binary_cross_entropy(
-                    expert_output,
-                    Variable(torch.zeros(expert_action_var.size(0), 1)).type(
-                        dtype))
-            expert_disc_loss.backward()
-
-
-
-            # Backprop with generated demonstrations
-            # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
-            gen_output = self.reward_net(
-                    torch.cat((state_var,
-                               action_var,
-                               goal_var), 1))
-            gen_disc_loss = F.binary_cross_entropy(
-                    gen_output,
-                    Variable(torch.ones(action_var.size(0), 1)).type(dtype))
-            gen_disc_loss.backward()
+            if not train_discriminator_once:
+                # Backprop with expert demonstrations
+                expert_output = self.reward_net(
+                        torch.cat((expert_state_var,
+                                   expert_action_var,
+                                   expert_goal_var), 1))
+                expert_disc_loss = F.binary_cross_entropy(
+                        expert_output,
+                        Variable(torch.zeros(expert_action_var.size(0), 1)).type(
+                            dtype))
+                expert_disc_loss.backward()
+                # Backprop with generated demonstrations
+                # latent_next_c_var is actual c_t, latent_c_var is c_{t-1}
+                gen_output = self.reward_net(
+                        torch.cat((state_var,
+                                   action_var,
+                                   goal_var), 1))
+                gen_disc_loss = F.binary_cross_entropy(
+                        gen_output,
+                        Variable(torch.ones(action_var.size(0), 1)).type(dtype))
+                gen_disc_loss.backward()
+            else:
+                expert_output = self.reward_net(
+                        torch.cat((Variable(expert_states), 
+                                   Variable(expert_actions), 
+                                   Variable(expert_goal), 1))
+                expert_disc_loss = F.binary_cross_entropy(
+                        expert_output,
+                        Variable(torch.zeros(expert_actions.size(0), 1)).type(
+                            dtype))
+                expert_disc_loss.backward()
+                gen_output = self.reward_net(
+                        torch.cat((states, actions, goal), 1))
+                gen_disc_loss = F.binary_cross_entropy(
+                        gen_output,
+                        Variable(torch.ones(action_var.size(0), 1)).type(dtype))
+                gen_disc_loss.backward()
 
             # clip_grad_value(self.reward_net.parameters(), 50)
             self.opt_reward.step()
@@ -1041,7 +1056,7 @@ class CausalGAILMLP(BaseGAIL):
                             self.policy_net(torch.cat((expert_state_var, expert_latent_c_var), 1))
 
                 expert_l2_loss = self.args.l2_loss * torch.mean(
-                        expert_action_means - expert_action_var)
+                        (expert_action_means - expert_action_var).pow(2))
                 expert_l2_loss.backward()
 
                 # print(bcolors.Red+"PPO loss:{:.3f} L2 loss: {:.3f}".format(
@@ -1171,7 +1186,7 @@ class CausalGAILMLP(BaseGAIL):
                                                   self.policy_net.parameters()):
             old_policy_param.data.copy_(policy_param.data)
 
-        # update value, reward and policy networks
+        # Get batch size for expert data
         optim_iters = self.args.batch_size // optim_batch_size
         optim_batch_size_exp = expert_actions.size(0) // optim_iters
 
@@ -1182,7 +1197,7 @@ class CausalGAILMLP(BaseGAIL):
         elif len(actions.shape) == 3:
             actions = actions.view(actions.size(0), -1)
 
-        for _ in range(optim_epochs):
+        for optim_epoch_idx in range(optim_epochs):
             perm = np.random.permutation(np.arange(actions.size(0)))
             perm_exp = np.random.permutation(np.arange(expert_actions.size(0)))
             if args.cuda:
